@@ -1,0 +1,35 @@
+{
+  "name": "@wayuto/gos",
+  "version": "0.1.5",
+  "description": "The Gos Programming Language - A Tree-walking interpreter",
+  "exports": {
+    ".": "./src/mod.ts",
+    "./gos": "./src/main.ts"
+  },
+  "bin": {
+    "gos": "./src/main.ts"
+  },
+  "license": "MIT",
+  "keywords": [
+    "programming-language",
+    "interpreter",
+    "cli",
+    "gos"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wayuto/gos"
+  },
+  "publish": {
+    "include": [
+      "src/**/*.ts",
+      "README.md",
+      "LICENSE"
+    ]
+  },
+  "imports": {
+    "@std/assert": "jsr:@std/assert@^1.0.15",
+    "@std/fmt/colors": "jsr:@std/fmt/colors",
+    "@cliffy/command": "jsr:@cliffy/command@1.0.0-rc.5"
+  }
+}

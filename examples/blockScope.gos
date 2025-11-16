@@ -1,0 +1,6 @@
+fun f() out "outer"
+{
+    fun f() out "inner"
+    f()
+}
+f()

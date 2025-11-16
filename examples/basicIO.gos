@@ -1,0 +1,3 @@
+in n
+writeFile('testFile' n)
+out readFile('testFile')
