@@ -1,0 +1,12 @@
+
+let n = 10
+
+N = false 
+goto label
+del n 
+
+label:
+out n
+out ' '
+n--
+if n != 0 goto label

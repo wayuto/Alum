@@ -19,28 +19,46 @@ export class Interpreter {
     this.context = ctx;
   }
 
-  public execute = (program: Program): Literal => {
+  public execute = async (program: Program): Promise<Literal> => {
     let result: Literal = undefined;
-    if (!program) return;
+    if (!program || program.body.length === 0) return;
+
+    for (let i = 0; i < program.body.length; i++) {
+      const expr = program.body[i];
+      if (expr.type === "Label") {
+        this.context.setLabel(expr.name, i);
+      }
+      if (expr.type === "FuncDecl") {
+        this.context.setFunc(
+          expr.name,
+          { params: expr.params, body: expr.body, type: "GosFunc" },
+        );
+        return;
+      }
+    }
+
+    const executable = program.body.filter((a) =>
+      a.type !== "Label" && a.type !== "FuncDecl"
+    );
     while (
-      this.pc < program.body.length
+      this.pc < executable.length
     ) {
-      const expr = program.body[this.pc];
-      result = this.eval(expr);
+      const expr = executable[this.pc];
+      result = await this.eval(expr);
       this.pc++;
     }
     return result;
   };
 
-  private eval = (expr: Expression): Literal => {
+  private eval = async (expr: Expression): Promise<Literal> => {
     switch (expr.type) {
       case "Value": {
-        return (expr as Value).value as number;
+        return (expr as Value).value;
       }
       case "BinOp": {
         const binNode = expr as BinOp;
-        const left = this.eval(binNode.left);
-        const right = this.eval(binNode.right);
+        const left = await this.eval(binNode.left);
+        const right = await this.eval(binNode.right);
 
         switch (binNode.op) {
           case TokenType.OP_ADD:
@@ -74,11 +92,11 @@ export class Interpreter {
           case TokenType.LOG_XOR:
             return (left as number) ^ (right as number);
           default:
-            return err("Evaluate", `Unknown operator: ${binNode.op}`);
+            return err("Interpreter", `Unknown operator: ${binNode.op}`);
         }
       }
       case "UnaryOp": {
-        const val = this.eval(expr.argument);
+        const val = await this.eval(expr.argument);
         switch (expr.op) {
           case TokenType.LOG_NOT: {
             return !val;
@@ -104,21 +122,21 @@ export class Interpreter {
         }
       }
       case "VarDecl": {
-        this.context.setVar(expr.name, this.eval(expr.value));
+        this.context.setVar(expr.name, await this.eval(expr.value));
         return;
       }
       case "VarMod": {
-        this.context.modifyVar(expr.name, this.eval(expr.value));
+        this.context.modifyVar(expr.name, await this.eval(expr.value));
         return;
       }
       case "Var": {
         return this.context.getVar(expr.name) as Literal;
       }
       case "Out": {
-        const value = this.eval(expr.value);
-        if (this.context.getVar("NN")) {
-          Deno.stdout.writeSync(new TextEncoder().encode(`${value}\n`));
-        } else Deno.stdout.writeSync(new TextEncoder().encode(`${value}`));
+        const value = await this.eval(expr.value);
+        if (this.context.getVar("N")) {
+          await Deno.stdout.write(new TextEncoder().encode(`${value}\n`));
+        } else await Deno.stdout.write(new TextEncoder().encode(`${value}`));
         return;
       }
       case "In": {
@@ -127,12 +145,12 @@ export class Interpreter {
         break;
       }
       case "If": {
-        if (this.eval(expr.cond)) return this.eval(expr.body);
-        else if (expr.else) return this.eval(expr.else);
+        if (await this.eval(expr.cond)) return await this.eval(expr.body);
+        else if (expr.else) return await this.eval(expr.else);
         return;
       }
       case "While": {
-        while (this.eval(expr.cond)) this.eval(expr.body);
+        while (await this.eval(expr.cond)) await this.eval(expr.body);
         return;
       }
       case "Goto": {
@@ -151,12 +169,12 @@ export class Interpreter {
       case "Stmt": {
         let result: Literal = undefined;
         this.context.enterScope();
-        for (const e of expr.body) result = this.eval(e);
+        for (const e of expr.body) result = await this.eval(e);
         this.context.exitScope();
         return result;
       }
       case "Exit": {
-        return Deno.exit(this.eval(expr.status) as number);
+        return Deno.exit(await this.eval(expr.status) as number);
       }
       case "FuncDecl": {
         this.context.setFunc(
@@ -170,7 +188,7 @@ export class Interpreter {
         if (fn.type !== "NativeFunc") {
           if ((fn as GosFunc).params.length !== expr.args.length) {
             return err(
-              "Evaluate",
+              "Interpreter",
               `Function '${expr.name}' expects ${
                 (fn as GosFunc).params.length
               } args`,
@@ -178,23 +196,26 @@ export class Interpreter {
           }
           this.context.enterScope();
           for (let i = 0; i < (fn as GosFunc).params.length; i++) {
-            const val = this.eval(expr.args[i]);
+            const val = await this.eval(expr.args[i]);
             this.context.setVar((fn as GosFunc).params[i], val);
           }
-          const result = this.eval((fn as GosFunc).body);
+          const result = await this.eval((fn as GosFunc).body);
           this.context.exitScope();
           return result;
         } else {
-          const args = expr.args.map((arg) => this.eval(arg));
-          return (fn as NativeFunc).fn(...args);
+          const args = await Promise.all(
+            expr.args.map(async (arg) => await this.eval(arg)),
+          );
+          const result = (fn as NativeFunc).fn(...args);
+          return await Promise.resolve(result);
         }
       }
       case "Return": {
-        return this.eval(expr.value);
+        return await this.eval(expr.value);
       }
       default:
         return err(
-          "Evaluate",
+          "Interpreter",
           `Unknown node type: ${(expr as Expression).type}`,
         );
     }

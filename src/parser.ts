@@ -99,6 +99,7 @@ export class Parser {
         this.lexer.nextToken();
         const name = this.lexer.currentToken().name as string;
         this.lexer.nextToken();
+        this.lexer.nextToken();
         return { type: "Goto", name };
       }
       case TokenType.VAR_DEL: {

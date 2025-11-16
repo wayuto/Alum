@@ -1,4 +1,5 @@
 import type { NativeFunc } from "./ast.ts";
+import type { Literal } from "./lexer.ts";
 
 export const nativeFuncs: Record<string, NativeFunc> = {
   abs: {
@@ -31,10 +32,24 @@ export const nativeFuncs: Record<string, NativeFunc> = {
   },
   readFile: {
     type: "NativeFunc",
-    fn: (a) => Deno.readTextFileSync(a as string),
+    fn: async (a) => await Deno.readTextFile(a as string),
   },
   writeFile: {
     type: "NativeFunc",
-    fn: (a, b) => Deno.writeTextFileSync(a as string, b as string),
+    fn: async (a, b) => await Deno.writeTextFile(a as string, b as string),
   },
+  shell: {
+    type: "NativeFunc",
+    fn: async (a, ...b) => await shell(a, ...b),
+  },
+};
+
+const shell = async (a: Literal, ...b: Literal[]) => {
+  const { stdout } = await (new Deno.Command(a as string, {
+    args: [...b as string[]],
+    stdout: "piped",
+    stderr: "inherit",
+  })).output();
+  return new TextDecoder().decode(stdout)
+    .trimEnd();
 };

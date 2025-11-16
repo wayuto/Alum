@@ -7,11 +7,11 @@ _A `Tree-walking` interpreter implementing in `TypeScript`_
 - ### _**In CLI**_
 
 ```bash
-➜  deno install -A -n --global gos jsr:@wayuto/gos
+➜  deno install -A -n --global gos jsr:@wayuto/gos/gos
 ➜  gos -h    
 
   Usage:   gos 
-  Version: v0.1.6
+  Version: [VERSION]
 
   License: MIT
 
@@ -110,11 +110,16 @@ sum(1 2) # Output: 3
 
 ```typescript
 let n = 10
+
+N = false # no newline when print values
+goto label
+del n # this expression will be skipped
+
 label:
 out n
-if (n != 0) let n = n - 1
-goto label
-# Output: 10 9 8 ...
+out ' '
+n--
+if n != 0 goto label # Output: 10 9 8 7 6 5 4 3 2 1
 ```
 
 - ### _**Block Scope**_

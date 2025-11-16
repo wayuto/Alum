@@ -334,7 +334,8 @@ export class Lexer {
       this.bump();
       return;
     } else if (this.current() === "#") {
-      while (this.current() !== "\n") this.bump();
+      while (this.current() !== "\n" && this.current() !== "\0") this.bump();
+      this.nextToken();
       return;
     } else {
       err("Lexer", `Error: Unknown token: '${this.current()}`);

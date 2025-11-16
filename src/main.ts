@@ -4,7 +4,7 @@ import { Lexer } from "./lexer.ts";
 import { Parser } from "./parser.ts";
 import { Command } from "@cliffy/command";
 
-const run = async (file: string) => {
+const run = async (file: string): Promise<void> => {
   const src = await Deno.readTextFile(file);
   const lexer = new Lexer(src);
   const parser = new Parser(lexer);
@@ -14,7 +14,7 @@ const run = async (file: string) => {
   interpreter.execute(ast);
 };
 
-const printAST = async (file: string) => {
+const printAST = async (file: string): Promise<void> => {
   const src = await Deno.readTextFile(file);
   const lexer = new Lexer(src);
   const parser = new Parser(lexer);
@@ -22,7 +22,7 @@ const printAST = async (file: string) => {
   console.log(ast);
 };
 
-const repl = () => {
+const repl = async (): Promise<void> => {
   console.log("Gos REPL");
 
   const context = new Context();
@@ -34,7 +34,7 @@ const repl = () => {
       const parser = new Parser(lexer);
       const ast = parser.parse();
       const interpreter = new Interpreter(context);
-      const result = interpreter.execute(ast);
+      const result = await interpreter.execute(ast);
       if (result !== undefined) console.log(result);
     } catch (e) {
       console.log(e);
@@ -42,7 +42,7 @@ const repl = () => {
   }
 };
 
-const main = async () => {
+const main = async (): Promise<void> => {
   await new Command()
     .name("gos")
     .version("v0.1.5")

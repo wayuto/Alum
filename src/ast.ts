@@ -16,6 +16,7 @@ export type NodeType =
   | "While"
   | "Del"
   | "Stmt"
+  | "ExprStmt"
   | "FuncDecl"
   | "FuncCall"
   | "NativeFunc"
@@ -148,7 +149,7 @@ export interface FuncCall extends Node {
 
 export interface NativeFunc extends Node {
   type: "NativeFunc";
-  fn: (...args: Literal[]) => Literal;
+  fn: (...args: Literal[]) => Literal | Promise<Literal>;
 } // typescript functions
 
 export interface Return extends Node {
