@@ -11,7 +11,7 @@ _A `Tree-walking` interpreter implementing in `TypeScript`_
 ➜  gos -h    
 
   Usage:   gos 
-  Version: v0.1.5
+  Version: v0.1.6
 
   License: MIT
 
