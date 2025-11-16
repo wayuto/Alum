@@ -230,13 +230,11 @@ export class Lexer {
         return;
       } else {
         this.tok = { type: TokenType.OP_ADD };
-        this.bump();
         return;
       }
     } else if (this.current() === "-") {
       if (this.isPrefix()) {
         this.tok = { type: TokenType.OP_NEG };
-        this.bump();
         return;
       }
       this.bump();
