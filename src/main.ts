@@ -47,7 +47,7 @@ const main = async (): Promise<void> => {
   else {
     await new Command()
       .name("gos")
-      .version("v0.1.8")
+      .version("v0.1.9")
       .description("Gos Interpreter")
       .meta("License", "MIT")
       .command("run <file:string>", "Run a Gos source file")

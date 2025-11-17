@@ -235,6 +235,7 @@ export class Lexer {
     } else if (this.current() === "-") {
       if (this.isPrefix()) {
         this.tok = { type: TokenType.OP_NEG };
+        this.bump();
         return;
       }
       this.bump();
@@ -244,7 +245,6 @@ export class Lexer {
         return;
       } else {
         this.tok = { type: TokenType.OP_SUB };
-        this.bump();
         return;
       }
     } else if (this.current() === "*") {
