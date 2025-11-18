@@ -1,5 +1,5 @@
 import type { Expression, NativeFunc } from "../ast.ts";
-import { Literal } from "../token.ts";
+import type { Literal } from "../token.ts";
 import { err } from "../utils.ts";
 import { nativeFuncs } from "./core.ts";
 
