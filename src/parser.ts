@@ -1,6 +1,7 @@
 import type { Expression, Program } from "./ast.ts";
-import { type Lexer, type Literal, TokenType } from "./lexer.ts";
+import type { Lexer } from "@wayuto/gos";
 import { err } from "./utils.ts";
+import { type Literal, TokenType } from "./token.ts";
 
 /**Parser */
 export class Parser {

@@ -7,8 +7,8 @@ import type {
   Var,
 } from "../ast.ts";
 import type { Context, GosFunc } from "./context.ts";
-import { type Literal, TokenType } from "../lexer.ts";
 import { err } from "../utils.ts";
+import { type Literal, TokenType } from "../token.ts";
 
 /**Interpreter */
 export class Interpreter {

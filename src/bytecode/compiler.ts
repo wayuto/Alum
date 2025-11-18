@@ -1,5 +1,5 @@
 import type { Expression, Program } from "../ast.ts";
-import { type Literal, TokenType } from "../lexer.ts";
+import { type Literal, TokenType } from "../token.ts";
 import { err } from "../utils.ts";
 import { Op } from "./bytecode.ts";
 
@@ -80,22 +80,59 @@ export class Compiler {
             this.emit(Op.DIV);
             break;
           }
+          case TokenType.COMP_EQ: {
+            this.emit(Op.EQ);
+            break;
+          }
+          case TokenType.COMP_NE: {
+            this.emit(Op.NE);
+            break;
+          }
+          case TokenType.COMP_GT: {
+            this.emit(Op.GT);
+            break;
+          }
+          case TokenType.COMP_GE: {
+            this.emit(Op.GE);
+            break;
+          }
+          case TokenType.COMP_LT: {
+            this.emit(Op.LT);
+            break;
+          }
+          case TokenType.COMP_LE: {
+            this.emit(Op.LE);
+            break;
+          }
         }
         break;
       }
       case "UnaryOp": {
         this.compileExpr(expr.argument);
+        if (expr.op === TokenType.OP_INC || expr.op === TokenType.OP_DEC) {
+          if (expr.argument.type === "Var") {
+            const varName = expr.argument.name;
+            const slot = this.locals.get(varName);
+            if (slot === undefined) {
+              return err(
+                "Compiler",
+                `Variable '${varName}' has not been defined`,
+              );
+            }
+
+            this.emit(Op.LOAD_VAR, slot);
+            if (expr.op === TokenType.OP_INC) {
+              this.emit(Op.INC);
+            } else {
+              this.emit(Op.DEC);
+            }
+            this.emit(Op.STORE_VAR, slot);
+            break;
+          }
+        }
         switch (expr.op) {
           case TokenType.LOG_NOT: {
             this.emit(Op.LOG_NOT);
-            break;
-          }
-          case TokenType.OP_INC: {
-            this.emit(Op.INC);
-            break;
-          }
-          case TokenType.OP_DEC: {
-            this.emit(Op.DEC);
             break;
           }
           default: {
@@ -111,9 +148,58 @@ export class Compiler {
         this.emit(Op.OUT);
         break;
       }
+      case "Stmt": {
+        for (const e of expr.body) {
+          this.compileExpr(e);
+        }
+        break;
+      }
+      case "If": {
+        this.compileExpr(expr.cond);
+
+        const thenPos = this.codes.length;
+        this.emit(Op.JUMP_IF_FALSE, 0, 0);
+        this.compileExpr(expr.body);
+
+        let elsePos = -1;
+        if (expr.else) {
+          elsePos = this.codes.length;
+          this.emit(Op.JUMP, 0, 0);
+        }
+
+        const thenEndPos = this.codes.length;
+        this.patchJumpAddr(thenPos + 1, thenEndPos);
+
+        if (expr.else) {
+          this.compileExpr(expr.else);
+          const elseEndPos = this.codes.length;
+          this.patchJumpAddr(elsePos + 1, elseEndPos);
+        }
+        break;
+      }
+
+      case "While": {
+        const loopPos = this.codes.length;
+        this.compileExpr(expr.cond);
+
+        const jumpIfFalse = this.codes.length;
+        this.emit(Op.JUMP_IF_FALSE, 0, 0);
+
+        this.compileExpr(expr.body);
+        this.emit(Op.JUMP, (loopPos >> 8) & 0xff, loopPos & 0xff);
+
+        const breakPos = this.codes.length;
+        this.patchJumpAddr(jumpIfFalse + 1, breakPos);
+        break;
+      }
       default: {
         return err("Compiler", `Unknown node type: ${expr.type}`);
       }
     }
+  };
+
+  private patchJumpAddr = (pos: number, addr: number): void => {
+    this.codes[pos] = (addr >> 8) & 0xff;
+    this.codes[pos + 1] = addr & 0xff;
   };
 }

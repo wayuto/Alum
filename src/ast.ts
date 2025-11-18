@@ -1,4 +1,4 @@
-import type { Literal, TokenType } from "./lexer.ts";
+import type { Literal, TokenType } from "./token.ts";
 
 export type NodeType =
   | "Program"

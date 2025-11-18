@@ -1,7 +1,7 @@
 import type { Chunk } from "./compiler.ts";
 import { Op } from "./bytecode.ts";
-import type { Literal } from "../lexer.ts";
 import { err } from "../utils.ts";
+import type { Literal } from "../token.ts";
 
 /**GosVM */
 export class GVM {
@@ -33,30 +33,72 @@ export class GVM {
           break;
         }
         case Op.ADD: {
-          const left = this.stack.pop();
           const right = this.stack.pop();
+          const left = this.stack.pop();
           const val = (left as number) + (right as number);
           this.stack.push(val);
           break;
         }
         case Op.SUB: {
-          const left = this.stack.pop();
           const right = this.stack.pop();
+          const left = this.stack.pop();
           const val = (left as number) - (right as number);
           this.stack.push(val);
           break;
         }
         case Op.MUL: {
-          const left = this.stack.pop();
           const right = this.stack.pop();
+          const left = this.stack.pop();
           const val = (left as number) * (right as number);
           this.stack.push(val);
           break;
         }
         case Op.DIV: {
-          const left = this.stack.pop();
           const right = this.stack.pop();
+          const left = this.stack.pop();
           const val = (left as number) / (right as number);
+          this.stack.push(val);
+          break;
+        }
+        case Op.EQ: {
+          const right = this.stack.pop();
+          const left = this.stack.pop();
+          const val = left === right;
+          this.stack.push(val);
+          break;
+        }
+        case Op.NE: {
+          const right = this.stack.pop();
+          const left = this.stack.pop();
+          const val = left !== right;
+          this.stack.push(val);
+          break;
+        }
+        case Op.GT: {
+          const right = this.stack.pop();
+          const left = this.stack.pop();
+          const val = left! > right!;
+          this.stack.push(val);
+          break;
+        }
+        case Op.GE: {
+          const right = this.stack.pop();
+          const left = this.stack.pop();
+          const val = left! >= right!;
+          this.stack.push(val);
+          break;
+        }
+        case Op.LT: {
+          const right = this.stack.pop();
+          const left = this.stack.pop();
+          const val = left! < right!;
+          this.stack.push(val);
+          break;
+        }
+        case Op.LE: {
+          const right = this.stack.pop();
+          const left = this.stack.pop();
+          const val = left! <= right!;
           this.stack.push(val);
           break;
         }
@@ -80,12 +122,28 @@ export class GVM {
         }
         case Op.DEC: {
           const val = this.stack.pop();
-          this.stack.push((val as number)--);
+          this.stack.push((val as number) - 1);
           break;
         }
         case Op.LOG_NOT: {
           const val = this.stack.pop();
           this.stack.push(!val);
+          break;
+        }
+        case Op.JUMP: {
+          const high = this.chunk.code[this.ip++];
+          const low = this.chunk.code[this.ip++];
+          const target = (high << 8) | low;
+          this.ip = target;
+          break;
+        }
+        case Op.JUMP_IF_FALSE: {
+          const high = this.chunk.code[this.ip++];
+          const low = this.chunk.code[this.ip++];
+          const target = (high << 8) | low;
+
+          const cond = this.stack.pop();
+          if (!cond) this.ip = target;
           break;
         }
         case Op.HALT: {
