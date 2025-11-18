@@ -192,6 +192,11 @@ export class Compiler {
         this.patchJumpAddr(jumpIfFalse + 1, breakPos);
         break;
       }
+      case "Label":
+      case "Goto": {
+        console.warn("'goto' isn't available in bytecode mode");
+        break;
+      }
       default: {
         return err("Compiler", `Unknown node type: ${expr.type}`);
       }
