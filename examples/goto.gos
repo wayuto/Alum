@@ -1,6 +1,5 @@
 let n = 10
 
-N = false # no newline when print values
 goto label
 del n # this expression will be skipped
 

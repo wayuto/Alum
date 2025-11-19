@@ -12,12 +12,46 @@ export interface Chunk {
 export class Compiler {
   private constants: Literal[] = [];
   private codes: number[] = [];
-  private locals = new Map<string, number>();
+  private scopes: Map<string, number>[] = [new Map()];
   private nextSlot = 0;
 
   private emit = (op: Op, ...arg: number[]): void => {
     this.codes.push(op);
     if (arg !== undefined) this.codes.push(...arg);
+  };
+
+  private enterScope = () => {
+    this.scopes.push(new Map());
+  };
+
+  private exitScope = () => {
+    this.scopes.pop();
+  };
+
+  private loadVar = (name: string): number | null => {
+    for (let i = this.scopes.length - 1; i >= 0; i--) {
+      const slot = this.scopes[i].get(name);
+      if (slot !== undefined) return slot;
+    }
+    return null;
+  };
+
+  private declVar = (name: string): number => {
+    const currentScope = this.scopes[this.scopes.length - 1];
+    const slot = this.nextSlot++;
+    currentScope.set(name, slot);
+    return slot;
+  };
+
+  private modVar = (name: string): number => {
+    const slot = this.loadVar(name);
+    if (slot === null) {
+      return err(
+        "Compiler",
+        `Variable '${name}' has not been defined`,
+      );
+    }
+    return slot;
   };
 
   public compile = (program: Program): { chunk: Chunk; maxSlot: number } => {
@@ -44,7 +78,7 @@ export class Compiler {
         break;
       }
       case "Var": {
-        const slot = this.locals.get(expr.name);
+        const slot = this.loadVar(expr.name)!;
         if (slot === undefined) {
           return err(
             "Compiler",
@@ -56,8 +90,13 @@ export class Compiler {
       }
       case "VarDecl": {
         this.compileExpr(expr.value);
-        const slot = this.nextSlot++;
-        this.locals.set(expr.name, slot);
+        const slot = this.declVar(expr.name);
+        this.emit(Op.STORE_VAR, slot);
+        break;
+      }
+      case "VarMod": {
+        this.compileExpr(expr.value);
+        const slot = this.modVar(expr.name);
         this.emit(Op.STORE_VAR, slot);
         break;
       }
@@ -111,12 +150,12 @@ export class Compiler {
         this.compileExpr(expr.argument);
         if (expr.op === TokenType.OP_INC || expr.op === TokenType.OP_DEC) {
           if (expr.argument.type === "Var") {
-            const varName = expr.argument.name;
-            const slot = this.locals.get(varName);
+            const name = expr.argument.name;
+            const slot = this.loadVar(name)!;
             if (slot === undefined) {
               return err(
                 "Compiler",
-                `Variable '${varName}' has not been defined`,
+                `Variable '${name}' has not been defined`,
               );
             }
 
@@ -149,9 +188,11 @@ export class Compiler {
         break;
       }
       case "Stmt": {
+        this.enterScope();
         for (const e of expr.body) {
           this.compileExpr(e);
         }
+        this.exitScope();
         break;
       }
       case "If": {
@@ -159,7 +200,10 @@ export class Compiler {
 
         const thenPos = this.codes.length;
         this.emit(Op.JUMP_IF_FALSE, 0, 0);
+
+        this.enterScope();
         this.compileExpr(expr.body);
+        this.exitScope();
 
         let elsePos = -1;
         if (expr.else) {
@@ -171,7 +215,9 @@ export class Compiler {
         this.patchJumpAddr(thenPos + 1, thenEndPos);
 
         if (expr.else) {
+          this.enterScope();
           this.compileExpr(expr.else);
+          this.exitScope();
           const elseEndPos = this.codes.length;
           this.patchJumpAddr(elsePos + 1, elseEndPos);
         }
@@ -179,6 +225,8 @@ export class Compiler {
       }
 
       case "While": {
+        this.enterScope();
+
         const loopPos = this.codes.length;
         this.compileExpr(expr.cond);
 
@@ -190,6 +238,8 @@ export class Compiler {
 
         const breakPos = this.codes.length;
         this.patchJumpAddr(jumpIfFalse + 1, breakPos);
+
+        this.exitScope();
         break;
       }
       case "Label":
