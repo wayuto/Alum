@@ -345,6 +345,11 @@ export class Compiler {
 
         break;
       }
+      case "Exit": {
+        this.compileExpr(expr.status);
+        this.emit(Op.EXIT);
+        break;
+      }
       case "Return": {
         if (expr.value) {
           this.compileExpr(expr.value);

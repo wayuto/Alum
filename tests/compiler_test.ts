@@ -9,6 +9,6 @@ Deno.test("Compiler", () => {
   const ast = parser.parse();
   const compiler = new Compiler();
   const { chunk, maxSlot } = compiler.compile(ast);
-  assertEquals(chunk.code, new Uint8Array([0, 0, 18, 21]));
+  assertEquals(chunk.code, new Uint8Array([0, 0, 18, 24]));
   assertEquals(maxSlot, 0);
 });

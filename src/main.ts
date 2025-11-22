@@ -6,11 +6,14 @@ import {
   Interpreter,
   Lexer,
   Parser,
+  Preprocessor,
 } from "@wayuto/gos";
 
 const interpret = async (file: string): Promise<void> => {
   const src = await Deno.readTextFile(file);
-  const lexer = new Lexer(src);
+  const preprocessor = new Preprocessor(src);
+  const code = await preprocessor.preprocess();
+  const lexer = new Lexer(code);
   const parser = new Parser(lexer);
   const ast = parser.parse();
   const context = new Context();
@@ -20,7 +23,9 @@ const interpret = async (file: string): Promise<void> => {
 
 const run = async (file: string): Promise<void> => {
   const src = await Deno.readTextFile(file);
-  const lexer = new Lexer(src);
+  const preprocessor = new Preprocessor(src);
+  const code = await preprocessor.preprocess();
+  const lexer = new Lexer(code);
   const parser = new Parser(lexer);
   const ast = parser.parse();
   const compiler = new Compiler();
@@ -35,6 +40,13 @@ const printAST = async (file: string): Promise<void> => {
   const parser = new Parser(lexer);
   const ast = parser.parse();
   console.log(ast);
+};
+
+const printPreprocessed = async (file: string): Promise<void> => {
+  const src = await Deno.readTextFile(file);
+  const preprocessor = new Preprocessor(src);
+  const code = await preprocessor.preprocess();
+  console.log(code);
 };
 
 const repl = async (): Promise<void> => {
@@ -62,7 +74,7 @@ const main = async (): Promise<void> => {
   else {
     await new Command()
       .name("gos")
-      .version("v0.2.3")
+      .version("v0.2.4")
       .description("Gos Interpreter")
       .meta("License", "MIT")
       .command("repl", "Gos REPL")
@@ -81,6 +93,12 @@ const main = async (): Promise<void> => {
       .command("ast <file:string>", "Show the AST of a Gos source file")
       .action(async (_, file: string) => {
         await printAST(file);
+      })
+      .command(
+        "preprocess <file:string>",
+        "Show the proprecessed Gos source file",
+      ).action(async (_, file: string) => {
+        await printPreprocessed(file);
       })
       .parse(Deno.args);
   }

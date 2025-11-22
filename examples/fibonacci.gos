@@ -1,16 +1,14 @@
-let n = 10
-    fun f(x) {
-        if (x <= 1) return x
-        else {
-            let a = 0
-            let b = 1
-            while (x > 1) {
-                let tmp = a + b
-                a = b
-                b = tmp
-                x--
-            }
-            return b
+fun f(x) {
+    if (x <= 1) return x
+    else {
+        let a = 0
+        let b = 1
+        while (x > 1) {
+            let tmp = a + b
+            a = b
+            b = tmp
+            x--
         }
+        return b
     }
-    out f(10)
+}

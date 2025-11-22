@@ -1,0 +1,5 @@
+$import "fibonacci.gos"
+
+let n = 10
+let result = f(n)
+out result

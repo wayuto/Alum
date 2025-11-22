@@ -13,6 +13,9 @@ export const enum Op {
   INC,
   DEC,
   LOG_NOT,
+  LOG_AND,
+  LOG_OR,
+  LOG_XOR,
   EQ,
   NE,
   GT,
@@ -25,6 +28,7 @@ export const enum Op {
   JUMP_IF_FALSE,
   CALL,
   RET,
+  EXIT,
   HALT,
 }
 
@@ -42,6 +46,9 @@ export const dis = (chunk: Chunk): void => {
     "INC",
     "DEC",
     "LOG_NOT",
+    "LOG_AND",
+    "LOG_OR",
+    "LOG_XOR",
     "EQ",
     "NE",
     "GT",
@@ -54,6 +61,7 @@ export const dis = (chunk: Chunk): void => {
     "JUMP_IF_FALSE",
     "CALL",
     "RET",
+    "EXIT",
     "HALT",
   ];
 

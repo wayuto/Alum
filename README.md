@@ -11,9 +11,9 @@ feature support)_
 
 ```bash
 ➜  deno install -A -n --global gos jsr:@wayuto/gos/gos
-➜  gos -h    
+➜  gos -h
 Usage:   gos   
-Version: [VERSION]
+Version: v0.2.4
 
 License: MIT
 
@@ -28,10 +28,11 @@ Options:
 
 Commands:
 
-  repl          - Gos REPL                                        
-  gvm   <file>  - Run a Gos source file by bytecode (Experimental)
-  run   <file>  - Run a Gos source file by ast-walking            
-  ast   <file>  - Show the AST of a Gos source file
+  repl                - Gos REPL                                        
+  gvm         <file>  - Run a Gos source file by bytecode
+  run         <file>  - Run a Gos source file by ast-walking            
+  ast         <file>  - Show the AST of a Gos source file               
+  preprocess  <file>  - Show the proprecessed Gos source file
 ```
 
 - ### _**In TypeScript**_
@@ -39,17 +40,25 @@ Commands:
 
 ```typescript
 // tree-walking
-import { Context, Interpreter, Lexer, Parser } from "jsr:@wayuto/gos";
+import {
+  Context,
+  Interpreter,
+  Lexer,
+  Parser,
+  Preprocessor,
+} from "jsr:@wayuto/gos";
 
 // bytecode
-import { Compiler, GVM, Lexer, Parser } from "@wayuto/gos";
+import { Compiler, GVM, Lexer, Parser, Preprocessor } from "@wayuto/gos";
 ```
 
 - _**Initialization**_
 
 ```typescript
-const code = "out 'Hello world!'";
+const src = "out 'Hello world!'";
 
+const preprocessor = new Preprocessor(src);
+const code = await preprocessor.preprocess();
 const lexer = new Lexer(code);
 const parser = new Parser(lexer);
 const ast = parser.parse();
@@ -160,4 +169,14 @@ let x = {
 } # x = 3
 
 let y = if (true) 1 else 0 # y = 1
+```
+
+- ### _**Import module**_
+
+```typescript
+$import "fibonacci.gos"
+
+let n = 10
+let result = f(n)
+out result
 ```
