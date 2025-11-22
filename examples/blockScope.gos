@@ -1,6 +1,8 @@
-fun f() out "outer"
+$import "std.gos"
+
+fun f() print("outer")
 {
-    fun f() out "inner"
+    fun f() print("inner")
     f()
 
 }

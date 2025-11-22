@@ -1,4 +1,4 @@
-$import "examples/std.gos"
+$import "std.gos"
 
 let name = input("Enter your name: ")
 writeFile("hello.txt" "Hello " + name + "!")

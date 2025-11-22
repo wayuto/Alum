@@ -1,5 +1,5 @@
-$import "examples/fibonacci.gos"
-$import "examples/std.gos"
+$import "fibonacci.gos"
+$import "std.gos"
 
 let n = 10
 let result = f(n)
