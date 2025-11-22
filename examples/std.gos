@@ -27,10 +27,10 @@ fun max(a b) return eval "Math.max("
     + a
     + ", "
     + b 
-    +")"
+    + ")"
 
 fun min(a b) return eval "Math.min(" 
     + a
     + ", "
     + b 
-    +")"
+    + ")"
