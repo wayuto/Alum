@@ -62,7 +62,7 @@ const main = async (): Promise<void> => {
   else {
     await new Command()
       .name("gos")
-      .version("v0.2.2")
+      .version("v0.2.3")
       .description("Gos Interpreter")
       .meta("License", "MIT")
       .command("repl", "Gos REPL")

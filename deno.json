@@ -1,7 +1,7 @@
 {
   "name": "@wayuto/gos",
-  "version": "0.2.2",
-  "description": "The Gos Programming Language - A Tree-walking interpreter",
+  "version": "0.2.3",
+  "description": "The Gos Programming Language",
   "exports": {
     ".": "./src/mod.ts",
     "./gos": "./src/main.ts"

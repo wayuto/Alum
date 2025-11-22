@@ -12,26 +12,47 @@ export interface Chunk {
 export class Compiler {
   private constants: Literal[] = [];
   private codes: number[] = [];
-  private scopes: Map<string, number>[] = [new Map()];
+  private scopes: { vars: Map<string, number>; slotCount: number }[] = [{
+    vars: new Map(),
+    slotCount: 0,
+  }];
   private nextSlot = 0;
+  private funcs: Map<string, { addr: number; paramCount: number }>[] = [
+    new Map(),
+  ];
 
-  private emit = (op: Op, ...arg: number[]): void => {
+  emit = (op: Op, ...arg: number[]): void => {
     this.codes.push(op);
     if (arg !== undefined) this.codes.push(...arg);
   };
 
   private enterScope = () => {
-    this.scopes.push(new Map());
+    this.scopes.push({ vars: new Map(), slotCount: 0 });
+    this.funcs.push(new Map());
   };
 
   private exitScope = () => {
-    this.scopes.pop();
+    const scope = this.scopes.pop();
+    if (scope) {
+      this.nextSlot -= scope.slotCount;
+    }
+    this.funcs.pop();
   };
 
   private loadVar = (name: string): number | null => {
     for (let i = this.scopes.length - 1; i >= 0; i--) {
-      const slot = this.scopes[i].get(name);
+      const slot = this.scopes[i].vars.get(name);
       if (slot !== undefined) return slot;
+    }
+    return null;
+  };
+
+  private loadFunc = (
+    name: string,
+  ): { addr: number; paramCount: number } | null => {
+    for (let i = this.funcs.length - 1; i >= 0; i--) {
+      const func = this.funcs[i].get(name);
+      if (func !== undefined) return func;
     }
     return null;
   };
@@ -39,7 +60,8 @@ export class Compiler {
   private declVar = (name: string): number => {
     const currentScope = this.scopes[this.scopes.length - 1];
     const slot = this.nextSlot++;
-    currentScope.set(name, slot);
+    currentScope.vars.set(name, slot);
+    currentScope.slotCount++;
     return slot;
   };
 
@@ -62,7 +84,10 @@ export class Compiler {
     this.emit(Op.HALT);
 
     return {
-      chunk: { code: new Uint8Array(this.codes), constants: this.constants },
+      chunk: {
+        code: new Uint8Array(this.codes),
+        constants: this.constants,
+      },
       maxSlot: this.nextSlot,
     };
   };
@@ -78,13 +103,14 @@ export class Compiler {
         break;
       }
       case "Var": {
-        const slot = this.loadVar(expr.name)!;
-        if (slot === undefined) {
+        const slot = this.loadVar(expr.name);
+        if (slot === null) {
           return err(
             "Compiler",
             `Variable '${expr.name}' has not been defined`,
           );
         }
+
         this.emit(Op.LOAD_VAR, slot);
         break;
       }
@@ -92,12 +118,14 @@ export class Compiler {
         this.compileExpr(expr.value);
         const slot = this.declVar(expr.name);
         this.emit(Op.STORE_VAR, slot);
+        this.emit(Op.POP);
         break;
       }
       case "VarMod": {
         this.compileExpr(expr.value);
         const slot = this.modVar(expr.name);
         this.emit(Op.STORE_VAR, slot);
+        this.emit(Op.POP);
         break;
       }
       case "BinOp": {
@@ -189,9 +217,20 @@ export class Compiler {
       }
       case "Stmt": {
         this.enterScope();
-        for (const e of expr.body) {
-          this.compileExpr(e);
+        const body = expr.body;
+
+        for (let i = 0; i < body.length - 1; i++) {
+          this.compileExpr(body[i]);
+          this.emit(Op.POP);
         }
+
+        if (body.length > 0) {
+          this.compileExpr(body[body.length - 1]);
+        } else {
+          this.constants.push(undefined);
+          this.emit(Op.LOAD_CONST, this.constants.length - 1);
+        }
+
         this.exitScope();
         break;
       }
@@ -240,6 +279,80 @@ export class Compiler {
         this.patchJumpAddr(jumpIfFalse + 1, breakPos);
 
         this.exitScope();
+        break;
+      }
+      case "FuncDecl": {
+        const jumpAddr = this.codes.length;
+        this.emit(Op.JUMP, 0, 0);
+        const funcAddr = this.codes.length;
+        const currFunc = this.funcs[this.funcs.length - 1];
+
+        if (currFunc.has(expr.name)) {
+          return err(
+            "Compiler",
+            `Function '${expr.name}' has already been declared in this scope`,
+          );
+        }
+
+        currFunc.set(expr.name, {
+          addr: funcAddr,
+          paramCount: expr.params.length,
+        });
+
+        this.enterScope();
+
+        for (const param of expr.params) {
+          this.declVar(param);
+        }
+
+        this.compileExpr(expr.body);
+
+        this.emit(Op.RET);
+
+        this.exitScope();
+        this.patchJumpAddr(jumpAddr + 1, this.codes.length);
+        this.emit(Op.POP);
+        break;
+      }
+      case "FuncCall": {
+        for (const arg of expr.args) {
+          this.compileExpr(arg);
+        }
+
+        const func = this.loadFunc(expr.name);
+
+        if (func === null) {
+          return err(
+            "Compiler",
+            `Function '${expr.name}' hasn't been declared in this scope`,
+          );
+        }
+        if (func.paramCount !== expr.args.length) {
+          return err(
+            "Compiler",
+            `Function ${expr.name} expected ${func.paramCount} arguments, got ${expr.args.length}`,
+          );
+        }
+
+        const target = func.addr;
+
+        this.emit(
+          Op.CALL,
+          (target >> 8) & 0xff,
+          target & 0xff,
+          func.paramCount,
+        );
+
+        break;
+      }
+      case "Return": {
+        if (expr.value) {
+          this.compileExpr(expr.value);
+        } else {
+          this.constants.push(undefined);
+          this.emit(Op.LOAD_CONST, this.constants.length - 1);
+        }
+        this.emit(Op.RET);
         break;
       }
       case "Label":

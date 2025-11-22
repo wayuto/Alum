@@ -8,6 +8,8 @@ export class GVM {
   private ip = 0;
   private stack: Literal[] = [];
   private slots: Literal[] = [];
+  private callStack: { returnIp: number; baseSlot: number }[] = [];
+  private currBaseSlot = 0;
 
   constructor(private chunk: Chunk, private maxSlot: number) {
     this.slots = new Array<Literal>(this.maxSlot);
@@ -107,6 +109,10 @@ export class GVM {
           console.log(value);
           break;
         }
+        case Op.POP: {
+          this.stack.pop();
+          break;
+        }
         case Op.NEG: {
           const val = this.stack.pop();
           this.stack.push(-(val as number));
@@ -148,6 +154,44 @@ export class GVM {
         }
         case Op.HALT: {
           return;
+        }
+        case Op.CALL: {
+          const high = this.chunk.code[this.ip++];
+          const low = this.chunk.code[this.ip++];
+          const argsCount = this.chunk.code[this.ip++];
+          const target = (high << 8) | low;
+
+          this.callStack.push({
+            returnIp: this.ip,
+            baseSlot: this.currBaseSlot | 0,
+          });
+
+          const newBaseSlot = this.slots.length;
+
+          const args = [];
+          for (let i = 0; i < argsCount; i++) {
+            args.push(this.stack.pop());
+          }
+          args.reverse();
+          this.slots.push(...args);
+
+          this.currBaseSlot = newBaseSlot;
+          this.ip = target;
+          break;
+        }
+        case Op.RET: {
+          const value = this.stack.pop();
+          if (this.callStack.length === 0) return;
+          const frame = this.callStack.pop();
+
+          const currFrameSize = this.slots.length - this.currBaseSlot;
+          this.slots.splice(this.currBaseSlot, currFrameSize);
+
+          this.ip = frame!.returnIp;
+          this.currBaseSlot = frame!.baseSlot;
+
+          if (value !== undefined) this.stack.push(value);
+          break;
         }
         default: {
           return err(

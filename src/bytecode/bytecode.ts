@@ -20,8 +20,11 @@ export const enum Op {
   LT,
   LE,
   OUT,
+  POP,
   JUMP,
   JUMP_IF_FALSE,
+  CALL,
+  RET,
   HALT,
 }
 
@@ -46,8 +49,11 @@ export const dis = (chunk: Chunk): void => {
     "LT",
     "LE",
     "OUT",
+    "POP",
     "JUMP",
     "JUMP_IF_FALSE",
+    "CALL",
+    "RET",
     "HALT",
   ];
 
@@ -93,6 +99,25 @@ export const dis = (chunk: Chunk): void => {
             low.toString(16).padStart(2, "0")
           } ; -> ${target.toString().padStart(4, "0")}`,
         );
+        break;
+      }
+
+      case Op.CALL: {
+        const high = code[ip++];
+        const low = code[ip++];
+        const argCount = code[ip++];
+        const target = (high << 8) | low;
+        console.log(
+          ` ${high.toString(16).padStart(2, "0")} ${
+            low.toString(16).padStart(2, "0")
+          } ${argCount} ; -> ${
+            target.toString().padStart(4, "0")
+          } (${argCount} args)`,
+        );
+        break;
+      }
+      case Op.RET: {
+        console.log();
         break;
       }
 
