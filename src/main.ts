@@ -11,6 +11,18 @@ import {
 } from "@wayuto/gos";
 import { compile, load } from "./bytecode/serialize.ts";
 
+const interpret = async (file: string) => {
+  const src = await Deno.readTextFile(file);
+  const preprocessor = new Preprocessor(src);
+  const code = await preprocessor.preprocess();
+  const lexer = new Lexer(code);
+  const parser = new Parser(lexer);
+  const ast = parser.parse();
+  const context = new Context();
+  const interpreter = new Interpreter(context);
+  interpreter.execute(ast);
+};
+
 const run = async (file: string): Promise<void> => {
   if (file.endsWith("gbc")) {
     const { chunk, maxSlot } = await load(file);
@@ -101,6 +113,12 @@ const main = async (): Promise<void> => {
       )
       .action(async (_, file: string) => {
         await compile(file);
+      }).command(
+        "interpret <file:string>",
+        "Run a Gos source file by ast-walker",
+      )
+      .action(async (_, file: string) => {
+        await interpret(file);
       })
       .command("ast <file:string>", "Show the AST of a Gos source file")
       .action(async (_, file: string) => {
