@@ -168,7 +168,7 @@ let x = {
 let y = if (true) 1 else 0
 ```
 
-- ### _**Import module**_
+- ### _**Importing module**_
 
 ```gos
 $import "fibonacci.gos"
@@ -176,4 +176,10 @@ $import "fibonacci.gos"
 let n = 10
 let result = f(n)
 out result
+```
+
+- ### _**Running Typescript in Gos**_
+
+```
+let x = eval "1 + 1"
 ```
