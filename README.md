@@ -14,7 +14,7 @@ feature support)_
 ➜  gos -h
 
 Usage:   gos   
-Version: v0.2.
+Version: v0.2.7
 
 License: MIT
 
