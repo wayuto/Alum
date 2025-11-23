@@ -1,7 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { Lexer } from "../src/lexer.ts";
-import { Parser } from "../src/parser.ts";
-import { Optimizer } from "../src/opimizer.ts";
+import { Lexer, Optimizer, Parser } from "@wayuto/gos";
 
 Deno.test("Optimizer", () => {
   const code = "let x = (1 + 2) * 3";

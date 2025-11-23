@@ -5,4 +5,6 @@ export { Interpreter } from "./ast-walking/interpreter.ts";
 export { Context } from "./ast-walking/context.ts";
 export { Compiler } from "./bytecode/compiler.ts";
 export { GVM } from "./bytecode/gvm.ts";
+export { Optimizer } from "./optimizer.ts";
 export { dis } from "./bytecode/bytecode.ts";
+export { compile, load } from "./bytecode/serialize.ts";

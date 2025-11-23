@@ -1,16 +1,17 @@
 import { Command } from "@cliffy/command";
 import {
+  compile,
   Compiler,
   Context,
   dis,
   GVM,
   Interpreter,
   Lexer,
+  load,
+  Optimizer,
   Parser,
   Preprocessor,
 } from "@wayuto/gos";
-import { compile, load } from "./bytecode/serialize.ts";
-import { Optimizer } from "./opimizer.ts";
 
 const interpret = async (file: string): Promise<void> => {
   const src = await Deno.readTextFile(file);

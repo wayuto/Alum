@@ -1,6 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { Lexer } from "../src/lexer.ts";
-import { Parser } from "../src/parser.ts";
+import { Lexer, Parser } from "@wayuto/gos";
 
 Deno.test("Parser", () => {
   const code = "let x = 1";

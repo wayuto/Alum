@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { Lexer } from "../src/lexer.ts";
+import { Lexer } from "@wayuto/gos";
 
 Deno.test("Lexer", () => {
   const code = "1 + 1";

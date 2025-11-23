@@ -47,12 +47,20 @@ import {
   Context,
   Interpreter,
   Lexer,
+  Optimizer,
   Parser,
   Preprocessor,
 } from "jsr:@wayuto/gos";
 
 // bytecode
-import { Compiler, GVM, Lexer, Parser, Preprocessor } from "@wayuto/gos";
+import {
+  Compiler,
+  GVM,
+  Lexer,
+  Optimizer,
+  Parser,
+  Preprocessor,
+} from "@wayuto/gos";
 ```
 
 - _**Initialization**_
@@ -64,7 +72,8 @@ const preprocessor = new Preprocessor(src);
 const code = await preprocessor.preprocess();
 const lexer = new Lexer(code);
 const parser = new Parser(lexer);
-const ast = parser.parse();
+const optimizer = new Optimizer();
+const ast = optimizer.optimize(parser.parse());
 
 // tree-walking
 const context = new Context();
