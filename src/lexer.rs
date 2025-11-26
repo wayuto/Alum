@@ -1,30 +1,30 @@
+use std::{iter::Peekable, str::Chars};
+
 use crate::token::{Literal, Token, TokenType};
 
-#[derive(Debug)]
-pub struct Lexer {
-    pub tok: Token,
-    pos: usize,
-    src: Vec<char>,
+#[derive(Debug, Clone)]
+pub struct Lexer<'a> {
+    tok: Token,
+    src: Peekable<Chars<'a>>,
 }
 
-impl Lexer {
-    pub fn new(src: String) -> Self {
+impl<'a> Lexer<'a> {
+    pub fn new(src: &'a str) -> Self {
         Lexer {
-            pos: 0,
             tok: Token {
                 token: TokenType::EOF,
                 value: None,
             },
-            src: src.chars().collect(),
+            src: src.chars().peekable(),
         }
     }
 
-    fn current(&self) -> char {
-        *self.src.get(self.pos).unwrap_or(&'\0')
+    fn current(&mut self) -> char {
+        *self.src.peek().unwrap_or(&'\0')
     }
 
     fn bump(&mut self) -> () {
-        self.pos += 1;
+        self.src.next();
     }
 
     fn skip_spaces(&mut self) -> () {
@@ -73,8 +73,8 @@ impl Lexer {
         ident
     }
 
-    fn is_prefix(&self) -> bool {
-        let prev = *self.src.get(self.pos - 1).unwrap_or(&' ');
+    fn is_prefix(&mut self) -> bool {
+        let prev = *self.src.peek().unwrap_or(&' ');
         self.tok.token == TokenType::EOF
             || self.tok.token == TokenType::LPAREN
             || self.tok.token == TokenType::EQ
@@ -132,7 +132,7 @@ impl Lexer {
                 }
                 "return" => {
                     self.tok = Token {
-                        token: TokenType::FUNCDECL,
+                        token: TokenType::RETURN,
                         value: None,
                     }
                 }
@@ -178,10 +178,238 @@ impl Lexer {
                         value: None,
                     }
                 }
-                _ => {}
+                _ => {
+                    self.tok = Token {
+                        token: TokenType::IDENT,
+                        value: Some(Literal::Str(ident)),
+                    }
+                }
             }
             return;
         } else if self.current() == '"' {
+            self.bump();
+            let mut s = String::new();
+            while self.current().is_alphabetic() {
+                if self.current() == '\0' {
+                    panic!("Lexer: Expected: '\"'")
+                }
+                s.push(self.current());
+                self.bump();
+            }
+            self.bump();
+            self.tok = Token {
+                token: TokenType::LITERAL,
+                value: Some(Literal::Str(s)),
+            };
+            return;
+        } else if self.current() == '\'' {
+            self.bump();
+            let mut s = String::new();
+            while self.current().is_alphabetic() {
+                if self.current() == '\0' {
+                    panic!("Lexer: Expected: \"'\"")
+                }
+                s.push(self.current());
+                self.bump();
+            }
+            self.bump();
+            self.tok = Token {
+                token: TokenType::LITERAL,
+                value: Some(Literal::Str(s)),
+            };
+            return;
+        } else if self.current() == '+' {
+            if self.is_prefix() {
+                self.bump();
+                return;
+            }
+            self.bump();
+            if self.current() == '+' {
+                self.tok = Token {
+                    token: TokenType::INC,
+                    value: None,
+                };
+                self.bump();
+                return;
+            }
+            self.tok = Token {
+                token: TokenType::ADD,
+                value: None,
+            };
+            return;
+        } else if self.current() == '-' {
+            if self.is_prefix() {
+                self.tok = Token {
+                    token: TokenType::NEG,
+                    value: None,
+                };
+                self.bump();
+                return;
+            }
+            self.bump();
+            if self.current() == '-' {
+                self.tok = Token {
+                    token: TokenType::DEC,
+                    value: None,
+                };
+                self.bump();
+                return;
+            }
+            self.tok = Token {
+                token: TokenType::SUB,
+                value: None,
+            };
+            return;
+        } else if self.current() == '*' {
+            self.tok = Token {
+                token: TokenType::MUL,
+                value: None,
+            };
+            self.bump();
+            return;
+        } else if self.current() == '/' {
+            self.tok = Token {
+                token: TokenType::DIV,
+                value: None,
+            };
+            self.bump();
+            return;
+        } else if self.current() == '(' {
+            self.tok = Token {
+                token: TokenType::LPAREN,
+                value: None,
+            };
+            self.bump();
+            return;
+        } else if self.current() == ')' {
+            self.tok = Token {
+                token: TokenType::RPAREN,
+                value: None,
+            };
+            self.bump();
+            return;
+        } else if self.current() == '{' {
+            self.tok = Token {
+                token: TokenType::LBRACE,
+                value: None,
+            };
+            self.bump();
+            return;
+        } else if self.current() == '}' {
+            self.tok = Token {
+                token: TokenType::RBRACE,
+                value: None,
+            };
+            self.bump();
+            return;
+        } else if self.current() == '=' {
+            self.bump();
+            if self.current() == '=' {
+                self.tok = Token {
+                    token: TokenType::COMPEQ,
+                    value: None,
+                };
+                self.bump();
+                return;
+            }
+            self.tok = Token {
+                token: TokenType::EQ,
+                value: None,
+            };
+            return;
+        } else if self.current() == '!' {
+            self.bump();
+            if self.current() == '=' {
+                self.tok = Token {
+                    token: TokenType::COMPNE,
+                    value: None,
+                };
+                self.bump();
+                return;
+            }
+            self.tok = Token {
+                token: TokenType::LOGNOT,
+                value: None,
+            };
+            return;
+        } else if self.current() == '>' {
+            self.bump();
+            if self.current() == '=' {
+                self.tok = Token {
+                    token: TokenType::COMPGE,
+                    value: None,
+                };
+                self.bump();
+                return;
+            }
+            self.tok = Token {
+                token: TokenType::COMPGT,
+                value: None,
+            };
+            return;
+        } else if self.current() == '<' {
+            self.bump();
+            if self.current() == '=' {
+                self.tok = Token {
+                    token: TokenType::COMPLE,
+                    value: None,
+                };
+                self.bump();
+                return;
+            }
+            self.tok = Token {
+                token: TokenType::COMPLT,
+                value: None,
+            };
+            return;
+        } else if self.current() == '&' {
+            self.bump();
+            if self.current() == '&' {
+                self.tok = Token {
+                    token: TokenType::COMPAND,
+                    value: None,
+                };
+                self.bump();
+                return;
+            }
+            self.tok = Token {
+                token: TokenType::LOGAND,
+                value: None,
+            };
+            return;
+        } else if self.current() == '|' {
+            self.bump();
+            if self.current() == '|' {
+                self.tok = Token {
+                    token: TokenType::COMPOR,
+                    value: None,
+                };
+                self.bump();
+                return;
+            }
+            self.tok = Token {
+                token: TokenType::LOGOR,
+                value: None,
+            };
+            return;
+        } else if self.current() == '^' {
+            self.tok = Token {
+                token: TokenType::LOGXOR,
+                value: None,
+            };
+            self.bump();
+            return;
+        } else if self.current() == '#' {
+            while self.current() != '\n' || self.current() != '\0' {
+                self.bump();
+            }
+            return;
+        } else {
+            panic!("Lexer: Unknown token {}", self.current())
         }
+    }
+
+    pub fn current_token(&self) -> Token {
+        self.tok.clone()
     }
 }

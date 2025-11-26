@@ -1,11 +1,10 @@
-#[derive(PartialEq, PartialOrd, Debug)]
+#[derive(PartialEq, PartialOrd, Debug, Clone)]
 pub enum TokenType {
     ADD,
     SUB,
     MUL,
     DIV,
     NEG,
-    POS,
     INC,
     DEC,
     EQ,
@@ -26,7 +25,6 @@ pub enum TokenType {
     RPAREN,
     LBRACE,
     RBRACE,
-    COLON,
     VARDECL,
     VAR,
     IN,
@@ -45,7 +43,7 @@ pub enum TokenType {
     EOF,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Literal {
     Number(f64),
     Bool(bool),
@@ -53,7 +51,7 @@ pub enum Literal {
     Void,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Token {
     pub token: TokenType,
     pub value: Option<Literal>,
