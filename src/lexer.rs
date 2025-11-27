@@ -399,6 +399,13 @@ impl<'a> Lexer<'a> {
             };
             self.bump();
             return;
+        } else if self.current() == ':' {
+            self.tok = Token {
+                token: TokenType::COLON,
+                value: None,
+            };
+            self.bump();
+            return;
         } else if self.current() == '#' {
             while self.current() != '\n' || self.current() != '\0' {
                 self.bump();

@@ -25,6 +25,7 @@ pub enum TokenType {
     RPAREN,
     LBRACE,
     RBRACE,
+    COLON,
     VARDECL,
     VAR,
     IN,

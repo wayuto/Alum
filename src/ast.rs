@@ -1,7 +1,7 @@
-use crate::token::Literal;
+use crate::token::{Literal, TokenType};
 
 pub struct Program {
-    pub body: Vec<Expr>,    
+    pub body: Vec<Expr>,
 }
 
 pub struct Stmt {
@@ -21,9 +21,9 @@ pub enum Expr {
     FuncDecl(FuncDecl),
     FuncCall(FuncCall),
     Return(Return),
-    Out(Out), 
+    Out(Out),
     In(In),
-    Label(Label), 
+    Label(Label),
     Goto(Goto),
     Exit(Exit),
 }
@@ -54,7 +54,7 @@ pub struct BinOp {
 
 pub struct UnaryOp {
     pub argument: Box<Expr>,
-    pub operator: String,
+    pub operator: TokenType,
 }
 
 pub struct If {
@@ -88,7 +88,7 @@ pub struct Out {
 }
 
 pub struct In {
-    pub name: String
+    pub name: String,
 }
 
 pub struct Label {
