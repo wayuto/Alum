@@ -189,7 +189,7 @@ impl<'a> Lexer<'a> {
         } else if self.current() == '"' {
             self.bump();
             let mut s = String::new();
-            while self.current().is_alphabetic() {
+            while self.current() != '"' {
                 if self.current() == '\0' {
                     panic!("Lexer: Expected: '\"'")
                 }
@@ -205,7 +205,7 @@ impl<'a> Lexer<'a> {
         } else if self.current() == '\'' {
             self.bump();
             let mut s = String::new();
-            while self.current().is_alphabetic() {
+            while self.current() != '\'' {
                 if self.current() == '\0' {
                     panic!("Lexer: Expected: \"'\"")
                 }

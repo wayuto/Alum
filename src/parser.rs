@@ -110,7 +110,7 @@ impl<'a> Parser<'a> {
                 let status = self.expr();
                 self.lexer.next_token();
                 Expr::Exit(Exit {
-                    code: Some(Box::new(status)),
+                    code: Box::new(status),
                 })
             }
             TokenType::GOTO => {
@@ -135,6 +135,7 @@ impl<'a> Parser<'a> {
                 })
             }
             TokenType::OUT => {
+                self.lexer.next_token();
                 let value = self.expr();
                 Expr::Out(Out {
                     value: Box::new(value),
@@ -297,7 +298,7 @@ impl<'a> Parser<'a> {
             Literal::Str(s) => s,
             _ => {
                 panic!(
-                    "Invalid label name: {:?}",
+                    "Invalid name: {:?}",
                     self.lexer.current_token().value.unwrap()
                 )
             }
