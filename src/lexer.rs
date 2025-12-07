@@ -33,29 +33,32 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn parse_number(&mut self) -> f64 {
-        let mut int_part = 0;
-        let mut frac_part = 0;
-        let mut frac_div = 1;
+    fn parse_number(&mut self) -> u64 {
+        let mut int_part = 0u64;
+        // let mut frac_part = 0;
+        // let mut frac_div = 1;
 
         while self.current().is_numeric() {
-            int_part = int_part * 10 + self.current().to_digit(10).unwrap();
+            int_part = int_part * 10 + self.current().to_digit(10).unwrap() as u64;
             self.bump();
         }
 
         if self.current() == '.' {
-            self.bump();
-            if !self.current().is_numeric() {
-                panic!("Lexer: Invalid number: expected digit after '.'")
-            }
-            while self.current().is_numeric() {
-                frac_div *= 10;
-                frac_part = frac_part * 10 + self.current().to_digit(10).unwrap();
-                self.bump();
-            }
+            // self.bump();
+            // if !self.current().is_numeric() {
+            //     panic!("Lexer: Invalid number: expected digit after '.'")
+            // }
+            // while self.current().is_numeric() {
+            //     frac_div *= 10;
+            //     frac_part = frac_part * 10 + self.current().to_digit(10).unwrap();
+            //     self.bump();
+            // }
+
+            panic!("Lexer: Float number hasn't been implemented")
         }
 
-        int_part as f64 + frac_part as f64 / frac_div as f64
+        // int_part as f64 + frac_part as f64 / frac_div as f64
+        int_part
     }
 
     fn parse_ident(&mut self) -> String {
@@ -94,7 +97,7 @@ impl<'a> Lexer<'a> {
             let val = self.parse_number();
             self.tok = Token {
                 token: TokenType::LITERAL,
-                value: Some(Literal::Number(val)),
+                value: Some(Literal::Number(val as i64)),
             };
             return;
         } else if self.current().is_alphabetic() {

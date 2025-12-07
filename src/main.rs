@@ -6,7 +6,7 @@ use crate::{
     serialize::{compile, load},
 };
 use clap::{Arg, Command};
-use std::{fs, path::Path};
+use std::{env, fs, path::Path};
 
 pub mod ast;
 pub mod bytecode;
@@ -178,9 +178,9 @@ fn main() {
             eprintln!("nasm failed");
             std::process::exit(1);
         }
-
+        let lib_path = format!("/tmp/lib.o");
         let ld_status = std::process::Command::new("ld")
-            .args(&["-o", &bin_file, &obj_file])
+            .args(&["-o", &bin_file, &lib_path, &obj_file])
             .status()
             .expect("Failed to run ld");
         if !ld_status.success() {

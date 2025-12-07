@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 bincode = { version = "2.0.1", features = ["serde"] }
 clap = "4.5.53"
+regex = "1.12.2"
 serde = { version = "1.0.228", features = ["derive"] }
 
 [profile.release]

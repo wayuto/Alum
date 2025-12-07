@@ -34,11 +34,37 @@ impl<'a> Parser<'a> {
                 if self.lexer.current_token().token == TokenType::ELSE {
                     self.lexer.next_token();
                     let else_body = self.stmt();
+                    match cond.clone() {
+                        Expr::Val(val) => match val.value {
+                            Literal::Bool(b) => {
+                                if b {
+                                    return body;
+                                } else {
+                                    return else_body;
+                                }
+                            }
+                            _ => {}
+                        },
+                        _ => {}
+                    }
                     return Expr::If(If {
                         condition: Box::new(cond),
                         then: Box::new(body),
                         else_branch: Some(Box::new(else_body)),
                     });
+                }
+                match cond.clone() {
+                    Expr::Val(val) => match val.value {
+                        Literal::Bool(b) => {
+                            if b {
+                                return body;
+                            } else {
+                                return Expr::Stmt(Stmt { body: vec![] });
+                            }
+                        }
+                        _ => {}
+                    },
+                    _ => {}
                 }
                 Expr::If(If {
                     condition: Box::new(cond),
@@ -50,6 +76,26 @@ impl<'a> Parser<'a> {
                 self.lexer.next_token();
                 let cond = self.expr();
                 let body = self.stmt();
+                match cond.clone() {
+                    Expr::Val(val) => match val.value {
+                        Literal::Bool(b) => {
+                            if b {
+                                let lbl = format!("loop{:p}", &body);
+                                return Expr::Stmt(Stmt {
+                                    body: vec![
+                                        Expr::Label(Label { name: lbl.clone() }),
+                                        body,
+                                        Expr::Goto(Goto { label: lbl }),
+                                    ],
+                                });
+                            } else {
+                                return Expr::Stmt(Stmt { body: vec![] });
+                            }
+                        }
+                        _ => {}
+                    },
+                    _ => {}
+                }
                 Expr::While(While {
                     condition: Box::new(cond),
                     body: Box::new(body),
@@ -162,12 +208,53 @@ impl<'a> Parser<'a> {
         let mut left = self.comparison();
         while self.lexer.current_token().token == TokenType::LOGAND
             || self.lexer.current_token().token == TokenType::LOGOR
-            || self.lexer.current_token().token == TokenType::LOGNOT
             || self.lexer.current_token().token == TokenType::LOGXOR
         {
             let op = self.lexer.current_token().token;
             self.lexer.next_token();
             let right = self.comparison();
+            match (left.clone(), right.clone()) {
+                (Expr::Val(l), Expr::Val(r)) => match (l.value, r.value) {
+                    (Literal::Number(n), Literal::Number(m)) => match op.clone() {
+                        TokenType::LOGAND => {
+                            return Expr::Val(Val {
+                                value: Literal::Number(n & m),
+                            });
+                        }
+                        TokenType::LOGOR => {
+                            return Expr::Val(Val {
+                                value: Literal::Number(n | m),
+                            });
+                        }
+                        TokenType::LOGXOR => {
+                            return Expr::Val(Val {
+                                value: Literal::Number(n ^ m),
+                            });
+                        }
+                        _ => {}
+                    },
+                    (Literal::Bool(n), Literal::Bool(m)) => match op.clone() {
+                        TokenType::LOGAND => {
+                            return Expr::Val(Val {
+                                value: Literal::Bool(n & m),
+                            });
+                        }
+                        TokenType::LOGOR => {
+                            return Expr::Val(Val {
+                                value: Literal::Bool(n | m),
+                            });
+                        }
+                        TokenType::LOGXOR => {
+                            return Expr::Val(Val {
+                                value: Literal::Bool(n ^ m),
+                            });
+                        }
+                        _ => {}
+                    },
+                    (_, _) => {}
+                },
+                (_, _) => {}
+            }
             left = Expr::BinOp(BinOp {
                 left: Box::new(left),
                 right: Box::new(right),
@@ -190,6 +277,58 @@ impl<'a> Parser<'a> {
             let op = self.lexer.current_token().token;
             self.lexer.next_token();
             let right = self.additive();
+            match (left.clone(), right.clone()) {
+                (Expr::Val(l), Expr::Val(r)) => match (l.value, r.value) {
+                    (Literal::Number(n), Literal::Number(m)) => match op.clone() {
+                        TokenType::COMPEQ => {
+                            return Expr::Val(Val {
+                                value: Literal::Bool(n == m),
+                            });
+                        }
+                        TokenType::COMPNE => {
+                            return Expr::Val(Val {
+                                value: Literal::Bool(n != m),
+                            });
+                        }
+                        TokenType::COMPGT => {
+                            return Expr::Val(Val {
+                                value: Literal::Bool(n > m),
+                            });
+                        }
+                        TokenType::COMPGE => {
+                            return Expr::Val(Val {
+                                value: Literal::Bool(n >= m),
+                            });
+                        }
+                        TokenType::COMPLT => {
+                            return Expr::Val(Val {
+                                value: Literal::Bool(n < m),
+                            });
+                        }
+                        TokenType::COMPLE => {
+                            return Expr::Val(Val {
+                                value: Literal::Bool(n <= m),
+                            });
+                        }
+                        _ => {}
+                    },
+                    (Literal::Bool(n), Literal::Bool(m)) => match op.clone() {
+                        TokenType::COMPAND => {
+                            return Expr::Val(Val {
+                                value: Literal::Bool(n && m),
+                            });
+                        }
+                        TokenType::COMPOR => {
+                            return Expr::Val(Val {
+                                value: Literal::Bool(n || m),
+                            });
+                        }
+                        _ => {}
+                    },
+                    (_, _) => {}
+                },
+                (_, _) => {}
+            }
             left = Expr::BinOp(BinOp {
                 left: Box::new(left),
                 right: Box::new(right),
@@ -206,6 +345,25 @@ impl<'a> Parser<'a> {
             let op = self.lexer.current_token().token;
             self.lexer.next_token();
             let right = self.term();
+            match (left.clone(), right.clone()) {
+                (Expr::Val(l), Expr::Val(r)) => match (l.value, r.value) {
+                    (Literal::Number(n), Literal::Number(m)) => match op.clone() {
+                        TokenType::ADD => {
+                            return Expr::Val(Val {
+                                value: Literal::Number(n + m),
+                            });
+                        }
+                        TokenType::SUB => {
+                            return Expr::Val(Val {
+                                value: Literal::Number(n - m),
+                            });
+                        }
+                        _ => {}
+                    },
+                    (_, _) => {}
+                },
+                (_, _) => {}
+            }
             left = Expr::BinOp(BinOp {
                 left: Box::new(left),
                 right: Box::new(right),
@@ -222,6 +380,25 @@ impl<'a> Parser<'a> {
             let op = self.lexer.current_token().token;
             self.lexer.next_token();
             let right = self.factor();
+            match (left.clone(), right.clone()) {
+                (Expr::Val(l), Expr::Val(r)) => match (l.value, r.value) {
+                    (Literal::Number(n), Literal::Number(m)) => match op.clone() {
+                        TokenType::MUL => {
+                            return Expr::Val(Val {
+                                value: Literal::Number(n * m),
+                            });
+                        }
+                        TokenType::DIV => {
+                            return Expr::Val(Val {
+                                value: Literal::Number(n / m),
+                            });
+                        }
+                        _ => {}
+                    },
+                    (_, _) => {}
+                },
+                (_, _) => {}
+            }
             left = Expr::BinOp(BinOp {
                 left: Box::new(left),
                 right: Box::new(right),
@@ -244,6 +421,42 @@ impl<'a> Parser<'a> {
             }
             self.lexer.next_token();
             return expr;
+        } else if self.lexer.current_token().token == TokenType::NEG {
+            self.lexer.next_token();
+            let argument = self.expr();
+            match argument.clone() {
+                Expr::Val(val) => match val.value {
+                    Literal::Number(n) => {
+                        return Expr::Val(Val {
+                            value: Literal::Number(-n),
+                        });
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+            return Expr::UnaryOp(UnaryOp {
+                argument: Box::new(argument),
+                operator: TokenType::NEG,
+            });
+        } else if self.lexer.current_token().token == TokenType::LOGNOT {
+            self.lexer.next_token();
+            let argument = self.expr();
+            match argument.clone() {
+                Expr::Val(val) => match val.value {
+                    Literal::Bool(n) => {
+                        return Expr::Val(Val {
+                            value: Literal::Bool(!n),
+                        });
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+            return Expr::UnaryOp(UnaryOp {
+                argument: Box::new(argument),
+                operator: TokenType::LOGNOT,
+            });
         } else if self.lexer.current_token().token == TokenType::IDENT {
             let name = self.get_ident();
             self.lexer.next_token();

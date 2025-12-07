@@ -239,7 +239,7 @@ impl Gvm {
                     let value = self.stack.pop().unwrap();
                     match value {
                         Literal::Number(v) => {
-                            self.stack.push(Literal::Number(v + 1.0));
+                            self.stack.push(Literal::Number(v + 1));
                         }
                         Literal::Void => {
                             self.stack.push(Literal::Void);
@@ -253,7 +253,7 @@ impl Gvm {
                     let value = self.stack.pop().unwrap();
                     match value {
                         Literal::Number(v) => {
-                            self.stack.push(Literal::Number(v - 1.0));
+                            self.stack.push(Literal::Number(v - 1));
                         }
                         Literal::Void => {
                             self.stack.push(Literal::Void);
@@ -283,7 +283,7 @@ impl Gvm {
                     match (left, right) {
                         (Literal::Number(l), Literal::Number(r)) => {
                             self.stack
-                                .push(Literal::Number((l as isize & r as isize) as f64));
+                                .push(Literal::Number((l as isize & r as isize) as i64));
                         }
                         (Literal::Bool(l), Literal::Bool(r)) => {
                             self.stack.push(Literal::Bool(l & r));
@@ -302,7 +302,7 @@ impl Gvm {
                     match (left, right) {
                         (Literal::Number(l), Literal::Number(r)) => {
                             self.stack
-                                .push(Literal::Number((l as isize | r as isize) as f64));
+                                .push(Literal::Number((l as isize | r as isize) as i64));
                         }
                         (Literal::Bool(l), Literal::Bool(r)) => {
                             self.stack.push(Literal::Bool(l | r));
@@ -321,7 +321,7 @@ impl Gvm {
                     match (left, right) {
                         (Literal::Number(l), Literal::Number(r)) => {
                             self.stack
-                                .push(Literal::Number((l as isize ^ r as isize) as f64));
+                                .push(Literal::Number((l as isize ^ r as isize) as i64));
                         }
                         (Literal::Bool(l), Literal::Bool(r)) => {
                             self.stack.push(Literal::Bool(l ^ r));

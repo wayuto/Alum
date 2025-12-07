@@ -42,13 +42,12 @@ pub enum TokenType {
     CALL,
     RETURN,
     IDENT,
-    EVAL,
     EOF,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Literal {
-    Number(f64),
+    Number(i64),
     Bool(bool),
     Str(String),
     Void,

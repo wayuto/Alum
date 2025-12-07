@@ -22,8 +22,8 @@ pub struct Compiler {
     data: String,
     scope_stack: Vec<Scope>,
     base_offset: u32,
-    str_label: u32,
     in_function: bool,
+    str_cache: HashMap<String, String>,
 }
 
 impl Compiler {
@@ -33,8 +33,8 @@ impl Compiler {
             data: String::new(),
             scope_stack: Vec::new(),
             base_offset: 1,
-            str_label: 0,
             in_function: false,
+            str_cache: HashMap::new(),
         }
     }
 
@@ -91,6 +91,9 @@ impl Compiler {
     pub fn compile(&mut self, program: Program) -> String {
         self.enter_scope(true);
         assemble!(self.text, "section .text");
+        assemble!(self.text, "extern itoa");
+        assemble!(self.text, "extern atoi");
+        assemble!(self.text, "extern puts");
         assemble!(self.text, "global _start");
 
         for expr in program.body.iter() {
@@ -113,10 +116,44 @@ impl Compiler {
             result.push_str(&self.data);
         }
         result.push_str(&self.text);
-        result.trim().to_string()
+        self.optim(result.trim().to_string())
     }
 
-    fn compile_expr(&mut self, expr: Expr) {
+    fn optim(&mut self, src: String) -> String {
+        let lines: Vec<String> = src.lines().map(|s| s.to_string()).collect();
+        let mut result = Vec::new();
+        let mut i = 0;
+
+        while i < lines.len() {
+            let current = lines[i].trim();
+
+            if let Some(push_reg) = current.strip_prefix("push ") {
+                if i + 1 < lines.len() {
+                    let next = lines[i + 1].trim();
+
+                    if let Some(pop_reg) = next.strip_prefix("pop ") {
+                        let push_reg = push_reg.trim();
+                        let pop_reg = pop_reg.trim();
+
+                        if push_reg == pop_reg {
+                            i += 2;
+                            continue;
+                        } else {
+                            result.push(format!("mov {}, {}", pop_reg, push_reg));
+                            i += 2;
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            result.push(lines[i].clone());
+            i += 1;
+        }
+
+        result.join("\n")
+    }
+    fn compile_expr(&mut self, expr: Expr) -> () {
         match expr {
             Expr::Val(val) => match val.value {
                 Literal::Number(n) => {
@@ -127,11 +164,21 @@ impl Compiler {
                     if self.data.is_empty() {
                         assemble!(self.data, "section .data");
                     }
-                    let label = format!("str_{}", self.str_label);
-                    self.str_label += 1;
-                    assemble!(self.data, "{} db {:?}, 0", label, s);
+                    if self.str_cache.contains_key(&s) {
+                        assemble!(
+                            self.text,
+                            "lea rax, [rel {}]",
+                            self.str_cache.get(&s).unwrap()
+                        );
+                        assemble!(self.text, "push rax");
+                        return;
+                    }
+                    let label = format!("str_{:p}", &s.clone());
+                    let raw = format!("{:?}", &s);
+                    assemble!(self.data, "{} db `{}`, 0", label, &raw[1..&raw.len() - 1]);
                     assemble!(self.text, "lea rax, [rel {}]", label);
                     assemble!(self.text, "push rax");
+                    self.str_cache.insert(s, label);
                 }
                 Literal::Bool(b) => {
                     let val = if b { 1 } else { 0 };
@@ -225,11 +272,27 @@ impl Compiler {
                         assemble!(self.text, "movzx rbx, bl");
                         assemble!(self.text, "xor rax, rbx");
                     }
+                    TokenType::LOGNOT => {
+                        assemble!(self.text, "not rax")
+                    }
                     _ => {}
                 }
                 assemble!(self.text, "push rax");
             }
             Expr::UnaryOp(unary) => {
+                match *unary.argument.clone() {
+                    Expr::Var(var) => {
+                        let name = var.name;
+                        if unary.operator == TokenType::INC {
+                            let offset = self.find_var(&name).unwrap();
+                            assemble!(self.text, "inc qword [rbp - {}]", offset);
+                        } else if unary.operator == TokenType::DEC {
+                            let offset = self.find_var(&name).unwrap();
+                            assemble!(self.text, "dec qword [rbp - {}]", offset);
+                        }
+                    }
+                    _ => {}
+                }
                 self.compile_expr(*unary.argument);
                 assemble!(self.text, "pop rax");
 
@@ -292,7 +355,6 @@ impl Compiler {
 
                 assemble!(self.text, "push rbp");
                 assemble!(self.text, "mov rbp, rsp");
-                assemble!(self.text, "sub rsp, 32");
 
                 self.enter_scope(true);
 
@@ -301,7 +363,7 @@ impl Compiler {
                 local_slots += 8;
 
                 if local_slots > 0 {
-                    assemble!(self.text, "sub rsp, {}", local_slots * 8);
+                    assemble!(self.text, "sub rsp, {}", local_slots * 8 + 32);
                 }
 
                 let regs = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"];
@@ -316,7 +378,23 @@ impl Compiler {
                     }
                 }
 
-                self.compile_expr(*decl.body);
+                self.compile_expr(*decl.body.clone());
+
+                match *decl.body.clone() {
+                    Expr::Stmt(stmt) => {
+                        let last = stmt.body.last().unwrap();
+                        if !matches!(last, &Expr::Return(_)) {
+                            assemble!(self.text, "xor rax, rax");
+                            assemble!(self.text, "leave");
+                            assemble!(self.text, "ret");
+                        }
+                    }
+                    _ => {
+                        assemble!(self.text, "xor rax, rax");
+                        assemble!(self.text, "leave");
+                        assemble!(self.text, "ret");
+                    }
+                }
 
                 self.exit_scope();
             }
@@ -325,7 +403,7 @@ impl Compiler {
                     self.compile_expr(*val);
                     assemble!(self.text, "pop rax");
                 } else {
-                    assemble!(self.text, "mov rax, 0");
+                    assemble!(self.text, "xor rax, rax");
                 }
                 assemble!(self.text, "leave");
                 assemble!(self.text, "ret");
@@ -351,8 +429,6 @@ impl Compiler {
                 for i in 0..arg_cnt.min(6) {
                     assemble!(self.text, "pop {}", regs[i]);
                 }
-
-                assemble!(self.text, "xor eax, eax");
 
                 assemble!(self.text, "call {}", call.name);
 
@@ -390,8 +466,8 @@ impl Compiler {
             }
             Expr::If(if_expr) => {
                 let id = self.text.len();
-                let else_label = format!("if_else_{}", id);
-                let end_label = format!("if_end_{}", id);
+                let else_label = format!("if_else_{:x}", id);
+                let end_label = format!("if_end_{:x}", id);
 
                 self.compile_expr(*if_expr.condition.clone());
 
@@ -419,6 +495,18 @@ impl Compiler {
                 }
 
                 assemble!(self.text, ".{}:", end_label);
+            }
+            Expr::Exit(exit) => {
+                self.compile_expr(*exit.code);
+                assemble!(self.text, "mov rdi, rax");
+                assemble!(self.text, "mov rax, 60");
+                assemble!(self.text, "syscall");
+            }
+            Expr::Label(label) => {
+                assemble!(self.text, "{}:", label.name);
+            }
+            Expr::Goto(goto) => {
+                assemble!(self.text, "jmp {}", goto.label);
             }
             _ => {}
         }
