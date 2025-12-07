@@ -4,7 +4,7 @@ use bincode::{
 };
 
 use crate::{
-    compiler::{Bytecode, Compiler},
+    bytecode::{Bytecode, Compiler},
     lexer::Lexer,
     parser::Parser,
     preprocessor::Preprocessor,
@@ -35,14 +35,7 @@ pub fn compile(source: String) -> () {
 
     let encoded: Vec<u8> = encode_to_vec(&bytecode, bincode::config::standard()).unwrap();
     match std::fs::write(&output, encoded.clone()) {
-        Ok(_) => {
-            println!(
-                "Compiled {} to {} ({} bytes)",
-                source,
-                output,
-                encoded.len()
-            )
-        }
+        Ok(_) => {}
         Err(e) => {
             println!("{}", e)
         }

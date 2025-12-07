@@ -1,6 +1,5 @@
 use crate::{
-    compiler::Compiler,
-    gvm::Gvm,
+    bytecode::Gvm,
     lexer::Lexer,
     parser::Parser,
     preprocessor::Preprocessor,
@@ -11,9 +10,8 @@ use std::{fs, path::Path};
 
 pub mod ast;
 pub mod bytecode;
-pub mod compiler;
-pub mod gvm;
 pub mod lexer;
+pub mod native;
 pub mod parser;
 pub mod preprocessor;
 pub mod serialize;
@@ -31,10 +29,16 @@ fn main() {
                 .help("Print AST of the Gos source file"),
         )
         .arg(
+            Arg::new("bytecode")
+                .short('b')
+                .long("bytecode")
+                .help("Compile the Gos source file to bytecode"),
+        )
+        .arg(
             Arg::new("compile")
                 .short('c')
                 .long("compile")
-                .help("Compile the Gos source file"),
+                .help("Compile the Gos source file to native"),
         )
         .arg(
             Arg::new("preprocess")
@@ -80,7 +84,7 @@ fn main() {
                 let lexer = Lexer::new(code.as_str());
                 let mut parser = Parser::new(lexer);
                 let ast = parser.parse();
-                let mut compiler = Compiler::new();
+                let mut compiler = bytecode::Compiler::new();
                 let bytecode = compiler.compile(ast);
                 let mut gvm = Gvm::new(bytecode);
                 gvm.run();
@@ -111,7 +115,7 @@ fn main() {
         let mut preprocessor = Preprocessor::new(src.as_str(), path);
         let code = preprocessor.preprocess();
         println!("{}", code);
-    } else if let Some(file) = matches.get_one::<String>("compile") {
+    } else if let Some(file) = matches.get_one::<String>("bytecode") {
         compile(file.to_string());
     } else if let Some(file) = matches.get_one::<String>("disassemble") {
         let ext = Path::new(file)
@@ -135,10 +139,56 @@ fn main() {
                 let lexer = Lexer::new(code.as_str());
                 let mut parser = Parser::new(lexer);
                 let ast = parser.parse();
-                let mut compiler = Compiler::new();
+                let mut compiler = bytecode::Compiler::new();
                 let bytecode = compiler.compile(ast);
                 bytecode.print();
             }
         }
+    } else if let Some(file) = matches.get_one::<String>("compile") {
+        let src = fs::read_to_string(file).unwrap();
+        let path = Path::new(&file)
+            .parent()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        let mut preprocessor = Preprocessor::new(&src, path);
+        let code = preprocessor.preprocess();
+        let lexer = Lexer::new(&code);
+        let mut parser = Parser::new(lexer);
+        let ast = parser.parse();
+        let mut compiler = native::Compiler::new();
+        let assembly = compiler.compile(ast);
+
+        let stem = if let Some(idx) = file.rfind('.') {
+            &file[..idx]
+        } else {
+            file.as_str()
+        };
+        let asm_file = format!("{}.s", stem);
+        let obj_file = format!("{}.o", stem);
+        let bin_file = stem.to_string();
+
+        fs::write(&asm_file, &assembly).unwrap();
+        let nasm_status = std::process::Command::new("nasm")
+            .args(&["-f", "elf64", "-o", &obj_file, &asm_file])
+            .status()
+            .expect("Failed to run nasm");
+        if !nasm_status.success() {
+            eprintln!("nasm failed");
+            std::process::exit(1);
+        }
+
+        let ld_status = std::process::Command::new("ld")
+            .args(&["-o", &bin_file, &obj_file])
+            .status()
+            .expect("Failed to run ld");
+        if !ld_status.success() {
+            eprintln!("ld failed");
+            std::process::exit(1);
+        }
+
+        let _ = fs::remove_file(&asm_file);
+        let _ = fs::remove_file(&obj_file);
     }
 }

@@ -108,7 +108,6 @@ impl<'a> Parser<'a> {
             TokenType::EXIT => {
                 self.lexer.next_token();
                 let status = self.expr();
-                self.lexer.next_token();
                 Expr::Exit(Exit {
                     code: Box::new(status),
                 })

@@ -1,6 +1,6 @@
 use std::{io::stdin, process::exit};
 
-use crate::{bytecode::Op, compiler::Bytecode, token::Literal};
+use crate::{bytecode::Bytecode, bytecode::Op, token::Literal};
 
 struct CallStack {
     return_ip: usize,
