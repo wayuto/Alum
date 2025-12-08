@@ -509,6 +509,9 @@ impl Compiler {
             Expr::Goto(goto) => {
                 assemble!(self.text, "jmp {}", goto.label);
             }
+            Expr::Extern(ext) => {
+                assemble!(self.text, "extern {}", ext.func);
+            }
             _ => {}
         }
     }

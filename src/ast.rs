@@ -28,6 +28,7 @@ pub enum Expr {
     In(In),
     Label(Label),
     Goto(Goto),
+    Extern(Extern),
     Exit(Exit),
 }
 
@@ -120,4 +121,9 @@ pub struct Goto {
 #[derive(Debug, Clone)]
 pub struct Exit {
     pub code: Box<Expr>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Extern {
+    pub func: String,
 }

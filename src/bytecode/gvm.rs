@@ -7,7 +7,7 @@ struct CallStack {
     base_slot: usize,
 }
 
-pub struct Gvm {
+pub struct GVM {
     ip: usize,
     stack: Vec<Literal>,
     slots: Vec<Literal>,
@@ -16,9 +16,9 @@ pub struct Gvm {
     bytecode: Bytecode,
 }
 
-impl Gvm {
+impl GVM {
     pub fn new(bytecode: Bytecode) -> Self {
-        Gvm {
+        GVM {
             ip: 0,
             stack: Vec::new(),
             slots: vec![Literal::Void; bytecode.max_slot as usize],
@@ -235,6 +235,7 @@ impl Gvm {
                         }
                     }
                 }
+                Op::POS => {}
                 Op::INC => {
                     let value = self.stack.pop().unwrap();
                     match value {
@@ -421,7 +422,6 @@ impl Gvm {
                 Op::HALT => {
                     return;
                 }
-                _ => {}
             }
         }
     }

@@ -391,6 +391,9 @@ impl Compiler {
                     }
                 }
             }
+            Expr::Extern(_) => {
+                panic!("Only supported in Gos/Native");
+            }
         }
     }
 

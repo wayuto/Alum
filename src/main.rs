@@ -1,11 +1,11 @@
 use crate::{
-    bytecode::Gvm,
+    bytecode::GVM,
     lexer::Lexer,
     parser::Parser,
     preprocessor::Preprocessor,
     serialize::{compile, load},
 };
-use clap::{Arg, Command};
+use clap::{Arg, ArgAction, Command};
 use std::{fs, path::Path};
 
 pub mod ast;
@@ -17,10 +17,177 @@ pub mod preprocessor;
 pub mod serialize;
 pub mod token;
 
+fn run_bytecode(file: &String) -> () {
+    let ext = Path::new(file)
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_lowercase());
+    match ext.as_deref() {
+        Some("gbc") => {
+            let bytecode = load(file.to_string());
+            let mut gvm = GVM::new(bytecode);
+            gvm.run();
+        }
+        _ => {
+            let src = fs::read_to_string(file).unwrap();
+            let path = Path::new(&file.clone())
+                .parent()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_string();
+            let mut preprocessor = Preprocessor::new(src.as_str(), path);
+            let code = preprocessor.preprocess();
+            let lexer = Lexer::new(code.as_str());
+            let mut parser = Parser::new(lexer);
+            let ast = parser.parse();
+            let mut compiler = bytecode::Compiler::new();
+            let bytecode = compiler.compile(ast);
+            let mut gvm = GVM::new(bytecode);
+            gvm.run();
+        }
+    }
+}
+
+fn print_ast(file: &String) -> () {
+    let src = fs::read_to_string(file).unwrap();
+    let path = Path::new(&file.clone())
+        .parent()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    let mut preprocessor = Preprocessor::new(src.as_str(), path);
+    let code = preprocessor.preprocess();
+    let lexer = Lexer::new(code.as_str());
+    let mut parser = Parser::new(lexer);
+    let ast = parser.parse();
+    println!("{:#?}", ast);
+}
+
+fn print_pred(file: &String) -> () {
+    let src = fs::read_to_string(file).unwrap();
+    let path = Path::new(&file.clone())
+        .parent()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    let mut preprocessor = Preprocessor::new(src.as_str(), path);
+    let code = preprocessor.preprocess();
+    println!("{}", code);
+}
+
+fn print_bytecode(file: &String) -> () {
+    let ext = Path::new(file)
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_lowercase());
+    match ext.as_deref() {
+        Some("gbc") => {
+            load(file.to_string()).print();
+        }
+        _ => {
+            let src = fs::read_to_string(file).unwrap();
+            let path = Path::new(&file.clone())
+                .parent()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_string();
+            let mut preprocessor = Preprocessor::new(src.as_str(), path);
+            let code = preprocessor.preprocess();
+            let lexer = Lexer::new(code.as_str());
+            let mut parser = Parser::new(lexer);
+            let ast = parser.parse();
+            let mut compiler = bytecode::Compiler::new();
+            let bytecode = compiler.compile(ast);
+            bytecode.print();
+        }
+    }
+}
+
+fn compile_native(file: &String, typ: &str, is_link: bool) -> () {
+    let src = fs::read_to_string(file).unwrap();
+    let path = Path::new(&file)
+        .parent()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    let mut preprocessor = Preprocessor::new(&src, path);
+    let code = preprocessor.preprocess();
+    let lexer = Lexer::new(&code);
+    let mut parser = Parser::new(lexer);
+    let ast = parser.parse();
+    let mut compiler = native::Compiler::new();
+    let assembly = compiler.compile(ast);
+
+    let stem = if let Some(idx) = file.rfind('.') {
+        &file[..idx]
+    } else {
+        file.as_str()
+    };
+    let asm_file = format!("{}.s", stem);
+    let obj_file = format!("{}.o", stem);
+    let bin_file = stem.to_string();
+
+    match typ {
+        "asm" => {
+            fs::write(&asm_file, &assembly).unwrap();
+        }
+        "obj" => {
+            fs::write(&asm_file, &assembly).unwrap();
+            let nasm_status = std::process::Command::new("nasm")
+                .args(&["-f", "elf64", "-o", &obj_file, &asm_file])
+                .status()
+                .expect("Failed to run nasm");
+            if !nasm_status.success() {
+                let _ = fs::remove_file(&asm_file);
+                println!("nasm failed");
+                std::process::exit(1);
+            }
+            let _ = fs::remove_file(&asm_file);
+        }
+        "bin" => {
+            fs::write(&asm_file, &assembly).unwrap();
+            let nasm_status = std::process::Command::new("nasm")
+                .args(&["-f", "elf64", "-o", &obj_file, &asm_file])
+                .status()
+                .expect("Failed to run nasm");
+            if !nasm_status.success() {
+                println!("nasm failed");
+                std::process::exit(1);
+            }
+
+            let lib_path = format!("/tmp/lib.o");
+            let mut ld_args = vec!["-o", &bin_file, &lib_path, &obj_file];
+            if is_link {
+                ld_args.push("-lc");
+                ld_args.push("-I/lib64/ld-linux-x86-64.so.2");
+            }
+            let ld_status = std::process::Command::new("ld")
+                .args(&ld_args)
+                .status()
+                .expect("Failed to run ld");
+            if !ld_status.success() {
+                let _ = fs::remove_file(&asm_file);
+                let _ = fs::remove_file(&obj_file);
+                println!("ld failed");
+                std::process::exit(1);
+            }
+
+            let _ = fs::remove_file(&asm_file);
+            let _ = fs::remove_file(&obj_file);
+        }
+        _ => {}
+    }
+}
+
 fn main() {
     let cmd = Command::new("gos")
-        .version("0.2.7#rust")
-        .about("Gos interpreter implemented in Rust")
+        .version("0.3.0")
+        .about("The Gos programming language")
         .arg(Arg::new("FILE").help("Run the Gos source/bytecode file"))
         .arg(
             Arg::new("ast")
@@ -39,6 +206,24 @@ fn main() {
                 .short('c')
                 .long("compile")
                 .help("Compile the Gos source file to native"),
+        )
+        .arg(
+            Arg::new("assembly")
+                .short('s')
+                .help("Compile the Gos source file to assembly")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("object")
+                .short('o')
+                .help("Compile the Gos source file to object")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("libc")
+                .short('l')
+                .help("Link the libc when compiling to native")
+                .action(ArgAction::SetTrue),
         )
         .arg(
             Arg::new("preprocess")
@@ -61,134 +246,23 @@ fn main() {
     let matches = cmd.get_matches();
 
     if let Some(file) = matches.get_one::<String>("FILE") {
-        let ext = Path::new(file)
-            .extension()
-            .and_then(|s| s.to_str())
-            .map(|s| s.to_lowercase());
-        match ext.as_deref() {
-            Some("gbc") => {
-                let bytecode = load(file.to_string());
-                let mut gvm = Gvm::new(bytecode);
-                gvm.run();
-            }
-            _ => {
-                let src = fs::read_to_string(file).unwrap();
-                let path = Path::new(&file.clone())
-                    .parent()
-                    .unwrap()
-                    .to_str()
-                    .unwrap()
-                    .to_string();
-                let mut preprocessor = Preprocessor::new(src.as_str(), path);
-                let code = preprocessor.preprocess();
-                let lexer = Lexer::new(code.as_str());
-                let mut parser = Parser::new(lexer);
-                let ast = parser.parse();
-                let mut compiler = bytecode::Compiler::new();
-                let bytecode = compiler.compile(ast);
-                let mut gvm = Gvm::new(bytecode);
-                gvm.run();
-            }
-        }
+        run_bytecode(file);
     } else if let Some(file) = matches.get_one::<String>("ast") {
-        let src = fs::read_to_string(file).unwrap();
-        let path = Path::new(&file.clone())
-            .parent()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .to_string();
-        let mut preprocessor = Preprocessor::new(src.as_str(), path);
-        let code = preprocessor.preprocess();
-        let lexer = Lexer::new(code.as_str());
-        let mut parser = Parser::new(lexer);
-        let ast = parser.parse();
-        println!("{:#?}", ast);
+        print_ast(file);
     } else if let Some(file) = matches.get_one::<String>("preprocess") {
-        let src = fs::read_to_string(file).unwrap();
-        let path = Path::new(&file.clone())
-            .parent()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .to_string();
-        let mut preprocessor = Preprocessor::new(src.as_str(), path);
-        let code = preprocessor.preprocess();
-        println!("{}", code);
+        print_pred(file);
     } else if let Some(file) = matches.get_one::<String>("bytecode") {
         compile(file.to_string());
     } else if let Some(file) = matches.get_one::<String>("disassemble") {
-        let ext = Path::new(file)
-            .extension()
-            .and_then(|s| s.to_str())
-            .map(|s| s.to_lowercase());
-        match ext.as_deref() {
-            Some("gbc") => {
-                load(file.to_string()).print();
-            }
-            _ => {
-                let src = fs::read_to_string(file).unwrap();
-                let path = Path::new(&file.clone())
-                    .parent()
-                    .unwrap()
-                    .to_str()
-                    .unwrap()
-                    .to_string();
-                let mut preprocessor = Preprocessor::new(src.as_str(), path);
-                let code = preprocessor.preprocess();
-                let lexer = Lexer::new(code.as_str());
-                let mut parser = Parser::new(lexer);
-                let ast = parser.parse();
-                let mut compiler = bytecode::Compiler::new();
-                let bytecode = compiler.compile(ast);
-                bytecode.print();
-            }
-        }
+        print_bytecode(file);
     } else if let Some(file) = matches.get_one::<String>("compile") {
-        let src = fs::read_to_string(file).unwrap();
-        let path = Path::new(&file)
-            .parent()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .to_string();
-        let mut preprocessor = Preprocessor::new(&src, path);
-        let code = preprocessor.preprocess();
-        let lexer = Lexer::new(&code);
-        let mut parser = Parser::new(lexer);
-        let ast = parser.parse();
-        let mut compiler = native::Compiler::new();
-        let assembly = compiler.compile(ast);
-
-        let stem = if let Some(idx) = file.rfind('.') {
-            &file[..idx]
+        if matches.get_flag("assembly") {
+            compile_native(file, "asm", false);
+        } else if matches.get_flag("object") {
+            compile_native(file, "obj", false);
         } else {
-            file.as_str()
-        };
-        let asm_file = format!("{}.s", stem);
-        let obj_file = format!("{}.o", stem);
-        let bin_file = stem.to_string();
-
-        fs::write(&asm_file, &assembly).unwrap();
-        let nasm_status = std::process::Command::new("nasm")
-            .args(&["-f", "elf64", "-o", &obj_file, &asm_file])
-            .status()
-            .expect("Failed to run nasm");
-        if !nasm_status.success() {
-            eprintln!("nasm failed");
-            std::process::exit(1);
+            let is_link = matches.get_flag("libc");
+            compile_native(file, "bin", is_link);
         }
-        let lib_path = format!("/tmp/lib.o");
-        let ld_status = std::process::Command::new("ld")
-            .args(&["-o", &bin_file, &lib_path, &obj_file])
-            .status()
-            .expect("Failed to run ld");
-        if !ld_status.success() {
-            eprintln!("ld failed");
-            std::process::exit(1);
-        }
-
-        let _ = fs::remove_file(&asm_file);
-        let _ = fs::remove_file(&obj_file);
     }
 }

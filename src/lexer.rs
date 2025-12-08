@@ -101,7 +101,7 @@ impl<'a> Lexer<'a> {
             };
             return;
         } else if self.current().is_alphabetic() {
-            let ident = self.parse_ident();
+            let ident: String = self.parse_ident();
             match ident.as_str() {
                 "true" => {
                     self.tok = Token {
@@ -178,6 +178,12 @@ impl<'a> Lexer<'a> {
                 "exit" => {
                     self.tok = Token {
                         token: TokenType::EXIT,
+                        value: None,
+                    }
+                }
+                "extern" => {
+                    self.tok = Token {
+                        token: TokenType::EXTERN,
                         value: None,
                     }
                 }

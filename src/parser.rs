@@ -1,7 +1,7 @@
 use crate::{
     ast::{
-        BinOp, Exit, Expr, FuncCall, FuncDecl, Goto, If, In, Label, Out, Program, Return, Stmt,
-        UnaryOp, Val, Var, VarDecl, VarMod, While,
+        BinOp, Exit, Expr, Extern, FuncCall, FuncDecl, Goto, If, In, Label, Out, Program, Return,
+        Stmt, UnaryOp, Val, Var, VarDecl, VarMod, While,
     },
     lexer::Lexer,
     token::{Literal, TokenType},
@@ -197,6 +197,12 @@ impl<'a> Parser<'a> {
                 Expr::Return(Return {
                     value: Some(Box::new(value)),
                 })
+            }
+            TokenType::EXTERN => {
+                self.lexer.next_token();
+                let func = self.get_ident();
+                self.lexer.next_token();
+                Expr::Extern(Extern { func })
             }
             TokenType::IF => self.ctrl(),
             TokenType::WHILE => self.ctrl(),
