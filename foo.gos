@@ -1,0 +1,6 @@
+extern puts
+
+pub fun main() {
+    puts("Hello world!")
+    return 0
+} 
