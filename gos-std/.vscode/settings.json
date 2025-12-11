@@ -1,5 +1,0 @@
-{
-    "rust-analyzer.check.allTargets": false,
-    "rust-analyzer.cargo.allTargets": false,
-    "rust-analyzer.checkOnSave": true
-}
