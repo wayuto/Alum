@@ -1,3 +1,5 @@
 extern write
+extern read
 extern print
 extern println
+extern input

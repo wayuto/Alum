@@ -1,6 +1,9 @@
 use std::{iter::Peekable, str::Chars};
 
-use crate::token::{Literal, Token, TokenType};
+use crate::{
+    error::GosError,
+    token::{Literal, Token, TokenType},
+};
 
 #[derive(Debug, Clone)]
 pub struct Lexer<'a> {
@@ -14,6 +17,8 @@ impl<'a> Lexer<'a> {
             tok: Token {
                 token: TokenType::EOF,
                 value: None,
+                row: 1,
+                col: 1,
             },
             src: src.chars().peekable(),
         }
@@ -25,18 +30,21 @@ impl<'a> Lexer<'a> {
 
     fn bump(&mut self) -> () {
         self.src.next();
+        self.tok.col += 1;
     }
 
     fn skip_spaces(&mut self) -> () {
         while self.current() == ' ' || self.current() == '\t' || self.current() == '\n' {
+            if self.current() == '\n' {
+                self.tok.row += 1;
+                self.tok.col = 0;
+            }
             self.bump();
         }
     }
 
     fn parse_number(&mut self) -> u64 {
         let mut int_part = 0u64;
-        // let mut frac_part = 0;
-        // let mut frac_div = 1;
 
         while self.current().is_numeric() {
             int_part = int_part * 10 + self.current().to_digit(10).unwrap() as u64;
@@ -44,20 +52,11 @@ impl<'a> Lexer<'a> {
         }
 
         if self.current() == '.' {
-            // self.bump();
-            // if !self.current().is_numeric() {
-            //     panic!("Lexer: Invalid number: expected digit after '.'")
-            // }
-            // while self.current().is_numeric() {
-            //     frac_div *= 10;
-            //     frac_part = frac_part * 10 + self.current().to_digit(10).unwrap();
-            //     self.bump();
-            // }
-
-            panic!("Lexer: Float number hasn't been implemented")
+            let mut err = GosError::new(self.tok.row, self.tok.col);
+            err.unimplemented("float number");
+            err.panic();
         }
 
-        // int_part as f64 + frac_part as f64 / frac_div as f64
         int_part
     }
 
@@ -91,6 +90,8 @@ impl<'a> Lexer<'a> {
             self.tok = Token {
                 token: TokenType::EOF,
                 value: None,
+                row: self.tok.row,
+                col: self.tok.col,
             };
             return;
         } else if self.current().is_numeric() {
@@ -98,6 +99,8 @@ impl<'a> Lexer<'a> {
             self.tok = Token {
                 token: TokenType::LITERAL,
                 value: Some(Literal::Number(val as i64)),
+                row: self.tok.row,
+                col: self.tok.col,
             };
             return;
         } else if self.current().is_alphabetic() {
@@ -107,84 +110,104 @@ impl<'a> Lexer<'a> {
                     self.tok = Token {
                         token: TokenType::LITERAL,
                         value: Some(Literal::Bool(true)),
+                        row: self.tok.row,
+                        col: self.tok.col,
                     };
                 }
                 "false" => {
                     self.tok = Token {
                         token: TokenType::LITERAL,
                         value: Some(Literal::Bool(false)),
+                        row: self.tok.row,
+                        col: self.tok.col,
                     };
                 }
                 "null" => {
                     self.tok = Token {
                         token: TokenType::LITERAL,
                         value: Some(Literal::Void),
+                        row: self.tok.row,
+                        col: self.tok.col,
                     };
                 }
                 "let" => {
                     self.tok = Token {
                         token: TokenType::VARDECL,
                         value: None,
+                        row: self.tok.row,
+                        col: self.tok.col,
                     };
                 }
                 "fun" => {
                     self.tok = Token {
                         token: TokenType::FUNCDECL,
                         value: None,
+                        row: self.tok.row,
+                        col: self.tok.col,
                     }
                 }
                 "return" => {
                     self.tok = Token {
                         token: TokenType::RETURN,
                         value: None,
+                        row: self.tok.row,
+                        col: self.tok.col,
                     }
                 }
                 "if" => {
                     self.tok = Token {
                         token: TokenType::IF,
                         value: None,
+                        row: self.tok.row,
+                        col: self.tok.col,
                     }
                 }
                 "else" => {
                     self.tok = Token {
                         token: TokenType::ELSE,
                         value: None,
+                        row: self.tok.row,
+                        col: self.tok.col,
                     }
                 }
                 "while" => {
                     self.tok = Token {
                         token: TokenType::WHILE,
                         value: None,
+                        row: self.tok.row,
+                        col: self.tok.col,
                     }
                 }
                 "goto" => {
                     self.tok = Token {
                         token: TokenType::GOTO,
                         value: None,
-                    }
-                }
-                "exit" => {
-                    self.tok = Token {
-                        token: TokenType::EXIT,
-                        value: None,
+                        row: self.tok.row,
+                        col: self.tok.col,
                     }
                 }
                 "extern" => {
                     self.tok = Token {
                         token: TokenType::EXTERN,
                         value: None,
+                        row: self.tok.row,
+                        col: self.tok.col,
                     }
                 }
                 "pub" => {
                     self.tok = Token {
                         token: TokenType::PUB,
                         value: None,
+                        row: self.tok.row,
+                        col: self.tok.col,
                     }
                 }
                 _ => {
                     self.tok = Token {
                         token: TokenType::IDENT,
                         value: Some(Literal::Str(ident)),
+                        row: self.tok.row,
+                        col: self.tok.col,
                     }
                 }
             }
@@ -198,7 +221,7 @@ impl<'a> Lexer<'a> {
                         self.bump();
                         break;
                     }
-                    '\0' => panic!("Lexer: unterminated string"),
+                    '\0' => {}
                     '\\' => {
                         self.bump();
                         match self.current() {
@@ -222,7 +245,7 @@ impl<'a> Lexer<'a> {
                                 s.push('"');
                                 self.bump();
                             }
-                            c => panic!("Lexer: invalid escape \\{}", c),
+                            _ => self.bump(),
                         }
                     }
                     c => {
@@ -234,6 +257,8 @@ impl<'a> Lexer<'a> {
             self.tok = Token {
                 token: TokenType::LITERAL,
                 value: Some(Literal::Str(s)),
+                row: self.tok.row,
+                col: self.tok.col,
             };
             return;
         } else if self.current() == '\'' {
@@ -241,7 +266,9 @@ impl<'a> Lexer<'a> {
             let mut s = String::new();
             while self.current() != '\'' {
                 if self.current() == '\0' {
-                    panic!("Lexer: Expected: \"'\"")
+                    let mut err = GosError::new(self.tok.row, self.tok.col);
+                    err.unexpected_char(Some('\\'), self.current());
+                    err.panic();
                 }
                 s.push(self.current());
                 self.bump();
@@ -250,6 +277,8 @@ impl<'a> Lexer<'a> {
             self.tok = Token {
                 token: TokenType::LITERAL,
                 value: Some(Literal::Str(s)),
+                row: self.tok.row,
+                col: self.tok.col,
             };
             return;
         } else if self.current() == '+' {
@@ -262,6 +291,8 @@ impl<'a> Lexer<'a> {
                 self.tok = Token {
                     token: TokenType::INC,
                     value: None,
+                    row: self.tok.row,
+                    col: self.tok.col,
                 };
                 self.bump();
                 return;
@@ -269,6 +300,8 @@ impl<'a> Lexer<'a> {
             self.tok = Token {
                 token: TokenType::ADD,
                 value: None,
+                row: self.tok.row,
+                col: self.tok.col,
             };
             return;
         } else if self.current() == '-' {
@@ -276,6 +309,8 @@ impl<'a> Lexer<'a> {
                 self.tok = Token {
                     token: TokenType::NEG,
                     value: None,
+                    row: self.tok.row,
+                    col: self.tok.col,
                 };
                 self.bump();
                 return;
@@ -285,6 +320,8 @@ impl<'a> Lexer<'a> {
                 self.tok = Token {
                     token: TokenType::DEC,
                     value: None,
+                    row: self.tok.row,
+                    col: self.tok.col,
                 };
                 self.bump();
                 return;
@@ -292,12 +329,16 @@ impl<'a> Lexer<'a> {
             self.tok = Token {
                 token: TokenType::SUB,
                 value: None,
+                row: self.tok.row,
+                col: self.tok.col,
             };
             return;
         } else if self.current() == '*' {
             self.tok = Token {
                 token: TokenType::MUL,
                 value: None,
+                row: self.tok.row,
+                col: self.tok.col,
             };
             self.bump();
             return;
@@ -305,6 +346,8 @@ impl<'a> Lexer<'a> {
             self.tok = Token {
                 token: TokenType::DIV,
                 value: None,
+                row: self.tok.row,
+                col: self.tok.col,
             };
             self.bump();
             return;
@@ -312,6 +355,8 @@ impl<'a> Lexer<'a> {
             self.tok = Token {
                 token: TokenType::LPAREN,
                 value: None,
+                row: self.tok.row,
+                col: self.tok.col,
             };
             self.bump();
             return;
@@ -319,6 +364,8 @@ impl<'a> Lexer<'a> {
             self.tok = Token {
                 token: TokenType::RPAREN,
                 value: None,
+                row: self.tok.row,
+                col: self.tok.col,
             };
             self.bump();
             return;
@@ -326,6 +373,8 @@ impl<'a> Lexer<'a> {
             self.tok = Token {
                 token: TokenType::LBRACE,
                 value: None,
+                row: self.tok.row,
+                col: self.tok.col,
             };
             self.bump();
             return;
@@ -333,6 +382,8 @@ impl<'a> Lexer<'a> {
             self.tok = Token {
                 token: TokenType::RBRACE,
                 value: None,
+                row: self.tok.row,
+                col: self.tok.col,
             };
             self.bump();
             return;
@@ -342,6 +393,8 @@ impl<'a> Lexer<'a> {
                 self.tok = Token {
                     token: TokenType::COMPEQ,
                     value: None,
+                    row: self.tok.row,
+                    col: self.tok.col,
                 };
                 self.bump();
                 return;
@@ -349,6 +402,8 @@ impl<'a> Lexer<'a> {
             self.tok = Token {
                 token: TokenType::EQ,
                 value: None,
+                row: self.tok.row,
+                col: self.tok.col,
             };
             return;
         } else if self.current() == '!' {
@@ -357,6 +412,8 @@ impl<'a> Lexer<'a> {
                 self.tok = Token {
                     token: TokenType::COMPNE,
                     value: None,
+                    row: self.tok.row,
+                    col: self.tok.col,
                 };
                 self.bump();
                 return;
@@ -364,6 +421,8 @@ impl<'a> Lexer<'a> {
             self.tok = Token {
                 token: TokenType::LOGNOT,
                 value: None,
+                row: self.tok.row,
+                col: self.tok.col,
             };
             return;
         } else if self.current() == '>' {
@@ -372,6 +431,8 @@ impl<'a> Lexer<'a> {
                 self.tok = Token {
                     token: TokenType::COMPGE,
                     value: None,
+                    row: self.tok.row,
+                    col: self.tok.col,
                 };
                 self.bump();
                 return;
@@ -379,6 +440,8 @@ impl<'a> Lexer<'a> {
             self.tok = Token {
                 token: TokenType::COMPGT,
                 value: None,
+                row: self.tok.row,
+                col: self.tok.col,
             };
             return;
         } else if self.current() == '<' {
@@ -387,6 +450,8 @@ impl<'a> Lexer<'a> {
                 self.tok = Token {
                     token: TokenType::COMPLE,
                     value: None,
+                    row: self.tok.row,
+                    col: self.tok.col,
                 };
                 self.bump();
                 return;
@@ -394,6 +459,8 @@ impl<'a> Lexer<'a> {
             self.tok = Token {
                 token: TokenType::COMPLT,
                 value: None,
+                row: self.tok.row,
+                col: self.tok.col,
             };
             return;
         } else if self.current() == '&' {
@@ -402,6 +469,8 @@ impl<'a> Lexer<'a> {
                 self.tok = Token {
                     token: TokenType::COMPAND,
                     value: None,
+                    row: self.tok.row,
+                    col: self.tok.col,
                 };
                 self.bump();
                 return;
@@ -409,6 +478,8 @@ impl<'a> Lexer<'a> {
             self.tok = Token {
                 token: TokenType::LOGAND,
                 value: None,
+                row: self.tok.row,
+                col: self.tok.col,
             };
             return;
         } else if self.current() == '|' {
@@ -417,6 +488,8 @@ impl<'a> Lexer<'a> {
                 self.tok = Token {
                     token: TokenType::COMPOR,
                     value: None,
+                    row: self.tok.row,
+                    col: self.tok.col,
                 };
                 self.bump();
                 return;
@@ -424,12 +497,16 @@ impl<'a> Lexer<'a> {
             self.tok = Token {
                 token: TokenType::LOGOR,
                 value: None,
+                row: self.tok.row,
+                col: self.tok.col,
             };
             return;
         } else if self.current() == '^' {
             self.tok = Token {
                 token: TokenType::LOGXOR,
                 value: None,
+                row: self.tok.row,
+                col: self.tok.col,
             };
             self.bump();
             return;
@@ -437,6 +514,8 @@ impl<'a> Lexer<'a> {
             self.tok = Token {
                 token: TokenType::COLON,
                 value: None,
+                row: self.tok.row,
+                col: self.tok.col,
             };
             self.bump();
             return;
@@ -446,11 +525,17 @@ impl<'a> Lexer<'a> {
             }
             return;
         } else {
-            panic!("Lexer: Unknown token {}", self.current())
+            let mut err = GosError::new(self.tok.row, self.tok.col);
+            err.unexpected_char(None, self.current());
+            err.panic();
         }
     }
 
-    pub fn current_token(&self) -> Token {
+    pub fn curr_tok(&self) -> Token {
         self.tok.clone()
+    }
+
+    pub fn curr_ch(&mut self) -> char {
+        self.current()
     }
 }

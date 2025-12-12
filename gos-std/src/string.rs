@@ -10,6 +10,7 @@ pub extern "C" fn strlen(ptr: *const u8) -> usize {
     }
     len
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn memcpy(dst: *mut u8, src: *const u8, n: usize) -> *mut u8 {
     let mut i = 0;

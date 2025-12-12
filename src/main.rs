@@ -10,6 +10,7 @@ use std::{fs, path::Path};
 
 pub mod ast;
 pub mod bytecode;
+pub mod error;
 pub mod lexer;
 pub mod native;
 pub mod parser;
@@ -184,7 +185,7 @@ fn compile_native(file: &String, typ: &str, no_std: bool) -> () {
 
 fn main() {
     let cmd = Command::new("gos")
-        .version("0.3.0")
+        .version("0.3.5")
         .about("The Gos programming language")
         .arg(Arg::new("FILE").help("Run the Gos source/bytecode file"))
         .arg(

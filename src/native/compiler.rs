@@ -24,6 +24,7 @@ pub struct Compiler {
     base_offset: u32,
     in_function: bool,
     str_cache: HashMap<String, String>,
+    strs: usize,
 }
 
 impl Compiler {
@@ -35,6 +36,7 @@ impl Compiler {
             base_offset: 1,
             in_function: false,
             str_cache: HashMap::new(),
+            strs: 0,
         }
     }
 
@@ -160,7 +162,8 @@ impl Compiler {
                         assemble!(self.text, "push rax");
                         return;
                     }
-                    let label = format!("str_{:p}", &s.clone());
+                    let label = format!("L.str_{}", self.strs);
+                    self.strs += 1;
                     let raw = format!("{:?}", &s);
                     assemble!(self.data, "{} db `{}`, 0", label, &raw[1..&raw.len() - 1]);
                     assemble!(self.text, "lea rax, [rel {}]", label);
@@ -465,12 +468,6 @@ impl Compiler {
                 }
 
                 assemble!(self.text, ".{}:", end_label);
-            }
-            Expr::Exit(exit) => {
-                self.compile_expr(*exit.code);
-                assemble!(self.text, "mov rdi, rax");
-                assemble!(self.text, "mov rax, 60");
-                assemble!(self.text, "syscall");
             }
             Expr::Label(label) => {
                 assemble!(self.text, "{}:", label.name);

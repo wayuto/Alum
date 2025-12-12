@@ -2,3 +2,4 @@ $import "gosio.gos"
 $import "string.gos"
 $import "convert.gos"
 extern syscall
+extern exit

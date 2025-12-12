@@ -37,7 +37,6 @@ pub enum TokenType {
     WHILE,
     LABEL,
     GOTO,
-    EXIT,
     FUNCDECL,
     CALL,
     RETURN,
@@ -59,4 +58,6 @@ pub enum Literal {
 pub struct Token {
     pub token: TokenType,
     pub value: Option<Literal>,
+    pub row: usize,
+    pub col: usize,
 }

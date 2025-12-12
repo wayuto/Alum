@@ -13,7 +13,7 @@ pub mod string;
 pub extern "C" fn rust_eh_personality() {}
 
 unsafe extern "C" {
-    fn main() -> i32;
+    fn main() -> isize;
 }
 
 #[panic_handler]
@@ -24,7 +24,7 @@ fn panic(_info: &PanicInfo) -> ! {
 }
 
 #[inline(always)]
-pub extern "C" fn syscall(nr: usize, a1: usize, a2: usize, a3: usize) -> isize {
+pub extern "C" fn syscall(nr: usize, a1: isize, a2: isize, a3: isize) -> isize {
     let ret: isize;
     unsafe {
         asm!("
@@ -34,7 +34,7 @@ pub extern "C" fn syscall(nr: usize, a1: usize, a2: usize, a3: usize) -> isize {
         mov rdx, {a3}
         syscall
         ", 
-            nr = in(reg) nr,
+            nr = in(reg) nr as isize,
             a1 = in(reg) a1,
             a2 = in(reg) a2,
             a3 = in(reg) a3,
@@ -46,15 +46,20 @@ pub extern "C" fn syscall(nr: usize, a1: usize, a2: usize, a3: usize) -> isize {
 }
 
 #[unsafe(no_mangle)]
-extern "C" fn _start() -> () {
-    let ret = unsafe { main() };
+pub extern "C" fn exit(code: isize) {
     unsafe {
-        asm!(
-            "mov rdi, {ret}",
-            "mov rax, 60",
-            "syscall",
-            ret = in(reg) ret as usize,
-            options(noreturn)
+        asm!("
+            mov rax, 60    
+            syscall
+            ",
+        in("rdi") code,
+        options(noreturn, nostack)
         );
     }
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn _start() -> () {
+    let ret = unsafe { main() };
+    exit(ret);
 }

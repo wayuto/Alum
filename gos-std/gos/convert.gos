@@ -1,1 +1,2 @@
 extern itoa
+extern atoi

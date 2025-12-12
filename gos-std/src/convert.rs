@@ -1,4 +1,4 @@
-static mut BUFFER: [u8; 24] = [0; 24];
+static mut BUFFER: [u8; 64] = [0; 64];
 
 #[unsafe(no_mangle)]
 pub extern "C" fn itoa(n: isize) -> *const u8 {
@@ -41,5 +41,52 @@ pub extern "C" fn itoa(n: isize) -> *const u8 {
 
         (*buffer)[idx] = 0;
         buffer as *const u8
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn atoi(s: *const u8) -> isize {
+    unsafe {
+        if s.is_null() {
+            return 0;
+        }
+
+        let mut ptr = s;
+        let mut result: isize = 0;
+        let mut sign: isize = 1;
+        let mut is_neg = false;
+
+        while *ptr == b' ' || *ptr == b'\t' || *ptr == b'\n' || *ptr == b'\r' {
+            ptr = ptr.add(1);
+        }
+
+        match *ptr {
+            b'+' => {
+                sign = 1;
+                ptr = ptr.add(1);
+                is_neg = true;
+            }
+            b'-' => {
+                sign = -1;
+                ptr = ptr.add(1);
+                is_neg = true;
+            }
+            _ => {}
+        }
+
+        if is_neg {
+            while *ptr == b' ' || *ptr == b'\t' || *ptr == b'\n' || *ptr == b'\r' {
+                ptr = ptr.add(1);
+            }
+        }
+
+        while *ptr >= b'0' && *ptr <= b'9' {
+            let digit = (*ptr - b'0') as isize;
+
+            result = result * 10 + digit;
+            ptr = ptr.add(1);
+        }
+
+        result * sign
     }
 }

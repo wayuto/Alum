@@ -27,7 +27,6 @@ pub enum Expr {
     Label(Label),
     Goto(Goto),
     Extern(Extern),
-    Exit(Exit),
 }
 
 #[derive(Debug, Clone)]
@@ -105,11 +104,6 @@ pub struct Label {
 #[derive(Debug, Clone)]
 pub struct Goto {
     pub label: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct Exit {
-    pub code: Box<Expr>,
 }
 
 #[derive(Debug, Clone)]

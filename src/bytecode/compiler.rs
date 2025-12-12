@@ -349,10 +349,6 @@ impl Compiler {
                     }
                 }
             }
-            Expr::Exit(exit) => {
-                self.compile_expr(*exit.code);
-                self.emit(Op::EXIT, &[]);
-            }
             Expr::Return(ret) => {
                 if let Some(value) = ret.value {
                     self.compile_expr(*value);

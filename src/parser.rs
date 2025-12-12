@@ -1,8 +1,9 @@
 use crate::{
     ast::{
-        BinOp, Exit, Expr, Extern, FuncCall, FuncDecl, Goto, If, Label, Program, Return, Stmt,
-        UnaryOp, Val, Var, VarDecl, VarMod, While,
+        BinOp, Expr, Extern, FuncCall, FuncDecl, Goto, If, Label, Program, Return, Stmt, UnaryOp,
+        Val, Var, VarDecl, VarMod, While,
     },
+    error::GosError,
     lexer::Lexer,
     token::{Literal, TokenType},
 };
@@ -20,18 +21,18 @@ impl<'a> Parser<'a> {
     pub fn parse(&mut self) -> Program {
         self.lexer.next_token();
         let mut exprs: Vec<Expr> = Vec::new();
-        while self.lexer.current_token().token != TokenType::EOF {
+        while self.lexer.curr_tok().token != TokenType::EOF {
             exprs.push(self.ctrl());
         }
         Program { body: exprs }
     }
     fn ctrl(&mut self) -> Expr {
-        match self.lexer.current_token().token {
+        match self.lexer.curr_tok().token {
             TokenType::IF => {
                 self.lexer.next_token();
                 let cond = self.expr();
                 let body = self.stmt();
-                if self.lexer.current_token().token == TokenType::ELSE {
+                if self.lexer.curr_tok().token == TokenType::ELSE {
                     self.lexer.next_token();
                     let else_body = self.stmt();
                     match cond.clone() {
@@ -110,13 +111,16 @@ impl<'a> Parser<'a> {
         }
     }
     fn stmt(&mut self) -> Expr {
-        if self.lexer.current_token().token == TokenType::LBRACE {
+        if self.lexer.curr_tok().token == TokenType::LBRACE {
             let mut exprs: Vec<Expr> = Vec::new();
             self.lexer.next_token();
 
-            while self.lexer.current_token().token != TokenType::RBRACE {
-                if self.lexer.current_token().token == TokenType::EOF {
-                    panic!("Parser: Expected: '}}'")
+            while self.lexer.curr_tok().token != TokenType::RBRACE {
+                if self.lexer.curr_tok().token == TokenType::EOF {
+                    let mut err =
+                        GosError::new(self.lexer.curr_tok().row, self.lexer.curr_tok().col);
+                    err.unexpected_char(Some('{'), self.lexer.curr_ch());
+                    err.panic();
                 }
                 exprs.push(self.ctrl());
             }
@@ -124,23 +128,16 @@ impl<'a> Parser<'a> {
             self.lexer.next_token();
             return Expr::Stmt(Stmt { body: exprs });
         }
-        if self.lexer.current_token().token == TokenType::IF
-            || self.lexer.current_token().token == TokenType::WHILE
-            || self.lexer.current_token().token == TokenType::FUNCDECL
+        if self.lexer.curr_tok().token == TokenType::IF
+            || self.lexer.curr_tok().token == TokenType::WHILE
+            || self.lexer.curr_tok().token == TokenType::FUNCDECL
         {
             return self.ctrl();
         }
         self.expr()
     }
     fn expr(&mut self) -> Expr {
-        match self.lexer.current_token().token {
-            TokenType::EXIT => {
-                self.lexer.next_token();
-                let status = self.expr();
-                Expr::Exit(Exit {
-                    code: Box::new(status),
-                })
-            }
+        match self.lexer.curr_tok().token {
             TokenType::GOTO => {
                 self.lexer.next_token();
                 let name = self.get_ident();
@@ -152,8 +149,11 @@ impl<'a> Parser<'a> {
                 self.lexer.next_token();
                 let name = self.get_ident();
                 self.lexer.next_token();
-                if self.lexer.current_token().token != TokenType::EQ {
-                    panic!("Parser: Expected: '='")
+                if self.lexer.curr_tok().token != TokenType::EQ {
+                    let mut err =
+                        GosError::new(self.lexer.curr_tok().row, self.lexer.curr_tok().col);
+                    err.unexpected_char(Some('='), self.lexer.curr_ch());
+                    err.panic();
                 }
                 self.lexer.next_token();
                 let value = self.expr();
@@ -183,11 +183,11 @@ impl<'a> Parser<'a> {
     }
     fn logical(&mut self) -> Expr {
         let mut left = self.comparison();
-        while self.lexer.current_token().token == TokenType::LOGAND
-            || self.lexer.current_token().token == TokenType::LOGOR
-            || self.lexer.current_token().token == TokenType::LOGXOR
+        while self.lexer.curr_tok().token == TokenType::LOGAND
+            || self.lexer.curr_tok().token == TokenType::LOGOR
+            || self.lexer.curr_tok().token == TokenType::LOGXOR
         {
-            let op = self.lexer.current_token().token;
+            let op = self.lexer.curr_tok().token;
             self.lexer.next_token();
             let right = self.comparison();
             match (left.clone(), right.clone()) {
@@ -242,16 +242,16 @@ impl<'a> Parser<'a> {
     }
     fn comparison(&mut self) -> Expr {
         let mut left = self.additive();
-        while self.lexer.current_token().token == TokenType::COMPEQ
-            || self.lexer.current_token().token == TokenType::COMPNE
-            || self.lexer.current_token().token == TokenType::COMPLT
-            || self.lexer.current_token().token == TokenType::COMPLE
-            || self.lexer.current_token().token == TokenType::COMPGT
-            || self.lexer.current_token().token == TokenType::COMPGE
-            || self.lexer.current_token().token == TokenType::COMPAND
-            || self.lexer.current_token().token == TokenType::COMPOR
+        while self.lexer.curr_tok().token == TokenType::COMPEQ
+            || self.lexer.curr_tok().token == TokenType::COMPNE
+            || self.lexer.curr_tok().token == TokenType::COMPLT
+            || self.lexer.curr_tok().token == TokenType::COMPLE
+            || self.lexer.curr_tok().token == TokenType::COMPGT
+            || self.lexer.curr_tok().token == TokenType::COMPGE
+            || self.lexer.curr_tok().token == TokenType::COMPAND
+            || self.lexer.curr_tok().token == TokenType::COMPOR
         {
-            let op = self.lexer.current_token().token;
+            let op = self.lexer.curr_tok().token;
             self.lexer.next_token();
             let right = self.additive();
             match (left.clone(), right.clone()) {
@@ -316,10 +316,10 @@ impl<'a> Parser<'a> {
     }
     fn additive(&mut self) -> Expr {
         let mut left = self.term();
-        while self.lexer.current_token().token == TokenType::ADD
-            || self.lexer.current_token().token == TokenType::SUB
+        while self.lexer.curr_tok().token == TokenType::ADD
+            || self.lexer.curr_tok().token == TokenType::SUB
         {
-            let op = self.lexer.current_token().token;
+            let op = self.lexer.curr_tok().token;
             self.lexer.next_token();
             let right = self.term();
             match (left.clone(), right.clone()) {
@@ -351,10 +351,10 @@ impl<'a> Parser<'a> {
     }
     fn term(&mut self) -> Expr {
         let mut left = self.factor();
-        while self.lexer.current_token().token == TokenType::MUL
-            || self.lexer.current_token().token == TokenType::DIV
+        while self.lexer.curr_tok().token == TokenType::MUL
+            || self.lexer.curr_tok().token == TokenType::DIV
         {
-            let op = self.lexer.current_token().token;
+            let op = self.lexer.curr_tok().token;
             self.lexer.next_token();
             let right = self.factor();
             match (left.clone(), right.clone()) {
@@ -385,20 +385,22 @@ impl<'a> Parser<'a> {
         return left;
     }
     fn factor(&mut self) -> Expr {
-        if self.lexer.current_token().token == TokenType::LITERAL {
-            if let Some(val) = self.lexer.current_token().value {
+        if self.lexer.curr_tok().token == TokenType::LITERAL {
+            if let Some(val) = self.lexer.curr_tok().value {
                 self.lexer.next_token();
                 return Expr::Val(Val { value: val });
             }
-        } else if self.lexer.current_token().token == TokenType::LPAREN {
+        } else if self.lexer.curr_tok().token == TokenType::LPAREN {
             self.lexer.next_token();
             let expr = self.expr();
-            if self.lexer.current_token().token != TokenType::RPAREN {
-                panic!("Parser: Expected: ')'");
+            if self.lexer.curr_tok().token != TokenType::RPAREN {
+                let mut err = GosError::new(self.lexer.curr_tok().row, self.lexer.curr_tok().col);
+                err.unexpected_char(Some(')'), self.lexer.curr_ch());
+                err.panic();
             }
             self.lexer.next_token();
             return expr;
-        } else if self.lexer.current_token().token == TokenType::NEG {
+        } else if self.lexer.curr_tok().token == TokenType::NEG {
             self.lexer.next_token();
             let argument = self.expr();
             match argument.clone() {
@@ -416,7 +418,7 @@ impl<'a> Parser<'a> {
                 argument: Box::new(argument),
                 operator: TokenType::NEG,
             });
-        } else if self.lexer.current_token().token == TokenType::LOGNOT {
+        } else if self.lexer.curr_tok().token == TokenType::LOGNOT {
             self.lexer.next_token();
             let argument = self.expr();
             match argument.clone() {
@@ -434,10 +436,10 @@ impl<'a> Parser<'a> {
                 argument: Box::new(argument),
                 operator: TokenType::LOGNOT,
             });
-        } else if self.lexer.current_token().token == TokenType::IDENT {
+        } else if self.lexer.curr_tok().token == TokenType::IDENT {
             let name = self.get_ident();
             self.lexer.next_token();
-            match self.lexer.current_token().token {
+            match self.lexer.curr_tok().token {
                 TokenType::COLON => {
                     self.lexer.next_token();
                     return Expr::Label(Label { name: name });
@@ -459,7 +461,7 @@ impl<'a> Parser<'a> {
                 TokenType::LPAREN => {
                     self.lexer.next_token();
                     let mut args: Vec<Expr> = Vec::new();
-                    while self.lexer.current_token().token != TokenType::RPAREN {
+                    while self.lexer.curr_tok().token != TokenType::RPAREN {
                         args.push(self.expr());
                     }
                     self.lexer.next_token();
@@ -476,20 +478,19 @@ impl<'a> Parser<'a> {
                 _ => return Expr::Var(Var { name }),
             }
         }
-        panic!(
-            "Parser: Unexpected token: '{:?}'",
-            self.lexer.current_token().token
-        )
+        let err = GosError::new(self.lexer.curr_tok().row, self.lexer.curr_tok().col);
+        err.panic();
+        panic!()
     }
 
     fn get_ident(&mut self) -> String {
-        match self.lexer.current_token().value.unwrap() {
+        match self.lexer.curr_tok().value.unwrap() {
             Literal::Str(s) => s,
             _ => {
-                panic!(
-                    "Invalid name: {:?}",
-                    self.lexer.current_token().value.unwrap()
-                )
+                let mut err = GosError::new(self.lexer.curr_tok().row, self.lexer.curr_tok().col);
+                err.invalid_name(self.lexer.curr_tok().value.unwrap());
+                err.panic();
+                panic!()
             }
         }
     }
@@ -499,11 +500,20 @@ impl<'a> Parser<'a> {
         let name = self.get_ident();
         let mut params: Vec<String> = Vec::new();
         self.lexer.next_token();
-        if self.lexer.current_token().token != TokenType::LPAREN {
-            panic!("Parser: Expected: '('")
+        if self.lexer.curr_tok().token != TokenType::LPAREN {
+            let mut err = GosError::new(self.lexer.curr_tok().row, self.lexer.curr_tok().col);
+            err.unexpected_char(Some('('), self.lexer.curr_ch());
+            err.panic();
         }
-        while self.lexer.current_token().token != TokenType::RPAREN {
-            if self.lexer.current_token().token == TokenType::IDENT {
+        while self.lexer.curr_tok().token != TokenType::RPAREN {
+            if self.lexer.curr_tok().token == TokenType::EOF
+                || self.lexer.curr_tok().token == TokenType::LBRACE
+            {
+                let mut err = GosError::new(self.lexer.curr_tok().row, self.lexer.curr_tok().col);
+                err.unexpected_char(Some(')'), self.lexer.curr_ch());
+                err.panic();
+            }
+            if self.lexer.curr_tok().token == TokenType::IDENT {
                 params.push(self.get_ident())
             }
             self.lexer.next_token();
