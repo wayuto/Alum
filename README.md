@@ -8,11 +8,8 @@
 
 ```bash
 ➜ git clone --depth 1 https://github.com/wayuto/Gos ~/Gos
-➜ cd ~/Gos/src/libgos
-➜ make all
-➜ make install
 ➜ cd ~/Gos
-➜ cargo install --path .
+➜ sh ./install.sh
 ➜ gos -h
 The Gos programming language
 
