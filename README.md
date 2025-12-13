@@ -107,10 +107,10 @@ let ld_status = std::process::Command::new("ld")
 ## _My First Gos/Native Program:_
 
 ```gos
-$import "stdlib"
+$import "gosio"
 
 pub fun main() {
-    print("Hello world!")
+    println("Hello world!")
     return 0
 }
 ```
@@ -127,10 +127,11 @@ Hello world!
 
 - ### _**Gos Standard Library**_
 - stdlib (_start, syscall, exit, ...)
-- gosio (write, read, print, mprint, input)
+- gosio (write, read, print, println, printf, input)
 - string (strlen)
 - convert (itoa, atoi)
 - math (abs, sqrt, max, min, pow, fact)
+- array (range, find)
 
 - ### _**Variables**_
 
