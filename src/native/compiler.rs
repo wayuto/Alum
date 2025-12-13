@@ -60,10 +60,6 @@ impl Compiler {
         if let Some(top) = self.scope_stack.pop() {
             self.base_offset = top.saved_base;
 
-            if !self.in_function && top.next_slot > 0 {
-                assemble!(self.text, "add rsp, {}", top.next_slot * 8);
-            }
-
             if self.in_function {
                 self.in_function = false;
             }
@@ -71,24 +67,44 @@ impl Compiler {
     }
 
     fn store_var(&mut self, name: String) -> u32 {
+        let outer_slots: u32 = self
+            .scope_stack
+            .iter()
+            .take(self.scope_stack.len().saturating_sub(1))
+            .map(|s| s.next_slot)
+            .sum();
+
+        let new_slot = self.scope_stack.last().unwrap().next_slot;
+        let byte_offset = (self.base_offset + outer_slots + new_slot) * 8;
         let scope = self.scope_stack.last_mut().unwrap();
-        let slot = scope.next_slot;
-        scope.vars.insert(name.clone(), slot);
+
+        scope.vars.insert(name.clone(), new_slot);
         scope.next_slot += 1;
 
-        let byte_offset = (self.base_offset + slot) * 8;
         byte_offset
     }
 
     fn find_var(&self, name: &str) -> Option<u32> {
-        let mut outer_slots = 0;
-        for scope in self.scope_stack.iter().rev() {
-            if let Some(&slot) = scope.vars.get(name) {
-                let byte_offset = (self.base_offset + outer_slots + slot) * 8;
-                return Some(byte_offset);
-            }
-            outer_slots += scope.next_slot;
+        if let Some(i) = self
+            .scope_stack
+            .iter()
+            .rev()
+            .position(|s| s.vars.contains_key(name))
+        {
+            let scope_index = self.scope_stack.len() - 1 - i;
+
+            let outer_slots: u32 = self
+                .scope_stack
+                .iter()
+                .take(scope_index)
+                .map(|s| s.next_slot)
+                .sum();
+
+            let slot = self.scope_stack[scope_index].vars.get(name).unwrap();
+            let byte_offset = (self.base_offset + outer_slots + *slot) * 8;
+            return Some(byte_offset);
         }
+
         None
     }
 
@@ -275,6 +291,7 @@ impl Compiler {
                 }
                 assemble!(self.text, "push rax");
             }
+
             Expr::UnaryOp(unary) => {
                 match *unary.argument.clone() {
                     Expr::Var(var) => {
@@ -282,9 +299,11 @@ impl Compiler {
                         if unary.operator == TokenType::INC {
                             let offset = self.find_var(&name).unwrap();
                             assemble!(self.text, "inc qword [rbp - {}]", offset);
+                            return;
                         } else if unary.operator == TokenType::DEC {
                             let offset = self.find_var(&name).unwrap();
                             assemble!(self.text, "dec qword [rbp - {}]", offset);
+                            return;
                         } else if unary.operator == TokenType::SIZEOF {
                             if let Some(&len) = self.arr_lens.get(&name) {
                                 assemble!(self.text, "mov rax, {}", len);
@@ -297,33 +316,13 @@ impl Compiler {
                     }
                     _ => {}
                 }
+
                 self.compile_expr(*unary.argument.clone());
                 assemble!(self.text, "pop rax");
 
-                match unary.operator {
-                    TokenType::LOGNOT => {
-                        assemble!(self.text, "test rax, rax");
-                        assemble!(self.text, "setz al");
-                        assemble!(self.text, "movzx rax, al");
-                    }
-                    TokenType::NEG => {
-                        assemble!(self.text, "neg rax")
-                    }
-                    TokenType::SIZEOF => match *unary.argument {
-                        Expr::Val(val) => {
-                            if let Literal::Array(len, _) = val.value.clone() {
-                                assemble!(self.text, "mov rax, {}", len);
-                                assemble!(self.text, "push rax");
-                            }
-                        }
-                        _ => {
-                            assemble!(self.text, "mov rax, 1");
-                            assemble!(self.text, "push rax");
-                        }
-                    },
-                    _ => {}
+                if unary.operator != TokenType::SIZEOF {
+                    assemble!(self.text, "push rax");
                 }
-                assemble!(self.text, "push rax");
             }
             Expr::VarDecl(decl) => {
                 if let VarType::Array(len) = decl.typ {
@@ -346,8 +345,33 @@ impl Compiler {
             }
             Expr::Stmt(stmt) => {
                 self.enter_scope(false);
-                for expr in stmt.body {
-                    self.compile_expr(expr);
+                let body_len = stmt.body.len();
+                for (i, expr) in stmt.body.into_iter().enumerate() {
+                    self.compile_expr(expr.clone());
+                    let pushes_value = match expr {
+                        Expr::Val(_)
+                        | Expr::Var(_)
+                        | Expr::BinOp(_)
+                        | Expr::UnaryOp(_)
+                        | Expr::ArrayAccess(_)
+                        | Expr::FuncCall(_) => true,
+
+                        Expr::VarDecl(_)
+                        | Expr::VarMod(_)
+                        | Expr::Stmt(_)
+                        | Expr::FuncDecl(_)
+                        | Expr::Return(_)
+                        | Expr::While(_)
+                        | Expr::If(_)
+                        | Expr::Label(_)
+                        | Expr::Goto(_)
+                        | Expr::Extern(_)
+                        | Expr::ArrayAssign(_) => false,
+                    };
+
+                    if pushes_value && i < body_len - 1 {
+                        assemble!(self.text, "pop rax");
+                    }
                 }
                 self.exit_scope();
             }
@@ -365,9 +389,12 @@ impl Compiler {
                 let mut local_slots = decl.params.len() as u32;
 
                 local_slots += 8;
-
                 if local_slots > 0 {
-                    assemble!(self.text, "sub rsp, {}", local_slots * 8 + 32);
+                    let mut alloc_size = local_slots * 8 + 32;
+                    if (alloc_size + 8) % 16 != 0 {
+                        alloc_size += 8;
+                    }
+                    assemble!(self.text, "sub rsp, {}", alloc_size);
                 }
 
                 let regs = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"];
@@ -460,13 +487,8 @@ impl Compiler {
                 self.compile_expr(*wh.body.clone());
 
                 self.exit_scope();
-
                 assemble!(self.text, "jmp .{}", loop_start_label);
-
                 assemble!(self.text, ".{}:", loop_end_label);
-
-                assemble!(self.text, "xor rax, rax");
-                assemble!(self.text, "push rax");
             }
             Expr::If(if_expr) => {
                 let id = self.text.len();
@@ -482,19 +504,14 @@ impl Compiler {
 
                 if has_else {
                     assemble!(self.text, "jz .{}", else_label);
-
                     self.compile_expr(*if_expr.then.clone());
-
                     assemble!(self.text, "jmp .{}", end_label);
-
                     assemble!(self.text, ".{}:", else_label);
-
                     if let Some(else_expr) = if_expr.else_branch {
                         self.compile_expr(*else_expr);
                     }
                 } else {
                     assemble!(self.text, "jz .{}", end_label);
-
                     self.compile_expr(*if_expr.then.clone());
                 }
 
@@ -509,15 +526,25 @@ impl Compiler {
             Expr::ArrayAccess(aa) => {
                 self.compile_expr(*aa.offset);
                 assemble!(self.text, "pop rbx");
-
                 let var_offset = self
                     .find_var(&aa.array)
                     .unwrap_or_else(|| panic!("Array '{}' not found", aa.array));
 
                 assemble!(self.text, "mov rax, [rbp - {}]", var_offset);
-
                 assemble!(self.text, "mov rax, [rax + rbx * 8]");
                 assemble!(self.text, "push rax");
+            }
+            Expr::ArrayAssign(aa) => {
+                let var_offset = self
+                    .find_var(&aa.array)
+                    .unwrap_or_else(|| panic!("Array '{}' not found", aa.array));
+
+                assemble!(self.text, "mov r10, [rbp - {}]", var_offset);
+                self.compile_expr(*aa.value.clone());
+                assemble!(self.text, "pop rcx");
+                self.compile_expr(*aa.offset.clone());
+                assemble!(self.text, "pop rbx");
+                assemble!(self.text, "mov [r10 + rbx * 8], rcx");
             }
             Expr::Extern(ext) => {
                 assemble!(self.text, "extern {}", ext.func);
@@ -527,16 +554,19 @@ impl Compiler {
 
     fn alloc_arr(&mut self, len: usize, arr: Vec<Expr>) {
         let block_size = len * 8;
+        let padding = (16 - (block_size % 16)) % 16;
+        let padded_block_size = block_size + padding;
 
-        assemble!(self.text, "sub rsp, {}", block_size);
-
+        assemble!(self.text, "sub rsp, {}", padded_block_size);
         assemble!(self.text, "mov r10, rsp");
 
         for (i, elem) in arr.iter().enumerate() {
             self.compile_expr(elem.clone());
             assemble!(self.text, "pop rbx");
-            assemble!(self.text, "mov [rsp + {}], rbx", i * 8);
+
+            assemble!(self.text, "mov [r10 + {}], rbx", i * 8);
         }
+
         assemble!(self.text, "push r10");
     }
 }

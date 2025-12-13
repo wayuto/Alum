@@ -16,6 +16,7 @@ pub enum Expr {
     Val(Val),
     Var(Var),
     ArrayAccess(ArrayAccess),
+    ArrayAssign(ArrayAssign),
     VarDecl(VarDecl),
     VarMod(VarMod),
     BinOp(BinOp),
@@ -113,6 +114,13 @@ pub struct Goto {
 pub struct ArrayAccess {
     pub array: String,
     pub offset: Box<Expr>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ArrayAssign {
+    pub array: String,
+    pub offset: Box<Expr>,
+    pub value: Box<Expr>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

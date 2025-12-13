@@ -24,7 +24,7 @@ pub extern "C" fn pow(base: isize, exp: isize) -> isize {
         return 1;
     }
     let mut res: isize = 1;
-    for i in 0..exp {
+    for _ in 0..exp {
         res *= base;
     }
     res

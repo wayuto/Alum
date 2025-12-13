@@ -377,9 +377,8 @@ impl Compiler {
                     }
                 }
             }
-            Expr::ArrayAccess(_) => {
-                unimplemented!()
-            }
+            Expr::ArrayAccess(_) => {}
+            Expr::ArrayAssign(_) => {}
             Expr::Extern(_) => {
                 panic!("Only supported in Gos/Native");
             }

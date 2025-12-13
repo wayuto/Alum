@@ -1,7 +1,7 @@
 use crate::{
     ast::{
-        ArrayAccess, BinOp, Expr, Extern, FuncCall, FuncDecl, Goto, If, Label, Program, Return,
-        Stmt, UnaryOp, Val, Var, VarDecl, VarMod, While,
+        ArrayAccess, ArrayAssign, BinOp, Expr, Extern, FuncCall, FuncDecl, Goto, If, Label,
+        Program, Return, Stmt, UnaryOp, Val, Var, VarDecl, VarMod, While,
     },
     error::GosError,
     lexer::Lexer,
@@ -565,10 +565,20 @@ impl<'a> Parser<'a> {
                             err.panic();
                         }
                         self.lexer.next_token();
-                        return Expr::ArrayAccess(ArrayAccess {
-                            array: name,
-                            offset: Box::new(offset),
-                        });
+                        if self.lexer.curr_tok().token == TokenType::EQ {
+                            self.lexer.next_token();
+                            let value = self.expr();
+                            return Expr::ArrayAssign(ArrayAssign {
+                                array: name,
+                                offset: Box::new(offset),
+                                value: Box::new(value),
+                            });
+                        } else {
+                            return Expr::ArrayAccess(ArrayAccess {
+                                array: name,
+                                offset: Box::new(offset),
+                            });
+                        }
                     }
                     _ => return Expr::Var(Var { name }),
                 }

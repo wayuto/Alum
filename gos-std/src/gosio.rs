@@ -46,10 +46,7 @@ pub extern "C" fn mprint(args: *const *const u8) -> isize {
             i += 1;
         }
     }
-
-    let nl = write(1, b"\n".as_ptr(), 1);
-
-    if nl < 0 { nl } else { ret + 1 }
+    ret
 }
 
 static mut BUFFER: [u8; 64] = [0; 64];
