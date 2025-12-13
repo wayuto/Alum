@@ -1,10 +1,11 @@
 $import "gosio"
 $import "string"
-
+$import "convert"
+$import "array"
 
 pub fun main() {
     let x: arr<_> = [5 2 3 1 4]
-    let N: num = sizeof(x) 
+    let N: num = sizeof x
 
     for i in range(N - 1) {
         for j in range(N - 1 - i) {
