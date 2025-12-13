@@ -1,4 +1,4 @@
-use crate::token::{Literal, TokenType};
+use crate::token::{Literal, TokenType, VarType};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Program {
@@ -33,6 +33,7 @@ pub enum Expr {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Val {
     pub value: Literal,
+    pub typ: VarType,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -44,6 +45,7 @@ pub struct Var {
 pub struct VarDecl {
     pub name: String,
     pub value: Box<Expr>,
+    pub typ: VarType,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

@@ -2,7 +2,11 @@ $import "gosio"
 $import "convert"
 
 pub fun main() {
-    let x = [1 2 3 4 5]
-    
+    let x: arr<5> = [1 2 3 4 5]
+    let i: num = 0
+    while i < sizeof x {
+        print(itoa(x[i]))
+        i++
+    }
     return 0
 }

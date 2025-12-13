@@ -7,6 +7,7 @@ enum ErrorType {
     UnimplementedError(String),
     NameError(String),
     ImportError(String),
+    TypeError(String),
 }
 
 pub struct GosError {
@@ -46,7 +47,11 @@ impl GosError {
     }
 
     pub fn invalid_name(&mut self, name: Literal) -> () {
-        self.err_type = ErrorType::NameError(format!("Invalid name: {:?}", name));
+        self.err_type = ErrorType::NameError(format!("invalid name: {:?}", name));
+    }
+
+    pub fn unknown_type(&mut self) -> () {
+        self.err_type = ErrorType::TypeError("unknown type".to_string());
     }
 
     pub fn panic(&self) -> () {
@@ -72,6 +77,12 @@ impl GosError {
             ErrorType::NameError(e) => {
                 eprintln!(
                     "NameError: {} (line: {}, column: {})",
+                    e, self.row, self.col
+                );
+            }
+            ErrorType::TypeError(e) => {
+                eprintln!(
+                    "TypeError: {} (line: {}, column: {})",
                     e, self.row, self.col
                 );
             }

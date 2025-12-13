@@ -22,7 +22,7 @@ pub enum TokenType {
     LOGAND,
     LOGOR,
     LOGXOR,
-    LITERAL,
+    LITERAL(VarType),
     LPAREN,
     RPAREN,
     LBRACE,
@@ -45,6 +45,8 @@ pub enum TokenType {
     IDENT,
     EXTERN,
     PUB,
+    Type(VarType),
+    SIZEOF,
     EOF,
 }
 
@@ -53,7 +55,16 @@ pub enum Literal {
     Number(i64),
     Bool(bool),
     Str(String),
-    Array(Vec<Expr>),
+    Array(usize, Vec<Expr>),
+    Void,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum VarType {
+    Number,
+    Bool,
+    Str,
+    Array(usize),
     Void,
 }
 

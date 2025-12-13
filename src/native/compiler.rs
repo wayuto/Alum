@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     ast::{Expr, Program},
-    token::{Literal, TokenType},
+    token::{Literal, TokenType, VarType},
 };
 
 macro_rules! assemble {
@@ -24,6 +24,7 @@ pub struct Compiler {
     base_offset: u32,
     in_function: bool,
     str_cache: HashMap<String, String>,
+    arr_lens: HashMap<String, usize>,
     strs: usize,
 }
 
@@ -36,6 +37,7 @@ impl Compiler {
             base_offset: 1,
             in_function: false,
             str_cache: HashMap::new(),
+            arr_lens: HashMap::new(),
             strs: 0,
         }
     }
@@ -175,21 +177,7 @@ impl Compiler {
                     assemble!(self.text, "mov rax, {}", val);
                     assemble!(self.text, "push rax");
                 }
-                Literal::Array(arr) => {
-                    let size = arr.len() as u32;
-                    let block_size = size * 8;
-
-                    assemble!(self.text, "sub rsp, {}", block_size);
-
-                    assemble!(self.text, "mov r10, rsp");
-
-                    for (i, elem) in arr.iter().enumerate() {
-                        self.compile_expr(elem.clone());
-                        assemble!(self.text, "pop rbx");
-                        assemble!(self.text, "mov [rsp + {}], rbx", i * 8);
-                    }
-                    assemble!(self.text, "push r10");
-                }
+                Literal::Array(len, arr) => self.alloc_arr(len, arr),
                 Literal::Void => {
                     assemble!(self.text, "xor rax, rax");
                     assemble!(self.text, "push rax");
@@ -297,11 +285,19 @@ impl Compiler {
                         } else if unary.operator == TokenType::DEC {
                             let offset = self.find_var(&name).unwrap();
                             assemble!(self.text, "dec qword [rbp - {}]", offset);
+                        } else if unary.operator == TokenType::SIZEOF {
+                            if let Some(&len) = self.arr_lens.get(&name) {
+                                assemble!(self.text, "mov rax, {}", len);
+                                assemble!(self.text, "push rax");
+                                return;
+                            } else {
+                                panic!("Variable '{}' not found or is not an array", name);
+                            }
                         }
                     }
                     _ => {}
                 }
-                self.compile_expr(*unary.argument);
+                self.compile_expr(*unary.argument.clone());
                 assemble!(self.text, "pop rax");
 
                 match unary.operator {
@@ -313,12 +309,29 @@ impl Compiler {
                     TokenType::NEG => {
                         assemble!(self.text, "neg rax")
                     }
+                    TokenType::SIZEOF => match *unary.argument {
+                        Expr::Val(val) => {
+                            if let Literal::Array(len, _) = val.value.clone() {
+                                assemble!(self.text, "mov rax, {}", len);
+                                assemble!(self.text, "push rax");
+                            }
+                        }
+                        _ => {
+                            assemble!(self.text, "mov rax, 1");
+                            assemble!(self.text, "push rax");
+                        }
+                    },
                     _ => {}
                 }
                 assemble!(self.text, "push rax");
             }
             Expr::VarDecl(decl) => {
+                if let VarType::Array(len) = decl.typ {
+                    self.arr_lens.insert(decl.name.clone(), len);
+                }
+
                 self.compile_expr(*decl.value);
+
                 let offset = self.store_var(decl.name);
                 assemble!(self.text, "pop rax");
                 assemble!(self.text, "mov [rbp - {}], rax", offset);
@@ -510,5 +523,20 @@ impl Compiler {
                 assemble!(self.text, "extern {}", ext.func);
             }
         }
+    }
+
+    fn alloc_arr(&mut self, len: usize, arr: Vec<Expr>) {
+        let block_size = len * 8;
+
+        assemble!(self.text, "sub rsp, {}", block_size);
+
+        assemble!(self.text, "mov r10, rsp");
+
+        for (i, elem) in arr.iter().enumerate() {
+            self.compile_expr(elem.clone());
+            assemble!(self.text, "pop rbx");
+            assemble!(self.text, "mov [rsp + {}], rbx", i * 8);
+        }
+        assemble!(self.text, "push r10");
     }
 }

@@ -5,7 +5,7 @@ use crate::{
     },
     error::GosError,
     lexer::Lexer,
-    token::{Literal, TokenType},
+    token::{Literal, TokenType, VarType},
 };
 
 #[derive(Debug)]
@@ -149,6 +149,27 @@ impl<'a> Parser<'a> {
                 self.lexer.next_token();
                 let name = self.get_ident();
                 self.lexer.next_token();
+                if self.lexer.curr_tok().token != TokenType::COLON {
+                    let mut err =
+                        GosError::new(self.lexer.curr_tok().row, self.lexer.curr_tok().col);
+                    err.unexpected_char(Some(':'), self.lexer.curr_ch());
+                    err.panic();
+                }
+                self.lexer.next_token();
+                let typ = match &self.lexer.curr_tok().token {
+                    TokenType::Type(VarType::Number) => VarType::Number,
+                    TokenType::Type(VarType::Bool) => VarType::Bool,
+                    TokenType::Type(VarType::Str) => VarType::Str,
+                    TokenType::Type(VarType::Array(n)) => VarType::Array(n.to_owned()),
+                    _ => {
+                        let mut err =
+                            GosError::new(self.lexer.curr_tok().row, self.lexer.curr_tok().col);
+                        err.unknown_type();
+                        err.panic();
+                        panic!()
+                    }
+                };
+                self.lexer.next_token();
                 if self.lexer.curr_tok().token != TokenType::EQ {
                     let mut err =
                         GosError::new(self.lexer.curr_tok().row, self.lexer.curr_tok().col);
@@ -160,6 +181,7 @@ impl<'a> Parser<'a> {
                 Expr::VarDecl(VarDecl {
                     name,
                     value: Box::new(value),
+                    typ,
                 })
             }
             TokenType::RETURN => {
@@ -196,16 +218,19 @@ impl<'a> Parser<'a> {
                         TokenType::LOGAND => {
                             return Expr::Val(Val {
                                 value: Literal::Number(n & m),
+                                typ: VarType::Number,
                             });
                         }
                         TokenType::LOGOR => {
                             return Expr::Val(Val {
                                 value: Literal::Number(n | m),
+                                typ: VarType::Number,
                             });
                         }
                         TokenType::LOGXOR => {
                             return Expr::Val(Val {
                                 value: Literal::Number(n ^ m),
+                                typ: VarType::Number,
                             });
                         }
                         _ => {}
@@ -214,16 +239,19 @@ impl<'a> Parser<'a> {
                         TokenType::LOGAND => {
                             return Expr::Val(Val {
                                 value: Literal::Bool(n & m),
+                                typ: VarType::Bool,
                             });
                         }
                         TokenType::LOGOR => {
                             return Expr::Val(Val {
                                 value: Literal::Bool(n | m),
+                                typ: VarType::Bool,
                             });
                         }
                         TokenType::LOGXOR => {
                             return Expr::Val(Val {
                                 value: Literal::Bool(n ^ m),
+                                typ: VarType::Bool,
                             });
                         }
                         _ => {}
@@ -260,31 +288,37 @@ impl<'a> Parser<'a> {
                         TokenType::COMPEQ => {
                             return Expr::Val(Val {
                                 value: Literal::Bool(n == m),
+                                typ: VarType::Bool,
                             });
                         }
                         TokenType::COMPNE => {
                             return Expr::Val(Val {
                                 value: Literal::Bool(n != m),
+                                typ: VarType::Bool,
                             });
                         }
                         TokenType::COMPGT => {
                             return Expr::Val(Val {
                                 value: Literal::Bool(n > m),
+                                typ: VarType::Bool,
                             });
                         }
                         TokenType::COMPGE => {
                             return Expr::Val(Val {
                                 value: Literal::Bool(n >= m),
+                                typ: VarType::Bool,
                             });
                         }
                         TokenType::COMPLT => {
                             return Expr::Val(Val {
                                 value: Literal::Bool(n < m),
+                                typ: VarType::Bool,
                             });
                         }
                         TokenType::COMPLE => {
                             return Expr::Val(Val {
                                 value: Literal::Bool(n <= m),
+                                typ: VarType::Bool,
                             });
                         }
                         _ => {}
@@ -293,11 +327,13 @@ impl<'a> Parser<'a> {
                         TokenType::COMPAND => {
                             return Expr::Val(Val {
                                 value: Literal::Bool(n && m),
+                                typ: VarType::Bool,
                             });
                         }
                         TokenType::COMPOR => {
                             return Expr::Val(Val {
                                 value: Literal::Bool(n || m),
+                                typ: VarType::Bool,
                             });
                         }
                         _ => {}
@@ -328,11 +364,13 @@ impl<'a> Parser<'a> {
                         TokenType::ADD => {
                             return Expr::Val(Val {
                                 value: Literal::Number(n + m),
+                                typ: VarType::Number,
                             });
                         }
                         TokenType::SUB => {
                             return Expr::Val(Val {
                                 value: Literal::Number(n - m),
+                                typ: VarType::Number,
                             });
                         }
                         _ => {}
@@ -363,11 +401,13 @@ impl<'a> Parser<'a> {
                         TokenType::MUL => {
                             return Expr::Val(Val {
                                 value: Literal::Number(n * m),
+                                typ: VarType::Number,
                             });
                         }
                         TokenType::DIV => {
                             return Expr::Val(Val {
                                 value: Literal::Number(n / m),
+                                typ: VarType::Number,
                             });
                         }
                         _ => {}
@@ -385,134 +425,160 @@ impl<'a> Parser<'a> {
         return left;
     }
     fn factor(&mut self) -> Expr {
-        if self.lexer.curr_tok().token == TokenType::LITERAL {
-            if let Some(val) = self.lexer.curr_tok().value {
+        match self.lexer.curr_tok().token {
+            TokenType::LITERAL(typ) => {
+                if let Some(val) = self.lexer.curr_tok().value {
+                    self.lexer.next_token();
+                    return Expr::Val(Val {
+                        value: val,
+                        typ: typ,
+                    });
+                } else {
+                    panic!()
+                }
+            }
+            TokenType::LPAREN => {
                 self.lexer.next_token();
-                return Expr::Val(Val { value: val });
-            }
-        } else if self.lexer.curr_tok().token == TokenType::LPAREN {
-            self.lexer.next_token();
-            let expr = self.expr();
-            if self.lexer.curr_tok().token != TokenType::RPAREN {
-                let mut err = GosError::new(self.lexer.curr_tok().row, self.lexer.curr_tok().col);
-                err.unexpected_char(Some(')'), self.lexer.curr_ch());
-                err.panic();
-            }
-            self.lexer.next_token();
-            return expr;
-        } else if self.lexer.curr_tok().token == TokenType::LBRACKET {
-            self.lexer.next_token();
-            let mut array: Vec<Expr> = Vec::new();
-            while self.lexer.curr_tok().token != TokenType::RBRACKET {
-                array.push(self.expr());
-                if self.lexer.curr_tok().token == TokenType::EOF {
+                let expr = self.expr();
+                if self.lexer.curr_tok().token != TokenType::RPAREN {
                     let mut err =
                         GosError::new(self.lexer.curr_tok().row, self.lexer.curr_tok().col);
-                    err.unexpected_char(Some(']'), self.lexer.curr_ch());
+                    err.unexpected_char(Some(')'), self.lexer.curr_ch());
                     err.panic();
                 }
+                self.lexer.next_token();
+                return expr;
             }
-
-            self.lexer.next_token();
-            return Expr::Val(Val {
-                value: Literal::Array(array),
-            });
-        } else if self.lexer.curr_tok().token == TokenType::NEG {
-            self.lexer.next_token();
-            let argument = self.expr();
-            match argument.clone() {
-                Expr::Val(val) => match val.value {
-                    Literal::Number(n) => {
-                        return Expr::Val(Val {
-                            value: Literal::Number(-n),
-                        });
-                    }
-                    _ => {}
-                },
-                _ => {}
-            }
-            return Expr::UnaryOp(UnaryOp {
-                argument: Box::new(argument),
-                operator: TokenType::NEG,
-            });
-        } else if self.lexer.curr_tok().token == TokenType::LOGNOT {
-            self.lexer.next_token();
-            let argument = self.expr();
-            match argument.clone() {
-                Expr::Val(val) => match val.value {
-                    Literal::Bool(n) => {
-                        return Expr::Val(Val {
-                            value: Literal::Bool(!n),
-                        });
-                    }
-                    _ => {}
-                },
-                _ => {}
-            }
-            return Expr::UnaryOp(UnaryOp {
-                argument: Box::new(argument),
-                operator: TokenType::LOGNOT,
-            });
-        } else if self.lexer.curr_tok().token == TokenType::IDENT {
-            let name = self.get_ident();
-            self.lexer.next_token();
-            match self.lexer.curr_tok().token {
-                TokenType::COLON => {
-                    self.lexer.next_token();
-                    return Expr::Label(Label { name: name });
-                }
-                TokenType::INC => {
-                    self.lexer.next_token();
-                    return Expr::UnaryOp(UnaryOp {
-                        argument: Box::new(Expr::Var(Var { name: name })),
-                        operator: TokenType::INC,
-                    });
-                }
-                TokenType::DEC => {
-                    self.lexer.next_token();
-                    return Expr::UnaryOp(UnaryOp {
-                        argument: Box::new(Expr::Var(Var { name: name })),
-                        operator: TokenType::DEC,
-                    });
-                }
-                TokenType::LPAREN => {
-                    self.lexer.next_token();
-                    let mut args: Vec<Expr> = Vec::new();
-                    while self.lexer.curr_tok().token != TokenType::RPAREN {
-                        args.push(self.expr());
-                    }
-                    self.lexer.next_token();
-                    return Expr::FuncCall(FuncCall { name, args: args });
-                }
-                TokenType::EQ => {
-                    self.lexer.next_token();
-                    let val = self.expr();
-                    return Expr::VarMod(VarMod {
-                        name,
-                        value: Box::new(val),
-                    });
-                }
-                TokenType::LBRACKET => {
-                    self.lexer.next_token();
-                    let offset = self.expr();
-                    if self.lexer.curr_tok().token != TokenType::RBRACKET {
+            TokenType::LBRACKET => {
+                self.lexer.next_token();
+                let mut array: Vec<Expr> = Vec::new();
+                while self.lexer.curr_tok().token != TokenType::RBRACKET {
+                    array.push(self.expr());
+                    if self.lexer.curr_tok().token == TokenType::EOF {
                         let mut err =
                             GosError::new(self.lexer.curr_tok().row, self.lexer.curr_tok().col);
                         err.unexpected_char(Some(']'), self.lexer.curr_ch());
                         err.panic();
                     }
-                    self.lexer.next_token();
-                    return Expr::ArrayAccess(ArrayAccess {
-                        array: name,
-                        offset: Box::new(offset),
-                    });
                 }
-                _ => return Expr::Var(Var { name }),
+
+                self.lexer.next_token();
+                return Expr::Val(Val {
+                    value: Literal::Array(array.len(), array.clone()),
+                    typ: VarType::Array(array.len()),
+                });
+            }
+            TokenType::NEG => {
+                self.lexer.next_token();
+                let argument = self.expr();
+                match argument.clone() {
+                    Expr::Val(val) => match val.value {
+                        Literal::Number(n) => {
+                            return Expr::Val(Val {
+                                value: Literal::Number(-n),
+                                typ: VarType::Number,
+                            });
+                        }
+                        _ => {}
+                    },
+                    _ => {}
+                }
+                return Expr::UnaryOp(UnaryOp {
+                    argument: Box::new(argument),
+                    operator: TokenType::NEG,
+                });
+            }
+            TokenType::LOGNOT => {
+                self.lexer.next_token();
+                let argument = self.expr();
+                match argument.clone() {
+                    Expr::Val(val) => match val.value {
+                        Literal::Bool(n) => {
+                            return Expr::Val(Val {
+                                value: Literal::Bool(!n),
+                                typ: VarType::Bool,
+                            });
+                        }
+                        _ => {}
+                    },
+                    _ => {}
+                }
+                return Expr::UnaryOp(UnaryOp {
+                    argument: Box::new(argument),
+                    operator: TokenType::LOGNOT,
+                });
+            }
+            TokenType::SIZEOF => {
+                self.lexer.next_token();
+                let argument = self.expr();
+                return Expr::UnaryOp(UnaryOp {
+                    argument: Box::new(argument),
+                    operator: TokenType::SIZEOF,
+                });
+            }
+            TokenType::IDENT => {
+                let name = self.get_ident();
+                self.lexer.next_token();
+                match self.lexer.curr_tok().token {
+                    TokenType::COLON => {
+                        self.lexer.next_token();
+                        return Expr::Label(Label { name: name });
+                    }
+                    TokenType::INC => {
+                        self.lexer.next_token();
+                        return Expr::UnaryOp(UnaryOp {
+                            argument: Box::new(Expr::Var(Var { name: name })),
+                            operator: TokenType::INC,
+                        });
+                    }
+                    TokenType::DEC => {
+                        self.lexer.next_token();
+                        return Expr::UnaryOp(UnaryOp {
+                            argument: Box::new(Expr::Var(Var { name: name })),
+                            operator: TokenType::DEC,
+                        });
+                    }
+                    TokenType::LPAREN => {
+                        self.lexer.next_token();
+                        let mut args: Vec<Expr> = Vec::new();
+                        while self.lexer.curr_tok().token != TokenType::RPAREN {
+                            args.push(self.expr());
+                        }
+                        self.lexer.next_token();
+                        return Expr::FuncCall(FuncCall { name, args: args });
+                    }
+                    TokenType::EQ => {
+                        self.lexer.next_token();
+                        let val = self.expr();
+                        return Expr::VarMod(VarMod {
+                            name,
+                            value: Box::new(val),
+                        });
+                    }
+                    TokenType::LBRACKET => {
+                        self.lexer.next_token();
+                        let offset = self.expr();
+                        if self.lexer.curr_tok().token != TokenType::RBRACKET {
+                            let mut err =
+                                GosError::new(self.lexer.curr_tok().row, self.lexer.curr_tok().col);
+                            err.unexpected_char(Some(']'), self.lexer.curr_ch());
+                            err.panic();
+                        }
+                        self.lexer.next_token();
+                        return Expr::ArrayAccess(ArrayAccess {
+                            array: name,
+                            offset: Box::new(offset),
+                        });
+                    }
+                    _ => return Expr::Var(Var { name }),
+                }
+            }
+            _ => {
+                let err = GosError::new(self.lexer.curr_tok().row, self.lexer.curr_tok().col);
+                err.panic();
+                panic!()
             }
         }
-        let err = GosError::new(self.lexer.curr_tok().row, self.lexer.curr_tok().col);
-        err.panic();
-        panic!()
     }
 
     fn get_ident(&mut self) -> String {

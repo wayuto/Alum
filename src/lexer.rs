@@ -2,7 +2,7 @@ use std::{iter::Peekable, str::Chars};
 
 use crate::{
     error::GosError,
-    token::{Literal, Token, TokenType},
+    token::{Literal, Token, TokenType, VarType},
 };
 
 #[derive(Debug, Clone)]
@@ -97,7 +97,7 @@ impl<'a> Lexer<'a> {
         } else if self.current().is_numeric() {
             let val = self.parse_number();
             self.tok = Token {
-                token: TokenType::LITERAL,
+                token: TokenType::LITERAL(VarType::Number),
                 value: Some(Literal::Number(val as i64)),
                 row: self.tok.row,
                 col: self.tok.col,
@@ -108,7 +108,7 @@ impl<'a> Lexer<'a> {
             match ident.as_str() {
                 "true" => {
                     self.tok = Token {
-                        token: TokenType::LITERAL,
+                        token: TokenType::LITERAL(VarType::Bool),
                         value: Some(Literal::Bool(true)),
                         row: self.tok.row,
                         col: self.tok.col,
@@ -116,7 +116,7 @@ impl<'a> Lexer<'a> {
                 }
                 "false" => {
                     self.tok = Token {
-                        token: TokenType::LITERAL,
+                        token: TokenType::LITERAL(VarType::Bool),
                         value: Some(Literal::Bool(false)),
                         row: self.tok.row,
                         col: self.tok.col,
@@ -124,7 +124,7 @@ impl<'a> Lexer<'a> {
                 }
                 "null" => {
                     self.tok = Token {
-                        token: TokenType::LITERAL,
+                        token: TokenType::LITERAL(VarType::Void),
                         value: Some(Literal::Void),
                         row: self.tok.row,
                         col: self.tok.col,
@@ -202,6 +202,43 @@ impl<'a> Lexer<'a> {
                         col: self.tok.col,
                     }
                 }
+                "num" => {
+                    self.tok = Token {
+                        token: TokenType::Type(VarType::Number),
+                        value: None,
+                        row: self.tok.row,
+                        col: self.tok.col,
+                    }
+                }
+                "arr" => {
+                    if self.current() != '<' {
+                        let mut err = GosError::new(self.tok.row, self.tok.col);
+                        err.unexpected_char(Some('<'), self.current());
+                        err.panic();
+                    }
+                    self.bump();
+                    let len = self.parse_number();
+                    if self.current() != '>' {
+                        let mut err = GosError::new(self.tok.row, self.tok.col);
+                        err.unexpected_char(Some('>'), self.current());
+                        err.panic();
+                    }
+                    self.bump();
+                    self.tok = Token {
+                        token: TokenType::Type(VarType::Array(len as usize)),
+                        value: None,
+                        row: self.tok.row,
+                        col: self.tok.col,
+                    }
+                }
+                "sizeof" => {
+                    self.tok = Token {
+                        token: TokenType::SIZEOF,
+                        value: None,
+                        row: self.tok.row,
+                        col: self.tok.col,
+                    }
+                }
                 _ => {
                     self.tok = Token {
                         token: TokenType::IDENT,
@@ -255,7 +292,7 @@ impl<'a> Lexer<'a> {
                 }
             }
             self.tok = Token {
-                token: TokenType::LITERAL,
+                token: TokenType::LITERAL(VarType::Str),
                 value: Some(Literal::Str(s)),
                 row: self.tok.row,
                 col: self.tok.col,
@@ -275,7 +312,7 @@ impl<'a> Lexer<'a> {
             }
             self.bump();
             self.tok = Token {
-                token: TokenType::LITERAL,
+                token: TokenType::LITERAL(VarType::Str),
                 value: Some(Literal::Str(s)),
                 row: self.tok.row,
                 col: self.tok.col,
