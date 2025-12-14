@@ -1,2 +1,10 @@
+mod codegen;
 mod compiler;
+mod gir;
+mod irgen;
+mod optimizer;
+pub use codegen::*;
 pub use compiler::*;
+pub use gir::*;
+pub use irgen::*;
+pub use optimizer::*;
