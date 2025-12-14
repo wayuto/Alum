@@ -1,4 +1,7 @@
-use crate::{bytecode::GVM, lexer::Lexer, parser::Parser, preprocessor::Preprocessor};
+#![allow(warnings)]
+use crate::{
+    bytecode::GVM, lexer::Lexer, native::IRGen, parser::Parser, preprocessor::Preprocessor,
+};
 use clap::{Arg, ArgAction, Command};
 use std::{fs, path::Path};
 
@@ -90,66 +93,9 @@ fn compile_native(file: &String, typ: &str, no_std: bool) -> () {
     let lexer = Lexer::new(&code);
     let mut parser = Parser::new(lexer);
     let ast = parser.parse();
-    let mut compiler = native::Compiler::new();
-    let assembly = compiler.compile(ast);
-
-    let stem = if let Some(idx) = file.rfind('.') {
-        &file[..idx]
-    } else {
-        file.as_str()
-    };
-    let asm_file = format!("{}.s", stem);
-    let obj_file = format!("{}.o", stem);
-    let bin_file = stem.to_string();
-
-    match typ {
-        "asm" => {
-            fs::write(&asm_file, &assembly).unwrap();
-        }
-        "obj" => {
-            fs::write(&asm_file, &assembly).unwrap();
-            let nasm_status = std::process::Command::new("nasm")
-                .args(&["-f", "elf64", "-o", &obj_file, &asm_file])
-                .status()
-                .expect("Failed to run nasm");
-            if !nasm_status.success() {
-                let _ = fs::remove_file(&asm_file);
-                println!("nasm failed");
-                std::process::exit(1);
-            }
-            let _ = fs::remove_file(&asm_file);
-        }
-        "bin" => {
-            fs::write(&asm_file, &assembly).unwrap();
-            let nasm_status = std::process::Command::new("nasm")
-                .args(&["-f", "elf64", "-o", &obj_file, &asm_file])
-                .status()
-                .expect("Failed to run nasm");
-            if !nasm_status.success() {
-                println!("nasm failed");
-                std::process::exit(1);
-            }
-
-            let mut ld_args = vec!["-o", &bin_file, &obj_file];
-            if !no_std {
-                ld_args.push("/usr/local/lib/libgos.a");
-            }
-            let ld_status = std::process::Command::new("ld")
-                .args(&ld_args)
-                .status()
-                .expect("Failed to run ld");
-            if !ld_status.success() {
-                let _ = fs::remove_file(&asm_file);
-                let _ = fs::remove_file(&obj_file);
-                println!("ld failed");
-                std::process::exit(1);
-            }
-
-            let _ = fs::remove_file(&asm_file);
-            let _ = fs::remove_file(&obj_file);
-        }
-        _ => {}
-    }
+    let mut irgen = IRGen::new();
+    let ir = irgen.compile(ast);
+    println!("{:?}", ir);
 }
 
 fn main() {
@@ -201,8 +147,25 @@ fn main() {
         );
 
     if std::env::args().len() == 1 {
-        cmd.clone().print_help().unwrap();
-        std::process::exit(0);
+        // cmd.clone().print_help().unwrap();
+        // std::process::exit(0);
+        let file = "/home/w/Gos/foo.gos";
+        let src = fs::read_to_string(file).unwrap();
+        let path = Path::new(&file)
+            .parent()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        let mut preprocessor = Preprocessor::new(&src, path);
+        let code = preprocessor.preprocess();
+        let lexer = Lexer::new(&code);
+        let mut parser = Parser::new(lexer);
+        let ast = parser.parse();
+        println!("{:#?}", ast);
+        let mut irgen = IRGen::new();
+        let ir = irgen.compile(ast);
+        println!("{:#?}", ir);
     }
 
     let matches = cmd.get_matches();

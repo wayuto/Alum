@@ -2,7 +2,7 @@
 pub enum IRType {
     Number,
     String,
-    Array,
+    Bool,
     Void,
 }
 
@@ -11,11 +11,12 @@ pub enum IRConst {
     I64(i64),
     Bool(bool),
     Str(String),
+    Void,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Operand {
-    Temp(u32),
+    Temp(usize, IRType),
     Var(String),
     Const(IRConst),
     Label(String),
@@ -59,10 +60,12 @@ pub struct IRFunction {
     pub name: String,
     pub params: Vec<(Operand, IRType)>,
     pub instructions: Vec<Instruction>,
+    pub ret_type: IRType,
+    pub is_pub: bool,
 }
 
 #[derive(Debug, Clone)]
 pub struct IRProgram {
     pub functions: Vec<IRFunction>,
-    pub data_section: Vec<IRConst>,
+    pub constants: Vec<IRConst>,
 }

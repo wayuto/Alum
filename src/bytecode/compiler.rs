@@ -306,7 +306,7 @@ impl Compiler {
 
                 self.enter_scope();
 
-                for param in decl.params {
+                for (param, typ) in decl.params {
                     self.decl_var(param);
                 }
 

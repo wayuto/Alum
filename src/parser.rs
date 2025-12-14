@@ -636,13 +636,14 @@ impl<'a> Parser<'a> {
     fn func_decl(&mut self, is_pub: bool) -> Expr {
         self.lexer.next_token();
         let name = self.get_ident();
-        let mut params: Vec<String> = Vec::new();
+        let mut params: Vec<(String, VarType)> = Vec::new();
         self.lexer.next_token();
         if self.lexer.curr_tok().token != TokenType::LPAREN {
             let mut err = GosError::new(self.lexer.curr_tok().row, self.lexer.curr_tok().col);
             err.unexpected_char(Some("("), self.lexer.curr_ch());
             err.panic();
         }
+        self.lexer.next_token();
         while self.lexer.curr_tok().token != TokenType::RPAREN {
             if self.lexer.curr_tok().token == TokenType::EOF
                 || self.lexer.curr_tok().token == TokenType::LBRACE
@@ -651,10 +652,64 @@ impl<'a> Parser<'a> {
                 err.unexpected_char(Some(")"), self.lexer.curr_ch());
                 err.panic();
             }
+            let name: String;
+            let typ: VarType;
             if self.lexer.curr_tok().token == TokenType::IDENT {
-                params.push(self.get_ident())
+                name = self.get_ident();
+            } else if self.lexer.curr_tok().token == TokenType::RPAREN {
+                break;
+            } else {
+                let mut err = GosError::new(self.lexer.curr_tok().row, self.lexer.curr_tok().col);
+                err.unexpected_char(Some("INDET"), self.lexer.curr_ch());
+                err.panic();
+                panic!()
             }
             self.lexer.next_token();
+            if self.lexer.curr_tok().token == TokenType::COLON {
+                self.lexer.next_token();
+                match self.lexer.curr_tok().token {
+                    TokenType::Type(vt) => {
+                        typ = vt;
+                    }
+                    _ => {
+                        let mut err =
+                            GosError::new(self.lexer.curr_tok().row, self.lexer.curr_tok().col);
+                        err.unexpected_char(Some("TYPE"), self.lexer.curr_ch());
+                        err.panic();
+                        panic!()
+                    }
+                }
+            } else {
+                let mut err = GosError::new(self.lexer.curr_tok().row, self.lexer.curr_tok().col);
+                err.unexpected_char(Some(":"), self.lexer.curr_ch());
+                err.panic();
+                panic!()
+            }
+            params.push((name, typ));
+            self.lexer.next_token();
+        }
+        self.lexer.next_token();
+        let ret_type: VarType;
+        if self.lexer.curr_tok().token == TokenType::COLON {
+            self.lexer.next_token();
+            match self.lexer.curr_tok().token {
+                TokenType::Type(vt) => {
+                    ret_type = vt;
+                }
+                _ => {
+                    println!("{:?}", self.lexer.curr_tok().token);
+                    let mut err =
+                        GosError::new(self.lexer.curr_tok().row, self.lexer.curr_tok().col);
+                    err.unexpected_char(Some("TYPE"), self.lexer.curr_ch());
+                    err.panic();
+                    panic!();
+                }
+            }
+        } else {
+            let mut err = GosError::new(self.lexer.curr_tok().row, self.lexer.curr_tok().col);
+            err.unexpected_char(Some(":"), self.lexer.curr_ch());
+            err.panic();
+            panic!();
         }
         self.lexer.next_token();
         let body = self.stmt();
@@ -662,6 +717,7 @@ impl<'a> Parser<'a> {
             name,
             params,
             body: Box::new(body),
+            ret_type,
             is_pub,
         })
     }

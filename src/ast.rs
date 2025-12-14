@@ -92,8 +92,9 @@ pub struct For {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FuncDecl {
     pub name: String,
-    pub params: Vec<String>,
+    pub params: Vec<(String, VarType)>,
     pub body: Box<Expr>,
+    pub ret_type: VarType,
     pub is_pub: bool,
 }
 
