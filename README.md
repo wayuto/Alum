@@ -109,7 +109,7 @@ let ld_status = std::process::Command::new("ld")
 ```gos
 $import "gosio"
 
-pub fun main() {
+pub fun main(): num {
     println("Hello world!")
     return 0
 }
@@ -127,18 +127,26 @@ Hello world!
 
 - ### _**Gos Standard Library**_
 - stdlib (_start, syscall, exit, ...)
-- gosio (write, read, print, println, printf, input)
+- gosio (write, read, print, println, input)
 - string (strlen)
 - convert (itoa, atoi)
 - math (abs, sqrt, max, min, pow, fact)
 - array (range, find)
 
+- ### _**Basic Types**_
+- num
+- str
+- bool
+- arr<N>
+- void
+
 - ### _**Variables**_
 
 ```gos
 let x: num = 1
-let y: num = 2
 let a: arr<5> = [1 2 3 4 5]
+let b: arr<_> = [1 2 3]
+let c: arr<5> = [0] # [0 0 0 0 0]
 ```
 
 - ### _**Flow Control**_
@@ -146,7 +154,7 @@ let a: arr<5> = [1 2 3 4 5]
 ```gos
 let x: num = 1
 let y: num = 2
-if (x < y) print(itoa(y)) else print(itoa(x))
+if x < y print(itoa(y)) else print(itoa(x))
 
 while true {
     print("I love you!")
@@ -156,7 +164,7 @@ while true {
 - ### _**Functions**_
 
 ```gos
-fun sum(x y) { return x + y }
+fun sum(x: num y: num): num { return x + y }
 sum(1 2)
 ```
 
@@ -196,7 +204,7 @@ print("Hello world!")
 - ### _**Interaction with C**_
 
 ```gos
-pub fun add(x y) {
+pub fun add(x: num y:num): num {
 	return x + y
 }
 ```
@@ -221,7 +229,7 @@ int add(int x, int y) {
 ```gos
 extern add
 
-pub fun main() {
+pub fun main(): num {
 	let sum: num = add(1 2)
 	return 0
 }

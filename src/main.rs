@@ -210,28 +210,8 @@ fn main() {
         );
 
     if std::env::args().len() == 1 {
-        // cmd.clone().print_help().unwrap();
-        // std::process::exit(0);
-        let file = "/home/w/Gos/foo.gos";
-        let src = fs::read_to_string(file).unwrap();
-        let path = Path::new(&file)
-            .parent()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .to_string();
-        let mut preprocessor = Preprocessor::new(&src, path);
-        let code = preprocessor.preprocess();
-        let lexer = Lexer::new(&code);
-        let mut parser = Parser::new(lexer);
-        let ast = parser.parse();
-        // println!("{:#?}", ast);
-        let mut irgen = IRGen::new();
-        let ir = irgen.compile(ast);
-        // println!("{:#?}", ir);
-        let mut compiler = CodeGen::new(ir);
-        let asm = compiler.compile();
-        println!("{}", asm);
+        cmd.clone().print_help().unwrap();
+        std::process::exit(0);
     }
 
     let matches = cmd.get_matches();
