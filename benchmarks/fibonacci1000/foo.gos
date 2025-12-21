@@ -7,7 +7,7 @@ fun fib(n: num a: num b: num): num {
 }
 
 
-pub fn main(): num {
+pub fun main(): num {
     let n: num = fib(1000 0 1)
     println(
         itoa(
