@@ -126,7 +126,7 @@ fun fib(n: num a: num b: num): num {
   return fib(n - 1 b a + b)
 }
 
-pub fn main(): num {
+pub fun main(): num {
   let n: num = fib(40 0 1)
   println(
     itoa(n)
