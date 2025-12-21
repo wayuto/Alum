@@ -8,7 +8,7 @@ fun fib(n: num a: num b: num): num {
 
 
 pub fn main(): num {
-    let n: num = fib(40 0 1)
+    let n: num = fib(1000 0 1)
     println(
         itoa(
             n

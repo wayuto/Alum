@@ -1,113 +1,105 @@
-# **The Gos Programming Language([中文版](README.zh.md))**
+# **Gos 编程语言([English](README.md))**
 
-Gos is a lightweight, efficient programming language featuring a hybrid
-execution model. It is implemented in **Rust** and designed to be both a
-compiled language for native performance and an interpreted language via a
-custom bytecode virtual machine (GVM).
+Gos 是一门轻量且高效的编程语言，采用混合执行模型。它以 **Rust**
+实现，既可以编译为原生可执行以获得高性能，也可以通过自定义字节码虚拟机（GVM）以解释模式运行。
 
-## **🚀 Installation**
+## **🚀 安装**
 
-### **Prerequisites**
+### **先决条件**
 
-Gos is designed for **x86_64 Linux** environments. Ensure you have the following
-installed:
+Gos 针对 **x86_64 Linux** 环境设计。请确保已安装：
 
-- **Rust & Cargo** (2024 edition)
-- **NASM** (The Netwide Assembler)
-- **ld** (GNU Linker)
+- **Rust & Cargo**（2024 版）
+- **NASM**（Netwide Assembler）
+- **ld**（GNU 链接器）
 
-### **Setup**
+### **设置**
 
-Clone the repository and run the automated installation script to set up the
-`gos` binary and the standard library:
+克隆仓库并运行自动安装脚本来设置 `gos` 可执行文件和标准库：
 
 ```bash
-# Clone the repository  
+# 克隆仓库  
 git clone --depth 1 https://github.com/wayuto/Gos ~/Gos  
 cd ~/Gos
 
-# Run the installation script  
-# This installs the 'gos' CLI, builds the standard library,   
-# and moves 'libgos.a' to /usr/local/lib  
+# 运行安装脚本  
+# 该脚本会安装 'gos' CLI、构建标准库，
+# 并将 'libgos.a' 移动到 /usr/local/lib  
 sh ./install.sh
 ```
 
-## **🛠 Features & Syntax**
+## **🛠 特性与语法**
 
-### **1. Dual Execution Model**
+### **1. 双重执行模型**
 
-- **Native Mode (-c):** Compiles code into a native ELF executable for x86_64
-  Linux.
-- **VM Mode:** Runs code through the built-in Gos Virtual Machine (GVM) using
-  custom bytecode.
+- **本地模式（-c）:** 将代码编译为 x86_64 Linux 的原生 ELF 可执行文件。
+- **虚拟机模式:** 使用内置的 Gos 虚拟机（GVM）和自定义字节码运行代码。
 
-### **2. Basic Types**
+### **2. 基本类型**
 
-- `num`: 64-bit signed integer/number.
-- `str`: String type.
-- `bool`: Boolean logic (true / false).
-- `arr<N>`: Fixed-size arrays (e.g., arr<5>).
-- `void`: Used for functions that do not return a value.
+- `num`：64 位有符号整数/数字。
+- `str`：字符串类型。
+- `bool`：布尔类型（true / false）。
+- `arr<N>`：定长数组（例如 `arr<5>`）。
+- `arr<_>`：长度从初始化推断的数组。
+- `void`：用于不返回值的函数。
 
-### **3. Variables & Constants**
+### **3. 变量与常量**
 
-```
+```gos
 let x: num = 42 
 let message: str = "Hello, Gos!"
-let flags: arr<3> = [1 2 3] 
-let dynamic: arr<_> = [1 2 3 4] # Length inferred as 4
+let flags: arr<3> = [true false true] 
+let dynamic: arr<_> = [1 2 3 4] # 长度被推断为 4
 ```
 
-### **4. Control Flow**
+### **4. 控制流**
 
-Gos supports modern control flow structures, including if-else expressions and
-loops.
+Gos 支持现代控制流结构，包括 if-else 表达式和循环。
 
-```
-# If-Else as an expression
+```gos
+# If-Else 作为表达式
 let result: str = if x > 10 "High" else "Low"
 
-# While loop
+# While 循环
 while x > 0 { x-- }
 
-# Range-based For loop ($import "array" before using `n..m`)
+# 基于区间的 For 循环（使用 `n..m` 之前需 $import "array"）
 for i in 0..10 { println(itoa(i)) }
 ```
 
-### **5. Block Scopes**
+### **5. 代码块作用域**
 
-In Gos, code blocks are expressions. The last value in a block is returned as
-the block's value.
+在 Gos 中，代码块是表达式。代码块中的最后一个值作为该块的返回值。
 
-```
+```gos
 let computed: num = { 
   let a: num = 10 
   let b: num = 20 
-  a + b # This is the block's value
+  a + b # 这是代码块的值
 }
 ```
 
-## **📚 Standard Library (gos-std)**
+## **📚 标准库（gos-std）**
 
-The Gos Standard Library provides essential functionality out of the box. Use
-`$import` to include them.
+Gos 标准库提供了常用的基础功能。使用 `$import` 引入模块。
 
-| Module      | Key Functions                              |
+| 模块        | 主要函数                                   |
 | :---------- | :----------------------------------------- |
 | **gosio**   | print, println, input, read, write         |
 | **math**    | abs, sqrt, max, min, pow, fact             |
 | **string**  | strlen, strcpy, strcat, memcpy, memset     |
-| **convert** | itoa (int to string), atoi (string to int) |
+| **convert** | itoa（整数转字符串）, atoi（字符串转整数） |
 | **array**   | range, find                                |
 | **stdlib**  | syscall, exit                              |
 
-## **💻 Language Examples**
+## **💻 语言示例**
 
 ### **Hello World**
 
-Save this as `hello.gos`:
+将以下内容保存为 `hello.gos`：
 
-```
+```gos
 $import "gosio"
 
 pub fun main(): num {
@@ -116,16 +108,16 @@ pub fun main(): num {
 }
 ```
 
-Run with:
+运行方式：
 
 ```bash
 gos -c hello.gos
 ./hello
 ```
 
-### **Recursive Fibonacci**
+### **递归斐波那契（示例）**
 
-```
+```gos
 $import "gosio"
 $import "convert"
 
@@ -143,14 +135,15 @@ pub fn main(): num {
 }
 ```
 
-## **🔗 FFI & Interoperability**
+## **🔗 FFI 与互操作性**
 
-Gos is designed to play well with C. You can declare external functions and call
-them directly. **Calling a C function in Gos:**
+Gos 设计为可与 C 很好互操作。你可以声明外部函数并直接调用它们。
 
-# Declare the external C function
+**在 Gos 中调用 C 函数：**
 
-```
+# 声明外部 C 函数
+
+```gos
 extern printf(str num): num
 
 pub fun main(): num {
@@ -159,36 +152,34 @@ pub fun main(): num {
 }
 ```
 
-**Exposing a Gos function to C:**
+**将 Gos 函数导出给 C：**
 
-# Use `pub` to make it visible to the linker
+# 使用 `pub` 使其对链接器可见
 
-```
+```gos
 pub fun add(x: num y: num): num {
   return x + y
 }
 ```
 
-## **📊 Benchmark**
+## **📊 基准测试**
 
-### Environment
+### 环境
 
-- CPU: Intel i5-8265U (8 cores @ 3.900GHz)
-- Memory: 8GB DDR4 (7647MiB)
-- Architecture: x86_64
-- Operating System: Arch Linux
-- Kernel Version: 6.18.1-zen1-2-zen
-- Desktop Environment: GNOME 49.2
+- CPU: Intel i5-8265U（8 核 @ 3.900GHz）
+- 内存: 8GB DDR4（7647MiB）
+- 架构: x86_64
+- 操作系统: Arch Linux
+- 内核版本: 6.18.1-zen1-2-zen
+- 桌面环境: GNOME 49.2
 
-### Test Content
+### 测试内容
 
-Performance test comparing three programming languages using tail recursion to
-compute the 1000th Fibonacci number:
+性能测试对比了三种使用尾递归计算第 1000 个斐波那契数的实现：
 
-- Gos Native 0.5.2: Gos language compiled to native
-- executable C (GCC -O3): C language compiled with GCC's highest optimization
-  level
-- Python 3.13.11: Python interpreted execution
+- Gos Native 0.5.2：Gos 语言编译为本地可执行文件
+- C 可执行文件（GCC -O3）：使用 GCC 高优化级别编译的 C
+- Python 3.13.11：Python 解释执行
 
 ```
 ➜  fibonacci1000 ./run.sh 
@@ -214,7 +205,7 @@ Summary
    83.32 ± 20.15 times faster than python foo.py
 ```
 
-## **⚙️ CLI Reference**
+## **⚙️ CLI 参考**
 
 ```bash
 The Gos programming language
