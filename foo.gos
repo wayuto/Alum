@@ -1,0 +1,3 @@
+pub fun main(): int {
+    let x: flt = 1.5
+}

@@ -1,5 +1,5 @@
-use std::{collections::HashMap, mem::take};
 use crate::gir::{IRConst, IRFunction, IRProgram, Instruction, Op, Operand};
+use std::{collections::HashMap, mem::take};
 
 macro_rules! assemble {
     ($buf:expr, $fmt:literal $(, $arg:expr)* $(,)?) => {
@@ -337,7 +337,7 @@ impl CodeGen {
         } else {
             match op {
                 Operand::ConstIdx(idx) => match &self.program.constants[*idx] {
-                    IRConst::Number(n) => assemble!(self.text, "mov {}, {}", reg, n),
+                    IRConst::Int(n) => assemble!(self.text, "mov {}, {}", reg, n),
                     IRConst::Bool(b) => {
                         assemble!(self.text, "mov {}, {}", reg, if *b { 1 } else { 0 })
                     }
@@ -347,6 +347,9 @@ impl CodeGen {
                         assemble!(self.text, "mov {}, {}", reg, lbl);
                     }
                     IRConst::Array(_, arr) => self.alloc_arr(arr.len(), arr.clone(), reg),
+                    IRConst::Float(f) => {
+                        unimplemented!()
+                    }
                 },
                 Operand::Var(_) | Operand::Temp(_, _) => {
                     assemble!(self.text, "mov {}, [rbp - {}]", reg, self.get_offset(op));

@@ -1,3 +1,5 @@
+use ordered_float::OrderedFloat;
+
 use crate::ast::Expr;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -54,7 +56,8 @@ pub enum TokenType {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Literal {
-    Number(i64),
+    Int(i64),
+    Float(OrderedFloat<f64>),
     Bool(bool),
     Str(String),
     Array(usize, Vec<Expr>),
@@ -63,7 +66,8 @@ pub enum Literal {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum VarType {
-    Number,
+    Int,
+    Float,
     Bool,
     Str,
     Array(Option<usize>),

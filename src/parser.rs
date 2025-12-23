@@ -7,7 +7,7 @@ use crate::{
     },
     error::GosError,
     lexer::Lexer,
-    token::{Literal, TokenType, VarType},
+    token::{Literal, Token, TokenType, VarType},
 };
 
 #[derive(Debug)]
@@ -180,7 +180,8 @@ impl<'a> Parser<'a> {
                 }
                 self.lexer.next_token();
                 let typ = match &self.lexer.curr_tok().token {
-                    TokenType::Type(VarType::Number) => VarType::Number,
+                    TokenType::Type(VarType::Int) => VarType::Int,
+                    TokenType::Type(VarType::Float) => VarType::Float,
                     TokenType::Type(VarType::Bool) => VarType::Bool,
                     TokenType::Type(VarType::Str) => VarType::Str,
                     TokenType::Type(VarType::Array(n)) => VarType::Array(*n),
@@ -283,23 +284,23 @@ impl<'a> Parser<'a> {
             let right = self.comparison();
             match (left.clone(), right.clone()) {
                 (Expr::Val(l), Expr::Val(r)) => match (l.value, r.value) {
-                    (Literal::Number(n), Literal::Number(m)) => match op.clone() {
+                    (Literal::Int(n), Literal::Int(m)) => match op.clone() {
                         TokenType::LOGAND => {
                             return Expr::Val(Val {
-                                value: Literal::Number(n & m),
-                                typ: VarType::Number,
+                                value: Literal::Int(n & m),
+                                typ: VarType::Int,
                             });
                         }
                         TokenType::LOGOR => {
                             return Expr::Val(Val {
-                                value: Literal::Number(n | m),
-                                typ: VarType::Number,
+                                value: Literal::Int(n | m),
+                                typ: VarType::Int,
                             });
                         }
                         TokenType::LOGXOR => {
                             return Expr::Val(Val {
-                                value: Literal::Number(n ^ m),
-                                typ: VarType::Number,
+                                value: Literal::Int(n ^ m),
+                                typ: VarType::Int,
                             });
                         }
                         _ => {}
@@ -354,7 +355,7 @@ impl<'a> Parser<'a> {
             let right = self.additive();
             match (left.clone(), right.clone()) {
                 (Expr::Val(l), Expr::Val(r)) => match (l.value, r.value) {
-                    (Literal::Number(n), Literal::Number(m)) => match op.clone() {
+                    (Literal::Int(n), Literal::Int(m)) => match op.clone() {
                         TokenType::COMPEQ => {
                             return Expr::Val(Val {
                                 value: Literal::Bool(n == m),
@@ -395,8 +396,8 @@ impl<'a> Parser<'a> {
                             let mut arr: Vec<Expr> = Vec::new();
                             for i in n..m {
                                 arr.push(Expr::Val(Val {
-                                    value: Literal::Number(i),
-                                    typ: VarType::Number,
+                                    value: Literal::Int(i),
+                                    typ: VarType::Int,
                                 }));
                             }
                             return Expr::Val(Val {
@@ -443,17 +444,17 @@ impl<'a> Parser<'a> {
             let right = self.term();
             match (left.clone(), right.clone()) {
                 (Expr::Val(l), Expr::Val(r)) => match (l.value, r.value) {
-                    (Literal::Number(n), Literal::Number(m)) => match op.clone() {
+                    (Literal::Int(n), Literal::Int(m)) => match op.clone() {
                         TokenType::ADD => {
                             return Expr::Val(Val {
-                                value: Literal::Number(n + m),
-                                typ: VarType::Number,
+                                value: Literal::Int(n + m),
+                                typ: VarType::Int,
                             });
                         }
                         TokenType::SUB => {
                             return Expr::Val(Val {
-                                value: Literal::Number(n - m),
-                                typ: VarType::Number,
+                                value: Literal::Int(n - m),
+                                typ: VarType::Int,
                             });
                         }
                         _ => {}
@@ -480,17 +481,17 @@ impl<'a> Parser<'a> {
             let right = self.factor();
             match (left.clone(), right.clone()) {
                 (Expr::Val(l), Expr::Val(r)) => match (l.value, r.value) {
-                    (Literal::Number(n), Literal::Number(m)) => match op.clone() {
+                    (Literal::Int(n), Literal::Int(m)) => match op.clone() {
                         TokenType::MUL => {
                             return Expr::Val(Val {
-                                value: Literal::Number(n * m),
-                                typ: VarType::Number,
+                                value: Literal::Int(n * m),
+                                typ: VarType::Int,
                             });
                         }
                         TokenType::DIV => {
                             return Expr::Val(Val {
-                                value: Literal::Number(n / m),
-                                typ: VarType::Number,
+                                value: Literal::Int(n / m),
+                                typ: VarType::Int,
                             });
                         }
                         _ => {}
@@ -556,10 +557,10 @@ impl<'a> Parser<'a> {
                 let argument = self.expr();
                 match argument.clone() {
                     Expr::Val(val) => match val.value {
-                        Literal::Number(n) => {
+                        Literal::Int(n) => {
                             return Expr::Val(Val {
-                                value: Literal::Number(-n),
-                                typ: VarType::Number,
+                                value: Literal::Int(-n),
+                                typ: VarType::Int,
                             });
                         }
                         _ => {}

@@ -2,14 +2,14 @@ $import "gosio"
 $import "convert"
 $import "array"
 
-pub fun main(): num {
+pub fun main(): int {
     let x: arr<_> = [10 9 8 7 6 5 4 3 2 1]
-    let N: num = sizeof x
+    let N: int = sizeof x
 
-    for i in 0..N-1 {
-        for j in 0..N-1-i {
+    for i in 0 ~ N-1 {
+        for j in 0 ~ N-1-i {
             if x[j] > x[j + 1] {
-                let temp: num = x[j]
+                let temp: int = x[j]
                 x[j] = x[j + 1]
                 x[j + 1] = temp
             }

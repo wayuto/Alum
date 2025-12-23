@@ -1,6 +1,6 @@
-extern abs(num): num
-extern sqrt(num): num
-extern max(num num): num
-extern min(num num): num
-extern pow(num num): num
-extern fact(num): num
+extern abs(int): int
+extern sqrt(int): int
+extern max(int int): int
+extern min(int int): int
+extern pow(int int): int
+extern fact(int): int

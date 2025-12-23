@@ -1,7 +1,7 @@
 use std::{collections::HashMap, iter::zip, mem::take};
 
 use crate::{
-    ast::{Expr, Extern, FuncDecl, Program},
+    ast::{Expr, Extern, FuncDecl, Program, Var},
     gir::{IRConst, IRFunction, IRProgram, IRType, Instruction, Op, Operand},
     token::{Literal, TokenType, VarType},
 };
@@ -60,7 +60,8 @@ impl Context {
 
     pub fn from_var_type(&self, var_type: &VarType) -> IRType {
         match var_type {
-            VarType::Number => IRType::Number,
+            VarType::Int => IRType::Int,
+            VarType::Float => IRType::Float,
             VarType::Bool => IRType::Bool,
             VarType::Str => IRType::String,
             VarType::Array(len) => IRType::Array(len.to_owned()),
@@ -71,7 +72,8 @@ impl Context {
     pub fn get_operand_type(&self, operand: &Operand) -> IRType {
         match operand {
             Operand::Const(c) => match c {
-                IRConst::Number(_) => IRType::Number,
+                IRConst::Int(_) => IRType::Int,
+                IRConst::Float(_) => IRType::Float,
                 IRConst::Bool(_) => IRType::Bool,
                 IRConst::Str(_) => IRType::String,
                 IRConst::Array(len, _) => IRType::Array(Some(len.to_owned())),
@@ -158,8 +160,9 @@ impl IRGen {
         match expr {
             Expr::Val(val) => {
                 let (ir_const, ir_type) = match val.value {
-                    Literal::Number(n) => (IRConst::Number(n), IRType::Number),
-                    Literal::Bool(b) => (IRConst::Number(if b { 1 } else { 0 }), IRType::Number),
+                    Literal::Int(n) => (IRConst::Int(n), IRType::Int),
+                    Literal::Float(f) => (IRConst::Float(f), IRType::Float),
+                    Literal::Bool(b) => (IRConst::Int(if b { 1 } else { 0 }), IRType::Int),
                     Literal::Str(s) => (IRConst::Str(s), IRType::String),
                     Literal::Void => return ctx.new_tmp(IRType::Void),
                     Literal::Array(len, arr) => {
@@ -484,11 +487,11 @@ impl IRGen {
 
                 let array_len_operand = match array_type {
                     IRType::Array(Some(l)) => {
-                        let idx = self.get_const_index(IRConst::Number(l as i64));
+                        let idx = self.get_const_index(IRConst::Int(l as i64));
                         Operand::ConstIdx(idx)
                     }
                     IRType::Array(None) => {
-                        let len_tmp = ctx.new_tmp(IRType::Number);
+                        let len_tmp = ctx.new_tmp(IRType::Int);
                         ctx.instructions.push(Instruction {
                             op: Op::SizeOf,
                             dst: Some(len_tmp.clone()),
@@ -506,9 +509,9 @@ impl IRGen {
                 ctx.enter_scope();
                 let idx_name = ctx.new_label("idx");
                 let idx_var = Operand::Var(idx_name.clone());
-                ctx.declare_var(idx_name.clone(), IRType::Number);
+                ctx.declare_var(idx_name.clone(), IRType::Int);
 
-                let zero_idx = self.get_const_index(IRConst::Number(0));
+                let zero_idx = self.get_const_index(IRConst::Int(0));
                 ctx.instructions.push(Instruction {
                     op: Op::Store,
                     dst: Some(idx_var.clone()),
@@ -525,7 +528,7 @@ impl IRGen {
                     src2: None,
                 });
 
-                let curr_idx = ctx.new_tmp(IRType::Number);
+                let curr_idx = ctx.new_tmp(IRType::Int);
                 ctx.instructions.push(Instruction {
                     op: Op::Load,
                     dst: Some(curr_idx.clone()),
@@ -548,8 +551,8 @@ impl IRGen {
                     src2: Some(Operand::Label(label_end.clone())),
                 });
 
-                ctx.declare_var(f.init.clone(), IRType::Number);
-                let element_tmp = ctx.new_tmp(IRType::Number);
+                ctx.declare_var(f.init.clone(), IRType::Int);
+                let element_tmp = ctx.new_tmp(IRType::Int);
 
                 ctx.instructions.push(Instruction {
                     op: Op::ArrayAccess,
@@ -567,8 +570,8 @@ impl IRGen {
 
                 self.compile_expr(*f.body, ctx);
 
-                let one_idx = self.get_const_index(IRConst::Number(1));
-                let next_idx = ctx.new_tmp(IRType::Number);
+                let one_idx = self.get_const_index(IRConst::Int(1));
+                let next_idx = ctx.new_tmp(IRType::Int);
 
                 ctx.instructions.push(Instruction {
                     op: Op::Add,
@@ -641,7 +644,7 @@ impl IRGen {
                 let arr = Operand::Var(aa.array.clone());
                 if let IRType::Array(_) = ctx.get_operand_type(&arr) {
                     let offset = self.compile_expr(*aa.offset, ctx);
-                    let res_tmp = ctx.new_tmp(IRType::Number);
+                    let res_tmp = ctx.new_tmp(IRType::Int);
                     ctx.instructions.push(Instruction {
                         op: Op::ArrayAccess,
                         dst: Some(res_tmp.clone()),
@@ -692,7 +695,7 @@ impl IRGen {
 
     fn global_constant(&mut self, literal: Literal) {
         match literal {
-            Literal::Number(n) => self.constants.push(IRConst::Number(n)),
+            Literal::Int(n) => self.constants.push(IRConst::Int(n)),
             Literal::Bool(b) => self.constants.push(IRConst::Bool(b)),
             Literal::Str(s) => self.constants.push(IRConst::Str(s)),
             _ => panic!("Invalid global constant type."),

@@ -1,5 +1,7 @@
 use std::{iter::Peekable, str::Chars};
 
+use ordered_float::OrderedFloat;
+
 use crate::{
     error::GosError,
     token::{Literal, Token, TokenType, VarType},
@@ -43,21 +45,29 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn parse_number(&mut self) -> u64 {
-        let mut int_part = 0u64;
+    fn parse_number(&mut self) -> f64 {
+        let mut int_part = 0;
+        let mut frac_part = 0;
+        let mut frac_div = 1;
 
         while self.current().is_numeric() {
-            int_part = int_part * 10 + self.current().to_digit(10).unwrap() as u64;
+            int_part = int_part * 10 + self.current().to_digit(10).unwrap();
             self.bump();
         }
 
-        // if self.current() == '.' {
-        //     let mut err = GosError::new(self.tok.row, self.tok.col);
-        //     err.unimplemented("float number");
-        //     err.panic();
-        // }
+        if self.current() == '.' {
+            self.bump();
+            if !self.current().is_numeric() {
+                panic!("Lexer: Invalid number: expected digit after '.'")
+            }
+            while self.current().is_numeric() {
+                frac_div *= 10;
+                frac_part = frac_part * 10 + self.current().to_digit(10).unwrap();
+                self.bump();
+            }
+        }
 
-        int_part
+        (int_part * frac_div + frac_part) as f64 / frac_div as f64
     }
 
     fn parse_ident(&mut self) -> String {
@@ -96,12 +106,21 @@ impl<'a> Lexer<'a> {
             return;
         } else if self.current().is_numeric() {
             let val = self.parse_number();
-            self.tok = Token {
-                token: TokenType::LITERAL(VarType::Number),
-                value: Some(Literal::Number(val as i64)),
-                row: self.tok.row,
-                col: self.tok.col,
-            };
+            if val.fract() == 0f64 {
+                self.tok = Token {
+                    token: TokenType::LITERAL(VarType::Int),
+                    value: Some(Literal::Int(val as i64)),
+                    row: self.tok.row,
+                    col: self.tok.col,
+                };
+            } else {
+                self.tok = Token {
+                    token: TokenType::LITERAL(VarType::Float),
+                    value: Some(Literal::Float(OrderedFloat(val))),
+                    row: self.tok.row,
+                    col: self.tok.col,
+                };
+            }
             return;
         } else if self.current().is_alphabetic() {
             let ident: String = self.parse_ident();
@@ -202,9 +221,17 @@ impl<'a> Lexer<'a> {
                         col: self.tok.col,
                     }
                 }
-                "num" => {
+                "int" => {
                     self.tok = Token {
-                        token: TokenType::Type(VarType::Number),
+                        token: TokenType::Type(VarType::Int),
+                        value: None,
+                        row: self.tok.row,
+                        col: self.tok.col,
+                    }
+                }
+                "flt" => {
+                    self.tok = Token {
+                        token: TokenType::Type(VarType::Float),
                         value: None,
                         row: self.tok.row,
                         col: self.tok.col,
@@ -607,21 +634,14 @@ impl<'a> Lexer<'a> {
             };
             self.bump();
             return;
-        } else if self.current() == '.' {
+        } else if self.current() == '~' {
+            self.tok = Token {
+                token: TokenType::RANGE,
+                value: None,
+                row: self.tok.row,
+                col: self.tok.col,
+            };
             self.bump();
-            if self.current() == '.' {
-                self.tok = Token {
-                    token: TokenType::RANGE,
-                    value: None,
-                    row: self.tok.row,
-                    col: self.tok.col,
-                };
-                self.bump();
-            } else {
-                let mut err = GosError::new(self.tok.row, self.tok.col);
-                err.unexpected_char(Some("."), self.current());
-                err.panic();
-            }
             return;
         } else if self.current() == '[' {
             self.tok = Token {

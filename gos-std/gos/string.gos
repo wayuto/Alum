@@ -1,7 +1,7 @@
-extern strlen(str): num
+extern strlen(str): int
 extern strcpy(str str): str
 extern strcat(str str): str
-extern memcmp(str str num): num
-extern memcpy(str str num): str
-extern memset(str num num): str
-extern bcmp(str str num): num
+extern memcmp(str str int): int
+extern memcpy(str str int): str
+extern memset(str int int): str
+extern bcmp(str str int): int

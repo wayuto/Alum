@@ -1,6 +1,9 @@
+use ordered_float::OrderedFloat;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum IRType {
-    Number,
+    Int,
+    Float,
     String,
     Bool,
     Array(Option<usize>),
@@ -9,7 +12,8 @@ pub enum IRType {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum IRConst {
-    Number(i64),
+    Int(i64),
+    Float(OrderedFloat<f64>),
     Bool(bool),
     Str(String),
     Array(usize, Vec<Operand>),

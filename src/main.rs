@@ -1,15 +1,16 @@
 #![allow(warnings)]
+use crate::codegen::CodeGen;
 use crate::irgen::IRGen;
 use crate::{lexer::Lexer, parser::Parser, preprocessor::Preprocessor};
 use clap::{Arg, ArgAction, Command};
 use std::{fs, path::Path};
 
 pub mod ast;
+pub mod codegen;
 pub mod error;
 pub mod gir;
 pub mod irgen;
 pub mod lexer;
-pub mod native;
 pub mod parser;
 pub mod preprocessor;
 pub mod token;
@@ -28,6 +29,24 @@ fn print_ast(file: &String) -> () {
     let mut parser = Parser::new(lexer);
     let ast = parser.parse();
     println!("{:#?}", ast);
+}
+
+fn print_ir(file: &String) -> () {
+    let src = fs::read_to_string(file).unwrap();
+    let path = Path::new(&file.clone())
+        .parent()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    let mut preprocessor = Preprocessor::new(src.as_str(), path);
+    let code = preprocessor.preprocess();
+    let lexer = Lexer::new(code.as_str());
+    let mut parser = Parser::new(lexer);
+    let ast = parser.parse();
+    let mut irgen = IRGen::new();
+    let ir = irgen.compile(ast);
+    println!("{:#?}", ir);
 }
 
 fn print_pred(file: &String) -> () {
@@ -58,7 +77,7 @@ fn compile_native(file: &String, typ: &str, no_std: bool) -> () {
     let ast = parser.parse();
     let mut irgen = IRGen::new();
     let ir = irgen.compile(ast);
-    let mut codegen = native::CodeGen::new(ir);
+    let mut codegen = CodeGen::new(ir);
     let assembly = codegen.compile();
 
     let stem = if let Some(idx) = file.rfind('.') {
@@ -131,6 +150,12 @@ fn main() {
                 .help("Print AST of the Gos source file"),
         )
         .arg(
+            Arg::new("ir")
+                .short('i')
+                .long("ir")
+                .help("Print IR of the Gos source file"),
+        )
+        .arg(
             Arg::new("compile")
                 .short('c')
                 .long("compile")
@@ -169,6 +194,8 @@ fn main() {
     let matches = cmd.get_matches();
     if let Some(file) = matches.get_one::<String>("ast") {
         print_ast(file);
+    } else if let Some(file) = matches.get_one::<String>("ir") {
+        print_ir(file);
     } else if let Some(file) = matches.get_one::<String>("preprocess") {
         print_pred(file);
     } else if let Some(file) = matches.get_one::<String>("compile") {

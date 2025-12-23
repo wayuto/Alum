@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 clap = "4.5.53"
+ordered-float = "5.1.0"
 
 [profile.release]
 opt-level = 3

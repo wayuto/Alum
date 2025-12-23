@@ -3,5 +3,5 @@ $import "string.gos"
 $import "convert.gos"
 $import "math.gos"
 $import "array.gos"
-extern syscall(num num num num): num
-extern exit(num): void
+extern syscall(int int int int): int
+extern exit(int): void

@@ -1,7 +1,7 @@
-extern range(num num): arr<_>
+extern range(int int): arr<_>
 
-pub fn find(a: arr<_> e: num): num {
-    let i: num = 0
+pub fn find(a: arr<_> e: int): int {
+    let i: int = 0
     while i < sizeof a {
         if a[i] == e {
             return i

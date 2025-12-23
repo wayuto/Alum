@@ -1,2 +1,2 @@
-extern itoa(num): str
-extern atoi(str): num
+extern itoa(int): str
+extern atoi(str): int
