@@ -1,8 +1,5 @@
 use std::{collections::HashMap, mem::take};
-
-use clap::builder::Str;
-
-use crate::native::{IRConst, IRFunction, IRProgram, Instruction, Op, Operand};
+use crate::gir::{IRConst, IRFunction, IRProgram, Instruction, Op, Operand};
 
 macro_rules! assemble {
     ($buf:expr, $fmt:literal $(, $arg:expr)* $(,)?) => {

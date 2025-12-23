@@ -1,7 +1,6 @@
 # **Gos 编程语言([English](README.md))**
 
-Gos 是一门轻量且高效的编程语言，采用混合执行模型。它以 **Rust**
-实现，既可以编译为原生可执行以获得高性能，也可以通过自定义字节码虚拟机（GVM）以解释模式运行。
+Gos 是一门用**Rust**实现的，轻量且高效的编程语言
 
 ## **🚀 安装**
 
@@ -30,12 +29,7 @@ sh ./install.sh
 
 ## **🛠 特性与语法**
 
-### **1. 双重执行模型**
-
-- **本地模式（-c）:** 将代码编译为 x86_64 Linux 的原生 ELF 可执行文件。
-- **虚拟机模式:** 使用内置的 Gos 虚拟机（GVM）和自定义字节码运行代码。
-
-### **2. 基本类型**
+### **基本类型**
 
 - `num`：64 位有符号整数/数字。
 - `str`：字符串类型。
@@ -43,7 +37,7 @@ sh ./install.sh
 - `arr<N>`：定长数组（例如 `arr<5>`）。
 - `void`：用于不返回值的函数。
 
-### **3. 变量与常量**
+### **变量与常量**
 
 ```gos
 let x: num = 42 
@@ -52,7 +46,7 @@ let flags: arr<3> = [1 2 3]
 let dynamic: arr<_> = [1 2 3 4] # 长度被推断为 4
 ```
 
-### **4. 控制流**
+### **控制流**
 
 Gos 支持现代控制流结构，包括 if-else 表达式和循环。
 
@@ -67,7 +61,7 @@ while x > 0 { x-- }
 for i in 0..10 { println(itoa(i)) }
 ```
 
-### **5. 代码块作用域**
+### **代码块作用域**
 
 在 Gos 中，代码块是表达式。代码块中的最后一个值作为该块的返回值。
 
@@ -186,13 +180,13 @@ Benchmark 1: ./foo
   Time (mean ± σ):     163.6 µs ±  38.8 µs    [User: 94.9 µs, System: 8.2 µs]
   Range (min … max):   121.4 µs … 2036.7 µs    17324 runs
  
-  Warning: Statistical outliers were detected. Consider re-running this benchmark on a quiet system without any interferences from other programs. It might help to use the '--warmup' or '--prepare' options.
+  Warning: Statistical outliers were detecteConsider re-running this benchmark on a quiet system without any interferences from other programIt might help to use the '--warmup' or '--prepare' options.
  
 Benchmark 2: ./a.out
   Time (mean ± σ):     479.4 µs ±  42.8 µs    [User: 267.1 µs, System: 117.8 µs]
   Range (min … max):   365.9 µs … 847.5 µs    5582 runs
  
-  Warning: Statistical outliers were detected. Consider re-running this benchmark on a quiet system without any interferences from other programs. It might help to use the '--warmup' or '--prepare' options.
+  Warning: Statistical outliers were detecteConsider re-running this benchmark on a quiet system without any interferences from other programIt might help to use the '--warmup' or '--prepare' options.
  
 Benchmark 3: python foo.py
   Time (mean ± σ):      13.6 ms ±   0.6 ms    [User: 10.7 ms, System: 2.7 ms]

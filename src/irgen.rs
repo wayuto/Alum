@@ -1,8 +1,8 @@
 use std::{collections::HashMap, iter::zip, mem::take};
 
 use crate::{
-    ast::{ArrayAccess, Expr, Extern, FuncDecl, Program},
-    native::{IRConst, IRFunction, IRProgram, IRType, Instruction, Op, Operand},
+    ast::{Expr, Extern, FuncDecl, Program},
+    gir::{IRConst, IRFunction, IRProgram, IRType, Instruction, Op, Operand},
     token::{Literal, TokenType, VarType},
 };
 
@@ -460,7 +460,7 @@ impl IRGen {
                 if !matches!(*w.body, Expr::Stmt(_)) {
                     ctx.enter_scope();
                 }
-                let while_body = self.compile_expr(*w.body.clone(), ctx);
+                self.compile_expr(*w.body.clone(), ctx);
                 if !matches!(*w.body, Expr::Stmt(_)) {
                     ctx.exit_scope();
                 }
@@ -666,7 +666,7 @@ impl IRGen {
                 });
                 res_tmp
             }
-            Expr::Extern(ext) => {
+            Expr::Extern(_) => {
                 panic!("SyntaxError: cannot extern a function in a function");
             }
             Expr::Goto(goto) => {

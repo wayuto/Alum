@@ -1,9 +1,7 @@
 # **The Gos Programming Language([中文版](README.zh.md))**
 
-Gos is a lightweight, efficient programming language featuring a hybrid
-execution model. It is implemented in **Rust** and designed to be both a
-compiled language for native performance and an interpreted language via a
-custom bytecode virtual machine (GVM).
+Gos is a lightweight, efficient programming language which is implemented in
+**Rust**
 
 ## **🚀 Installation**
 
@@ -34,14 +32,7 @@ sh ./install.sh
 
 ## **🛠 Features & Syntax**
 
-### **1. Dual Execution Model**
-
-- **Native Mode (-c):** Compiles code into a native ELF executable for x86_64
-  Linux.
-- **VM Mode:** Runs code through the built-in Gos Virtual Machine (GVM) using
-  custom bytecode.
-
-### **2. Basic Types**
+### **Basic Types**
 
 - `num`: 64-bit signed integer/number.
 - `str`: String type.
@@ -49,7 +40,7 @@ sh ./install.sh
 - `arr<N>`: Fixed-size arrays (e.g., arr<5>).
 - `void`: Used for functions that do not return a value.
 
-### **3. Variables & Constants**
+### **Variables & Constants**
 
 ```
 let x: num = 42 
@@ -58,7 +49,7 @@ let flags: arr<3> = [1 2 3]
 let dynamic: arr<_> = [1 2 3 4] # Length inferred as 4
 ```
 
-### **4. Control Flow**
+### **Control Flow**
 
 Gos supports modern control flow structures, including if-else expressions and
 loops.
@@ -74,7 +65,7 @@ while x > 0 { x-- }
 for i in 0..10 { println(itoa(i)) }
 ```
 
-### **5. Block Scopes**
+### **Block Scopes**
 
 In Gos, code blocks are expressions. The last value in a block is returned as
 the block's value.

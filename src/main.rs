@@ -1,41 +1,18 @@
 #![allow(warnings)]
-use crate::{
-    bytecode::GVM,
-    lexer::Lexer,
-    native::{CodeGen, IRGen},
-    parser::Parser,
-    preprocessor::Preprocessor,
-};
+use crate::irgen::IRGen;
+use crate::{lexer::Lexer, parser::Parser, preprocessor::Preprocessor};
 use clap::{Arg, ArgAction, Command};
 use std::{fs, path::Path};
 
 pub mod ast;
-pub mod bytecode;
 pub mod error;
+pub mod gir;
+pub mod irgen;
 pub mod lexer;
 pub mod native;
 pub mod parser;
 pub mod preprocessor;
 pub mod token;
-
-fn run_bytecode(file: &String) -> () {
-    let src = fs::read_to_string(file).unwrap();
-    let path = Path::new(&file.clone())
-        .parent()
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .to_string();
-    let mut preprocessor = Preprocessor::new(src.as_str(), path);
-    let code = preprocessor.preprocess();
-    let lexer = Lexer::new(code.as_str());
-    let mut parser = Parser::new(lexer);
-    let ast = parser.parse();
-    let mut compiler = bytecode::Compiler::new();
-    let bytecode = compiler.compile(ast);
-    let mut gvm = GVM::new(bytecode);
-    gvm.run();
-}
 
 fn print_ast(file: &String) -> () {
     let src = fs::read_to_string(file).unwrap();
@@ -66,24 +43,6 @@ fn print_pred(file: &String) -> () {
     println!("{}", code);
 }
 
-fn print_bytecode(file: &String) -> () {
-    let src = fs::read_to_string(file).unwrap();
-    let path = Path::new(&file.clone())
-        .parent()
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .to_string();
-    let mut preprocessor = Preprocessor::new(src.as_str(), path);
-    let code = preprocessor.preprocess();
-    let lexer = Lexer::new(code.as_str());
-    let mut parser = Parser::new(lexer);
-    let ast = parser.parse();
-    let mut compiler = bytecode::Compiler::new();
-    let bytecode = compiler.compile(ast);
-    bytecode.print();
-}
-
 fn compile_native(file: &String, typ: &str, no_std: bool) -> () {
     let src = fs::read_to_string(file).unwrap();
     let path = Path::new(&file)
@@ -99,7 +58,7 @@ fn compile_native(file: &String, typ: &str, no_std: bool) -> () {
     let ast = parser.parse();
     let mut irgen = IRGen::new();
     let ir = irgen.compile(ast);
-    let mut codegen = CodeGen::new(ir);
+    let mut codegen = native::CodeGen::new(ir);
     let assembly = codegen.compile();
 
     let stem = if let Some(idx) = file.rfind('.') {
@@ -165,7 +124,6 @@ fn main() {
     let cmd = Command::new("gos")
         .version("0.5.2")
         .about("The Gos programming language")
-        .arg(Arg::new("FILE").help("Run the Gos source file"))
         .arg(
             Arg::new("ast")
                 .short('a')
@@ -201,12 +159,6 @@ fn main() {
                 .short('p')
                 .long("preprocess")
                 .help("Print the preprocessed Gos source file"),
-        )
-        .arg(
-            Arg::new("disassemble")
-                .short('d')
-                .long("disassemble")
-                .help("Run the Gos source file"),
         );
 
     if std::env::args().len() == 1 {
@@ -215,15 +167,10 @@ fn main() {
     }
 
     let matches = cmd.get_matches();
-
-    if let Some(file) = matches.get_one::<String>("FILE") {
-        run_bytecode(file);
-    } else if let Some(file) = matches.get_one::<String>("ast") {
+    if let Some(file) = matches.get_one::<String>("ast") {
         print_ast(file);
     } else if let Some(file) = matches.get_one::<String>("preprocess") {
         print_pred(file);
-    } else if let Some(file) = matches.get_one::<String>("disassemble") {
-        print_bytecode(file);
     } else if let Some(file) = matches.get_one::<String>("compile") {
         if matches.get_flag("assembly") {
             compile_native(file, "asm", false);
