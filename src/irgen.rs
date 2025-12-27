@@ -9,6 +9,27 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
+pub enum IRGenError {
+    NameError { message: String },
+    TypeError { message: String },
+    ScopeError { message: String },
+    SyntaxError { message: String },
+}
+
+impl std::error::Error for IRGenError {}
+
+impl std::fmt::Display for IRGenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IRGenError::NameError { message } => write!(f, "Name error: {}", message),
+            IRGenError::TypeError { message } => write!(f, "Type error: {}", message),
+            IRGenError::ScopeError { message } => write!(f, "Scope error: {}", message),
+            IRGenError::SyntaxError { message } => write!(f, "Syntax error: {}", message),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 struct Symbol {
     pub name: String,
     pub ir_type: IRType,
@@ -47,17 +68,22 @@ impl Context {
         self.scope.push(Scope::new());
     }
 
-    pub fn exit_scope(&mut self) {
-        self.scope.pop().expect("Tried to pop the root scope.");
+    pub fn exit_scope(&mut self) -> Result<(), IRGenError> {
+        self.scope.pop().ok_or_else(|| IRGenError::ScopeError {
+            message: "Tried to pop the root scope.".to_string(),
+        })?;
+        Ok(())
     }
 
-    fn get_var_type(&self, name: &str) -> IRType {
+    fn get_var_type(&self, name: &str) -> Result<IRType, IRGenError> {
         for scope in self.scope.iter().rev() {
             if let Some(symbol) = scope.get(name) {
-                return symbol.ir_type.clone();
+                return Ok(symbol.ir_type.clone());
             }
         }
-        panic!("NameError: undefined variable '{}' in current scope.", name);
+        Err(IRGenError::NameError {
+            message: format!("undefined variable '{}' in current scope.", name),
+        })
     }
 
     pub fn from_var_type(&self, var_type: &VarType) -> IRType {
@@ -71,33 +97,35 @@ impl Context {
         }
     }
 
-    pub fn get_operand_type(&self, operand: &Operand) -> IRType {
+    pub fn get_operand_type(&self, operand: &Operand) -> Result<IRType, IRGenError> {
         match operand {
             Operand::Const(c) => match c {
-                IRConst::Int(_) => IRType::Int,
-                IRConst::Float(_) => IRType::Float,
-                IRConst::Bool(_) => IRType::Bool,
-                IRConst::Str(_) => IRType::String,
-                IRConst::Array(len, _) => IRType::Array(Some(len.to_owned())),
-                IRConst::Void => IRType::Void,
+                IRConst::Int(_) => Ok(IRType::Int),
+                IRConst::Float(_) => Ok(IRType::Float),
+                IRConst::Bool(_) => Ok(IRType::Bool),
+                IRConst::Str(_) => Ok(IRType::String),
+                IRConst::Array(len, _) => Ok(IRType::Array(Some(len.to_owned()))),
+                IRConst::Void => Ok(IRType::Void),
             },
             Operand::Var(name) => self.get_var_type(&name),
-            Operand::Temp(_, t) => t.to_owned(),
-            Operand::Label(_) => IRType::Void,
-            Operand::Function(_) => IRType::Void,
-            Operand::ConstIdx(_) => IRType::Void,
+            Operand::Temp(_, t) => Ok(t.to_owned()),
+            Operand::Label(_) => Ok(IRType::Void),
+            Operand::Function(_) => Ok(IRType::Void),
+            Operand::ConstIdx(_) => Ok(IRType::Void),
         }
     }
 
-    pub fn declare_var(&mut self, name: String, ir_type: IRType) {
-        let current_scope = self.scope.last_mut().unwrap();
+    pub fn declare_var(&mut self, name: String, ir_type: IRType) -> Result<(), IRGenError> {
+        let current_scope = self.scope.last_mut().ok_or_else(|| IRGenError::ScopeError {
+            message: "No scope available".to_string(),
+        })?;
         if current_scope.contains_key(&name) {
-            panic!(
-                "NameError: variable '{}' already declared in this scope.",
-                name
-            );
+            return Err(IRGenError::NameError {
+                message: format!("variable '{}' already declared in this scope.", name),
+            });
         }
         current_scope.insert(name.clone(), Symbol { name, ir_type });
+        Ok(())
     }
 }
 
@@ -116,14 +144,14 @@ impl IRGen {
         }
     }
 
-    pub fn compile(&mut self, program: Program) -> IRProgram {
+    pub fn compile(&mut self, program: Program) -> Result<IRProgram, IRGenError> {
         for expr in &program.body {
             match expr {
                 Expr::FuncDecl(decl) => {
-                    self.func_decl(decl.clone());
+                    self.func_decl(decl.clone())?;
                 }
                 Expr::Extern(ext) => {
-                    self.extern_decl(ext.clone());
+                    self.extern_decl(ext.clone())?;
                 }
                 _ => {}
             }
@@ -132,19 +160,19 @@ impl IRGen {
         for expr in program.body {
             match expr {
                 Expr::FuncDecl(decl) => {
-                    self.compile_fn(decl);
+                    self.compile_fn(decl)?;
                 }
                 Expr::Val(val) => {
-                    self.global_constant(val.value);
+                    self.global_constant(val.value)?;
                 }
                 _ => {}
             }
         }
 
-        IRProgram {
+        Ok(IRProgram {
             functions: take(&mut self.functions),
             constants: take(&mut self.constants),
-        }
+        })
     }
 
     fn get_const_index(&mut self, constant: IRConst) -> usize {
@@ -158,7 +186,7 @@ impl IRGen {
         index
     }
 
-    fn compile_expr(&mut self, expr: Expr, ctx: &mut Context) -> Operand {
+    fn compile_expr(&mut self, expr: Expr, ctx: &mut Context) -> Result<Operand, IRGenError> {
         match expr {
             Expr::Val(val) => {
                 let (ir_const, ir_type) = match val.value {
@@ -166,11 +194,11 @@ impl IRGen {
                     Literal::Float(f) => (IRConst::Float(f), IRType::Float),
                     Literal::Bool(b) => (IRConst::Int(if b { 1 } else { 0 }), IRType::Int),
                     Literal::Str(s) => (IRConst::Str(s), IRType::String),
-                    Literal::Void => return ctx.new_tmp(IRType::Void),
+                    Literal::Void => return Ok(ctx.new_tmp(IRType::Void)),
                     Literal::Array(len, arr) => {
                         let is_fill_syntax = len > 1 && arr.len() == 1;
                         if is_fill_syntax {
-                            let fill_element = self.compile_expr(arr[0].clone(), ctx);
+                            let fill_element = self.compile_expr(arr[0].clone(), ctx)?;
                             let mut elements = Vec::new();
                             for _ in 0..len {
                                 elements.push(fill_element.clone());
@@ -180,17 +208,19 @@ impl IRGen {
                                 IRType::Array(Some(elements.len())),
                             )
                         } else {
-                            let elements: Vec<Operand> = arr
-                                .iter()
-                                .map(|e| self.compile_expr(e.to_owned(), ctx))
-                                .collect();
+                            let mut elements = Vec::new();
+                            for e in arr.iter() {
+                                elements.push(self.compile_expr(e.to_owned(), ctx)?);
+                            }
 
                             if len != 0 && len != elements.len() {
-                                panic!(
-                                    "Array literal length mismatch: declared {}, actual {}",
-                                    len,
-                                    elements.len()
-                                );
+                                return Err(IRGenError::TypeError {
+                                    message: format!(
+                                        "Array literal length mismatch: declared {}, actual {}",
+                                        len,
+                                        elements.len()
+                                    ),
+                                });
                             }
 
                             (
@@ -217,12 +247,12 @@ impl IRGen {
                         src2: None,
                     }),
                 }
-                res_tmp
+                Ok(res_tmp)
             }
 
             Expr::VarDecl(decl) => {
-                let mut value = self.compile_expr(*decl.value.clone(), ctx);
-                let value_type = ctx.get_operand_type(&value);
+                let mut value = self.compile_expr(*decl.value.clone(), ctx)?;
+                let value_type = ctx.get_operand_type(&value)?;
 
                 let var_ir_type = match &decl.typ {
                     VarType::Array(Some(declared_len)) => {
@@ -240,8 +270,9 @@ impl IRGen {
                                                     IRConst::Array(*declared_len, new_elems);
                                                 let new_idx = self.get_const_index(new_const);
 
-                                                ctx.instructions.last_mut().unwrap().src1 =
-                                                    Some(Operand::ConstIdx(new_idx));
+                                                if let Some(last_inst) = ctx.instructions.last_mut() {
+                                                    last_inst.src1 = Some(Operand::ConstIdx(new_idx));
+                                                }
 
                                                 value = Operand::Temp(
                                                     ctx.tmp_cnt - 1,
@@ -252,17 +283,21 @@ impl IRGen {
                                     }
                                 }
                             } else if *declared_len != *actual_len {
-                                panic!("TypeError: array length mismatch");
+                                return Err(IRGenError::TypeError {
+                                    message: "array length mismatch".to_string(),
+                                });
                             }
                             IRType::Array(Some(*declared_len))
                         } else {
-                            panic!("TypeError: expected array");
+                            return Err(IRGenError::TypeError {
+                                message: "expected array".to_string(),
+                            });
                         }
                     }
                     _ => ctx.from_var_type(&decl.typ),
                 };
 
-                ctx.declare_var(decl.name.clone(), var_ir_type.clone());
+                ctx.declare_var(decl.name.clone(), var_ir_type.clone())?;
                 match var_ir_type {
                     IRType::Float => ctx.instructions.push(Instruction {
                         op: Op::FStore,
@@ -277,13 +312,16 @@ impl IRGen {
                         src2: None,
                     }),
                 }
-                ctx.new_tmp(IRType::Void)
+                Ok(ctx.new_tmp(IRType::Void))
             }
             Expr::VarMod(modi) => {
-                let value = self.compile_expr(*modi.value, ctx);
-                let typ = ctx.get_operand_type(&value);
-                if typ != ctx.get_var_type(&modi.name) {
-                    panic!("TypeError: unexpected type: {:?}", typ);
+                let value = self.compile_expr(*modi.value, ctx)?;
+                let typ = ctx.get_operand_type(&value)?;
+                let var_typ = ctx.get_var_type(&modi.name)?;
+                if typ != var_typ {
+                    return Err(IRGenError::TypeError {
+                        message: format!("unexpected type: {:?}", typ),
+                    });
                 }
                 match typ {
                     IRType::Float => ctx.instructions.push(Instruction {
@@ -299,10 +337,10 @@ impl IRGen {
                         src2: None,
                     }),
                 }
-                ctx.new_tmp(IRType::Void)
+                Ok(ctx.new_tmp(IRType::Void))
             }
             Expr::Var(var) => {
-                let var_type = ctx.get_var_type(&var.name);
+                let var_type = ctx.get_var_type(&var.name)?;
                 let res_tmp = ctx.new_tmp(var_type.clone());
                 match var_type {
                     IRType::Float => ctx.instructions.push(Instruction {
@@ -318,12 +356,12 @@ impl IRGen {
                         src2: None,
                     }),
                 }
-                res_tmp
+                Ok(res_tmp)
             }
             Expr::BinOp(bin) => {
-                let left = self.compile_expr(*bin.left, ctx);
-                let right = self.compile_expr(*bin.right, ctx);
-                let typ = ctx.get_operand_type(&left);
+                let left = self.compile_expr(*bin.left, ctx)?;
+                let right = self.compile_expr(*bin.right, ctx)?;
+                let typ = ctx.get_operand_type(&left)?;
                 let res_tmp: Operand;
                 if bin.operator == TokenType::RANGE {
                     res_tmp = ctx.new_tmp(IRType::Array(None));
@@ -356,10 +394,11 @@ impl IRGen {
                                 TokenType::COMPGE => Op::FGe,
                                 TokenType::COMPLT => Op::FLt,
                                 TokenType::COMPLE => Op::FLe,
-                                _ => panic!(
-                                    "OpError: unsupported float operation: {:?}",
-                                    bin.operator
-                                ),
+                                _ => {
+                                    return Err(IRGenError::TypeError {
+                                        message: format!("unsupported float operation: {:?}", bin.operator),
+                                    });
+                                }
                             },
                             _ => match bin.operator {
                                 TokenType::ADD => Op::Add,
@@ -374,24 +413,32 @@ impl IRGen {
                                 TokenType::COMPLE => Op::Le,
                                 TokenType::COMPAND => Op::And,
                                 TokenType::COMPOR => Op::Or,
-                                _ => panic!("OpError: unsupported operation: {:?}", bin.operator),
+                                _ => {
+                                    return Err(IRGenError::TypeError {
+                                        message: format!("unsupported operation: {:?}", bin.operator),
+                                    });
+                                }
                             },
                         },
                         TokenType::LOGAND => Op::LAnd,
                         TokenType::LOGOR => Op::LOr,
                         TokenType::LOGXOR => Op::Xor,
                         TokenType::RANGE => Op::Range,
-                        _ => panic!("OpError: unsupported operation: {:?}", bin.operator),
+                        _ => {
+                            return Err(IRGenError::TypeError {
+                                message: format!("unsupported operation: {:?}", bin.operator),
+                            });
+                        }
                     },
                     dst: Some(res_tmp.clone()),
                     src1: Some(left),
                     src2: Some(right),
                 });
-                res_tmp
+                Ok(res_tmp)
             }
             Expr::UnaryOp(unary) => {
-                let argument = self.compile_expr(*unary.argument, ctx);
-                let typ = ctx.get_operand_type(&argument);
+                let argument = self.compile_expr(*unary.argument, ctx)?;
+                let typ = ctx.get_operand_type(&argument)?;
                 let res_tmp = ctx.new_tmp(typ.clone());
                 match typ {
                     IRType::Float => match unary.operator {
@@ -413,7 +460,11 @@ impl IRGen {
                             src1: Some(argument.clone()),
                             src2: Some(Operand::Const(IRConst::Float(OrderedFloat(1.0)))),
                         }),
-                        _ => panic!("OpError: unsupported float unary operation"),
+                        _ => {
+                            return Err(IRGenError::TypeError {
+                                message: "unsupported float unary operation".to_string(),
+                            });
+                        }
                     },
                     _ => ctx.instructions.push(Instruction {
                         op: match unary.operator {
@@ -421,14 +472,18 @@ impl IRGen {
                             TokenType::INC => Op::Inc,
                             TokenType::DEC => Op::Dec,
                             TokenType::SIZEOF => Op::SizeOf,
-                            _ => panic!(),
+                            _ => {
+                                return Err(IRGenError::TypeError {
+                                    message: format!("unsupported unary operation: {:?}", unary.operator),
+                                });
+                            }
                         },
                         dst: Some(res_tmp.clone()),
                         src1: Some(argument),
                         src2: None,
                     }),
                 }
-                res_tmp
+                Ok(res_tmp)
             }
             Expr::Stmt(stmt) => {
                 ctx.enter_scope();
@@ -436,21 +491,21 @@ impl IRGen {
                 let body_len = stmt.body.len();
 
                 for i in 0..body_len.saturating_sub(1) {
-                    self.compile_expr(stmt.body[i].clone(), ctx);
+                    self.compile_expr(stmt.body[i].clone(), ctx)?;
                 }
 
                 let result_operand = if let Some(last_expr) = stmt.body.last() {
-                    self.compile_expr(last_expr.clone(), ctx)
+                    self.compile_expr(last_expr.clone(), ctx)?
                 } else {
                     ctx.new_tmp(IRType::Void)
                 };
-                ctx.exit_scope();
-                result_operand
+                ctx.exit_scope()?;
+                Ok(result_operand)
             }
             Expr::Return(ret_expr) => {
                 if let Some(val) = ret_expr.value {
-                    let res_op = self.compile_expr(*val, ctx);
-                    match ctx.get_operand_type(&res_op) {
+                    let res_op = self.compile_expr(*val, ctx)?;
+                    match ctx.get_operand_type(&res_op)? {
                         IRType::Float => ctx.instructions.push(Instruction {
                             op: Op::Return(String::from("xmm0")),
                             dst: None,
@@ -465,13 +520,13 @@ impl IRGen {
                         }),
                     }
                 }
-                ctx.new_tmp(IRType::Void)
+                Ok(ctx.new_tmp(IRType::Void))
             }
             Expr::If(i) => {
                 let label_else = ctx.new_label("else");
                 let label_end = ctx.new_label("endif");
 
-                let cond = self.compile_expr(*i.condition, ctx);
+                let cond = self.compile_expr(*i.condition, ctx)?;
 
                 ctx.instructions.push(Instruction {
                     op: Op::JumpIfFalse,
@@ -485,7 +540,7 @@ impl IRGen {
                 if !matches!(*i.then_branch, Expr::Stmt(_)) {
                     ctx.enter_scope();
                 }
-                let then_op = self.compile_expr(*i.then_branch.clone(), ctx);
+                let then_op = self.compile_expr(*i.then_branch.clone(), ctx)?;
 
                 ctx.instructions.push(Instruction {
                     op: Op::Move,
@@ -494,7 +549,7 @@ impl IRGen {
                     src2: None,
                 });
                 if !matches!(*i.then_branch, Expr::Stmt(_)) {
-                    ctx.exit_scope();
+                    ctx.exit_scope()?;
                 }
 
                 ctx.instructions.push(Instruction {
@@ -515,7 +570,7 @@ impl IRGen {
                     if !matches!(*else_expr, Expr::Stmt(_)) {
                         ctx.enter_scope();
                     }
-                    let else_op = self.compile_expr(*else_expr.to_owned(), ctx);
+                    let else_op = self.compile_expr(*else_expr.to_owned(), ctx)?;
 
                     ctx.instructions.push(Instruction {
                         op: Op::Move,
@@ -524,7 +579,7 @@ impl IRGen {
                         src2: None,
                     });
                     if !matches!(*else_expr.clone(), Expr::Stmt(_)) {
-                        ctx.exit_scope();
+                        ctx.exit_scope()?;
                     }
                 }
 
@@ -535,12 +590,12 @@ impl IRGen {
                     src2: None,
                 });
 
-                res_tmp
+                Ok(res_tmp)
             }
             Expr::While(w) => {
                 let label_start = ctx.new_label("while_start");
                 let label_end = ctx.new_label("while_end");
-                let cond = self.compile_expr(*w.condition, ctx);
+                let cond = self.compile_expr(*w.condition, ctx)?;
                 ctx.instructions.push(Instruction {
                     op: Op::JumpIfFalse,
                     dst: None,
@@ -556,9 +611,9 @@ impl IRGen {
                 if !matches!(*w.body, Expr::Stmt(_)) {
                     ctx.enter_scope();
                 }
-                self.compile_expr(*w.body.clone(), ctx);
+                self.compile_expr(*w.body.clone(), ctx)?;
                 if !matches!(*w.body, Expr::Stmt(_)) {
-                    ctx.exit_scope();
+                    ctx.exit_scope()?;
                 }
                 ctx.instructions.push(Instruction {
                     op: Op::Jump,
@@ -572,11 +627,11 @@ impl IRGen {
                     src1: None,
                     src2: None,
                 });
-                ctx.new_tmp(IRType::Void)
+                Ok(ctx.new_tmp(IRType::Void))
             }
             Expr::For(f) => {
-                let array_operand = self.compile_expr(*f.iter, ctx);
-                let array_type = ctx.get_operand_type(&array_operand);
+                let array_operand = self.compile_expr(*f.iter, ctx)?;
+                let array_type = ctx.get_operand_type(&array_operand)?;
 
                 let array_len_operand = match array_type {
                     IRType::Array(Some(l)) => {
@@ -593,16 +648,17 @@ impl IRGen {
                         });
                         len_tmp
                     }
-                    _ => panic!(
-                        "TypeError: can only iterate over arrays, found {:?}",
-                        array_type
-                    ),
+                    _ => {
+                        return Err(IRGenError::TypeError {
+                            message: format!("can only iterate over arrays, found {:?}", array_type),
+                        });
+                    }
                 };
 
                 ctx.enter_scope();
                 let idx_name = ctx.new_label("idx");
                 let idx_var = Operand::Var(idx_name.clone());
-                ctx.declare_var(idx_name.clone(), IRType::Int);
+                ctx.declare_var(idx_name.clone(), IRType::Int)?;
 
                 let zero_idx = self.get_const_index(IRConst::Int(0));
                 ctx.instructions.push(Instruction {
@@ -644,7 +700,7 @@ impl IRGen {
                     src2: Some(Operand::Label(label_end.clone())),
                 });
 
-                ctx.declare_var(f.init.clone(), IRType::Int);
+                ctx.declare_var(f.init.clone(), IRType::Int)?;
                 let element_tmp = ctx.new_tmp(IRType::Int);
 
                 ctx.instructions.push(Instruction {
@@ -661,7 +717,7 @@ impl IRGen {
                     src2: None,
                 });
 
-                self.compile_expr(*f.body, ctx);
+                self.compile_expr(*f.body, ctx)?;
 
                 let one_idx = self.get_const_index(IRConst::Int(1));
                 let next_idx = ctx.new_tmp(IRType::Int);
@@ -691,31 +747,38 @@ impl IRGen {
                     src2: None,
                 });
 
-                ctx.exit_scope();
-                ctx.new_tmp(IRType::Void)
+                ctx.exit_scope()?;
+                Ok(ctx.new_tmp(IRType::Void))
             }
             Expr::FuncDecl(_) => {
-                panic!("SyntaxError: cannot declare a function in a function");
+                return Err(IRGenError::SyntaxError {
+                    message: "cannot declare a function in a function".to_string(),
+                });
             }
             Expr::FuncCall(call) => {
-                let func = self.find_func(&call.name);
+                let func = self.find_func(&call.name)?;
                 if call.args.len() != func.params.len() {
-                    panic!(
-                        "TypeError: expected {} arguments, got {}",
-                        call.args.len(),
-                        func.params.len()
-                    );
+                    return Err(IRGenError::TypeError {
+                        message: format!(
+                            "expected {} arguments, got {}",
+                            func.params.len(),
+                            call.args.len()
+                        ),
+                    });
                 }
                 let res_tmp = ctx.new_tmp(ctx.from_var_type(&call.ret_type));
                 let mut n = 0;
                 for (arg, param) in zip(call.args.iter(), func.params.iter()) {
-                    let operand = self.compile_expr(arg.clone(), ctx);
-                    if ctx.get_operand_type(&operand) != param.1 {
-                        panic!(
-                            "TypeError: unexpected type {:?}, expected {:?}",
-                            ctx.get_operand_type(&operand),
-                            param.1
-                        );
+                    let operand = self.compile_expr(arg.clone(), ctx)?;
+                    let operand_type = ctx.get_operand_type(&operand)?;
+                    if operand_type != param.1 {
+                        return Err(IRGenError::TypeError {
+                            message: format!(
+                                "unexpected type {:?}, expected {:?}",
+                                operand_type,
+                                param.1
+                            ),
+                        });
                     }
                     match param.1 {
                         IRType::Float => ctx.instructions.push(Instruction {
@@ -739,12 +802,13 @@ impl IRGen {
                     src1: Some(Operand::Function(call.name)),
                     src2: None,
                 });
-                res_tmp
+                Ok(res_tmp)
             }
             Expr::ArrayAccess(aa) => {
                 let arr = Operand::Var(aa.array.clone());
-                if let IRType::Array(_) = ctx.get_operand_type(&arr) {
-                    let offset = self.compile_expr(*aa.offset, ctx);
+                let arr_type = ctx.get_operand_type(&arr)?;
+                if let IRType::Array(_) = arr_type {
+                    let offset = self.compile_expr(*aa.offset, ctx)?;
                     let res_tmp = ctx.new_tmp(IRType::Int);
                     ctx.instructions.push(Instruction {
                         op: Op::ArrayAccess,
@@ -752,26 +816,37 @@ impl IRGen {
                         src1: Some(arr),
                         src2: Some(offset),
                     });
-                    res_tmp
+                    Ok(res_tmp)
                 } else {
-                    panic!("TypeError: {} is not a array", aa.array);
+                    Err(IRGenError::TypeError {
+                        message: format!("{} is not an array", aa.array),
+                    })
                 }
             }
             Expr::ArrayAssign(aa) => {
-                let arr = Operand::Var(aa.array);
-                let offset = self.compile_expr(*aa.offset, ctx);
-                let val = self.compile_expr(*aa.value, ctx);
-                let res_tmp = ctx.new_tmp(IRType::Void);
-                ctx.instructions.push(Instruction {
-                    op: Op::ArrayAssign,
-                    dst: Some(arr),
-                    src1: Some(offset),
-                    src2: Some(val),
-                });
-                res_tmp
+                let arr = Operand::Var(aa.array.clone());
+                let arr_type = ctx.get_operand_type(&arr)?;
+                if let IRType::Array(_) = arr_type {
+                    let offset = self.compile_expr(*aa.offset, ctx)?;
+                    let val = self.compile_expr(*aa.value, ctx)?;
+                    let res_tmp = ctx.new_tmp(IRType::Void);
+                    ctx.instructions.push(Instruction {
+                        op: Op::ArrayAssign,
+                        dst: Some(arr),
+                        src1: Some(offset),
+                        src2: Some(val),
+                    });
+                    Ok(res_tmp)
+                } else {
+                    Err(IRGenError::TypeError {
+                        message: format!("{} is not an array", aa.array),
+                    })
+                }
             }
             Expr::Extern(_) => {
-                panic!("SyntaxError: cannot extern a function in a function");
+                return Err(IRGenError::SyntaxError {
+                    message: "cannot extern a function in a function".to_string(),
+                });
             }
             Expr::Goto(goto) => {
                 ctx.instructions.push(Instruction {
@@ -780,7 +855,7 @@ impl IRGen {
                     src1: Some(Operand::Label(goto.label)),
                     src2: None,
                 });
-                ctx.new_tmp(IRType::Void)
+                Ok(ctx.new_tmp(IRType::Void))
             }
             Expr::Label(label) => {
                 ctx.instructions.push(Instruction {
@@ -789,21 +864,32 @@ impl IRGen {
                     src1: None,
                     src2: None,
                 });
-                ctx.new_tmp(IRType::Void)
+                Ok(ctx.new_tmp(IRType::Void))
             }
         }
     }
 
-    fn global_constant(&mut self, literal: Literal) {
+    fn global_constant(&mut self, literal: Literal) -> Result<(), IRGenError> {
         match literal {
-            Literal::Int(n) => self.constants.push(IRConst::Int(n)),
-            Literal::Bool(b) => self.constants.push(IRConst::Bool(b)),
-            Literal::Str(s) => self.constants.push(IRConst::Str(s)),
-            _ => panic!("Invalid global constant type."),
+            Literal::Int(n) => {
+                self.constants.push(IRConst::Int(n));
+                Ok(())
+            }
+            Literal::Bool(b) => {
+                self.constants.push(IRConst::Bool(b));
+                Ok(())
+            }
+            Literal::Str(s) => {
+                self.constants.push(IRConst::Str(s));
+                Ok(())
+            }
+            _ => Err(IRGenError::TypeError {
+                message: "Invalid global constant type.".to_string(),
+            }),
         }
     }
 
-    fn func_decl(&mut self, decl: FuncDecl) {
+    fn func_decl(&mut self, decl: FuncDecl) -> Result<(), IRGenError> {
         let mut temp_ctx = Context::new();
         let params: Vec<(Operand, IRType)> = decl
             .params
@@ -822,30 +908,33 @@ impl IRGen {
             is_pub: decl.is_pub,
             is_external: false,
         });
+        Ok(())
     }
 
-    fn compile_fn(&mut self, decl: FuncDecl) {
+    fn compile_fn(&mut self, decl: FuncDecl) -> Result<(), IRGenError> {
         let name = decl.name.clone();
-        let func = self.find_func(&name);
+        let func = self.find_func(&name)?;
 
         let mut ctx = Context::new();
         ctx.enter_scope();
 
         for (i, (param, ty)) in func.params.iter().enumerate() {
             if let Operand::Var(name) = param {
-                ctx.scope.last_mut().unwrap().insert(
-                    name.clone(),
-                    Symbol {
-                        name: name.clone(),
-                        ir_type: ty.clone(),
-                    },
-                );
+                if let Some(scope) = ctx.scope.last_mut() {
+                    scope.insert(
+                        name.clone(),
+                        Symbol {
+                            name: name.clone(),
+                            ir_type: ty.clone(),
+                        },
+                    );
+                }
             }
         }
 
         let body = *decl.body;
-        let last_op = self.compile_expr(body, &mut ctx);
-        ctx.exit_scope();
+        let last_op = self.compile_expr(body, &mut ctx)?;
+        ctx.exit_scope()?;
 
         let last_inst_op = ctx.instructions.last().map(|i| i.op.clone());
 
@@ -869,9 +958,10 @@ impl IRGen {
         if let Some(f) = self.functions.iter_mut().find(|f| f.name == name) {
             f.instructions = take(&mut ctx.instructions);
         }
+        Ok(())
     }
 
-    fn extern_decl(&mut self, ext: Extern) -> () {
+    fn extern_decl(&mut self, ext: Extern) -> Result<(), IRGenError> {
         let name = ext.name;
         let params: Vec<(Operand, IRType)> = ext
             .params
@@ -895,14 +985,17 @@ impl IRGen {
             is_external: true,
         };
         self.functions.push(signature);
+        Ok(())
     }
 
-    fn find_func(&self, name: &String) -> IRFunction {
+    fn find_func(&self, name: &String) -> Result<IRFunction, IRGenError> {
         for func in self.functions.iter().rev() {
             if func.name == *name {
-                return func.to_owned();
+                return Ok(func.to_owned());
             }
         }
-        panic!("NameError: undefined function '{}' in current scope", name);
+        Err(IRGenError::NameError {
+            message: format!("undefined function '{}' in current scope", name),
+        })
     }
 }

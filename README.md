@@ -21,7 +21,7 @@ Clone the repository and run the automated installation script to set up the
 
 ```bash
 # Clone the repository  
-git clone --depth 1 https://github.com/wayuto/Gos ~/Gos  
+git clone --depth 1 https://github.com/wayuto/Gos ~/Gos
 cd ~/Gos
 
 # Run the installation script  
@@ -35,6 +35,7 @@ sh ./install.sh
 ### **Basic Types**
 
 - `num`: 64-bit signed integer/number.
+- `flt`: 64-bit floating-point number (IEEE 754 double precision).
 - `str`: String type.
 - `bool`: Boolean logic (true / false).
 - `arr<N>`: Fixed-size arrays (e.g., arr<5>).
@@ -44,10 +45,25 @@ sh ./install.sh
 
 ```
 let x: num = 42 
+let pi: flt = 3.14159
 let message: str = "Hello, Gos!"
 let flags: arr<3> = [1 2 3] 
 let dynamic: arr<_> = [1 2 3 4] # Length inferred as 4
 ```
+
+### **Floating-Point Numbers**
+
+Gos supports 64-bit floating-point numbers using the `flt` keyword.
+Floating-point literals can be written with decimal notation:
+
+```gos
+let pi: flt = 3.14159
+let e: flt = 2.71828
+let result: flt = 10.5 + 20.3
+```
+
+Floating-point numbers support all standard arithmetic operations (+, -, *, /)
+and comparisons (==, !=, >, >=, <, <=).
 
 ### **Control Flow**
 
@@ -77,6 +93,47 @@ let computed: num = {
   a + b # This is the block's value
 }
 ```
+
+## **🔧 Preprocessor Directives**
+
+Gos includes a preprocessor that supports directives for code organization and
+reuse.
+
+### **$import**
+
+The `$import` directive includes external Gos source files into your program:
+
+```gos
+$import "gosio"
+$import "math"
+```
+
+The preprocessor searches for imported files in:
+
+1. The same directory as the current file
+2. `/usr/local/gos/` (standard library location)
+
+### **$define**
+
+The `$define` directive allows you to define macros for text substitution:
+
+```gos
+$define PI 3.14159
+$define MAX_SIZE 100
+$define GREETING "Hello, Gos!"
+
+pub fun main(): num {
+  let arr: arr<MAX_SIZE> = [0]
+  let radius: flt = 5.0
+  let area: flt = PI * radius * radius
+  println(GREETING)
+  return 0
+}
+```
+
+Macros are simple text replacements that occur during preprocessing. They can be
+used for constants, simple expressions, or code snippets. Parameterized macros
+are not currently supported.
 
 ## **📚 Standard Library (gos-std)**
 
@@ -131,6 +188,22 @@ pub fn main(): num {
     itoa(n)
   ) 
   return 0 
+}
+```
+
+### **Floating-Point Calculation Example**
+
+```
+$import "gosio"
+$import "convert"
+
+pub fun main(): num {
+  let radius: flt = 5.0
+  let pi: flt = 3.14159
+  let area: flt = pi * radius * radius
+  println("Circle area: ")
+  # Note: You can use the ftoa function from the convert module to convert floats to strings
+  return 0
 }
 ```
 

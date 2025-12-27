@@ -7,7 +7,6 @@ use std::{fs, path::Path};
 
 pub mod ast;
 pub mod codegen;
-pub mod error;
 pub mod gir;
 pub mod irgen;
 pub mod lexer;
@@ -15,70 +14,73 @@ pub mod parser;
 pub mod preprocessor;
 pub mod token;
 
-fn print_ast(file: &String) -> () {
-    let src = fs::read_to_string(file).unwrap();
+fn print_ast(file: &String) -> Result<(), Box<dyn std::error::Error>> {
+    let src = fs::read_to_string(file)?;
     let path = Path::new(&file.clone())
         .parent()
-        .unwrap()
+        .ok_or("Invalid file path")?
         .to_str()
-        .unwrap()
+        .ok_or("Invalid path encoding")?
         .to_string();
     let mut preprocessor = Preprocessor::new(src.as_str(), path);
-    let code = preprocessor.preprocess();
+    let code = preprocessor.preprocess()?;
     let lexer = Lexer::new(code.as_str());
     let mut parser = Parser::new(lexer);
-    let ast = parser.parse();
+    let ast = parser.parse()?;
     println!("{:#?}", ast);
+    Ok(())
 }
 
-fn print_ir(file: &String) -> () {
-    let src = fs::read_to_string(file).unwrap();
+fn print_ir(file: &String) -> Result<(), Box<dyn std::error::Error>> {
+    let src = fs::read_to_string(file)?;
     let path = Path::new(&file.clone())
         .parent()
-        .unwrap()
+        .ok_or("Invalid file path")?
         .to_str()
-        .unwrap()
+        .ok_or("Invalid path encoding")?
         .to_string();
     let mut preprocessor = Preprocessor::new(src.as_str(), path);
-    let code = preprocessor.preprocess();
+    let code = preprocessor.preprocess()?;
     let lexer = Lexer::new(code.as_str());
     let mut parser = Parser::new(lexer);
-    let ast = parser.parse();
+    let ast = parser.parse()?;
     let mut irgen = IRGen::new();
-    let ir = irgen.compile(ast);
+    let ir = irgen.compile(ast)?;
     println!("{:#?}", ir);
+    Ok(())
 }
 
-fn print_pred(file: &String) -> () {
-    let src = fs::read_to_string(file).unwrap();
+fn print_pred(file: &String) -> Result<(), Box<dyn std::error::Error>> {
+    let src = fs::read_to_string(file)?;
     let path = Path::new(&file.clone())
         .parent()
-        .unwrap()
+        .ok_or("Invalid file path")?
         .to_str()
-        .unwrap()
+        .ok_or("Invalid path encoding")?
         .to_string();
     let mut preprocessor = Preprocessor::new(src.as_str(), path);
-    let code = preprocessor.preprocess();
+    let code = preprocessor.preprocess()?;
     println!("{}", code);
+    Ok(())
 }
 
-fn compile_native(file: &String, typ: &str, no_std: bool) -> () {
-    let src = fs::read_to_string(file).unwrap();
+fn compile_native(file: &String, typ: &str, no_std: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let src = fs::read_to_string(file)?;
     let path = Path::new(&file)
         .parent()
-        .unwrap()
+        .ok_or("Invalid file path")?
         .to_str()
-        .unwrap()
+        .ok_or("Invalid path encoding")?
         .to_string();
     let mut preprocessor = Preprocessor::new(&src, path);
-    let code = preprocessor.preprocess();
+    let code = preprocessor.preprocess()?;
     let lexer = Lexer::new(&code);
     let mut parser = Parser::new(lexer);
-    let ast = parser.parse();
+    let ast = parser.parse()?;
     let mut irgen = IRGen::new();
-    let ir = irgen.compile(ast);
+    let ir = irgen.compile(ast)?;
     let mut codegen = CodeGen::new(ir);
-    let assembly = codegen.compile();
+    let assembly = codegen.compile()?;
 
     let stem = if let Some(idx) = file.rfind('.') {
         &file[..idx]
@@ -91,30 +93,26 @@ fn compile_native(file: &String, typ: &str, no_std: bool) -> () {
 
     match typ {
         "asm" => {
-            fs::write(&asm_file, &assembly).unwrap();
+            fs::write(&asm_file, &assembly)?;
         }
         "obj" => {
-            fs::write(&asm_file, &assembly).unwrap();
+            fs::write(&asm_file, &assembly)?;
             let nasm_status = std::process::Command::new("nasm")
                 .args(&["-f", "elf64", "-o", &obj_file, &asm_file])
-                .status()
-                .expect("Failed to run nasm");
+                .status()?;
             if !nasm_status.success() {
                 let _ = fs::remove_file(&asm_file);
-                println!("nasm failed");
-                std::process::exit(1);
+                return Err("nasm failed".into());
             }
             let _ = fs::remove_file(&asm_file);
         }
         "bin" => {
-            fs::write(&asm_file, &assembly).unwrap();
+            fs::write(&asm_file, &assembly)?;
             let nasm_status = std::process::Command::new("nasm")
                 .args(&["-f", "elf64", "-o", &obj_file, &asm_file])
-                .status()
-                .expect("Failed to run nasm");
+                .status()?;
             if !nasm_status.success() {
-                println!("nasm failed");
-                std::process::exit(1);
+                return Err("nasm failed".into());
             }
 
             let mut ld_args = vec!["-o", &bin_file, &obj_file];
@@ -123,13 +121,11 @@ fn compile_native(file: &String, typ: &str, no_std: bool) -> () {
             }
             let ld_status = std::process::Command::new("ld")
                 .args(&ld_args)
-                .status()
-                .expect("Failed to run ld");
+                .status()?;
             if !ld_status.success() {
                 let _ = fs::remove_file(&asm_file);
                 let _ = fs::remove_file(&obj_file);
-                println!("ld failed");
-                std::process::exit(1);
+                return Err("ld failed".into());
             }
 
             let _ = fs::remove_file(&asm_file);
@@ -137,6 +133,7 @@ fn compile_native(file: &String, typ: &str, no_std: bool) -> () {
         }
         _ => {}
     }
+    Ok(())
 }
 
 fn main() {
@@ -187,24 +184,34 @@ fn main() {
         );
 
     if std::env::args().len() == 1 {
-        cmd.clone().print_help().unwrap();
+        if let Err(e) = cmd.clone().print_help() {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
         std::process::exit(0);
     }
 
     let matches = cmd.get_matches();
-    if let Some(file) = matches.get_one::<String>("ast") {
-        print_ast(file);
+    let result = if let Some(file) = matches.get_one::<String>("ast") {
+        print_ast(file)
     } else if let Some(file) = matches.get_one::<String>("ir") {
-        print_ir(file);
+        print_ir(file)
     } else if let Some(file) = matches.get_one::<String>("preprocess") {
-        print_pred(file);
+        print_pred(file)
     } else if let Some(file) = matches.get_one::<String>("compile") {
         if matches.get_flag("assembly") {
-            compile_native(file, "asm", false);
+            compile_native(file, "asm", false)
         } else if matches.get_flag("object") {
-            compile_native(file, "obj", false);
+            compile_native(file, "obj", false)
         } else {
-            compile_native(file, "bin", matches.get_flag("nostd"));
+            compile_native(file, "bin", matches.get_flag("nostd"))
         }
+    } else {
+        Ok(())
+    };
+
+    if let Err(e) = result {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
     }
 }

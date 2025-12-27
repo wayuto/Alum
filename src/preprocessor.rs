@@ -1,6 +1,25 @@
 use std::{fs, iter::Peekable, str::Chars};
 
-use crate::error::GosError;
+#[derive(Debug, Clone)]
+pub enum PreprocessorError {
+    ImportError { file: String, row: usize, col: usize },
+    IoError { message: String, row: usize, col: usize },
+}
+
+impl std::error::Error for PreprocessorError {}
+
+impl std::fmt::Display for PreprocessorError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PreprocessorError::ImportError { file, row, col } => {
+                write!(f, "Import error at {}:{}: cannot import '{}'", row, col, file)
+            }
+            PreprocessorError::IoError { message, row, col } => {
+                write!(f, "IO error at {}:{}: {}", row, col, message)
+            }
+        }
+    }
+}
 
 pub struct Preprocessor<'a> {
     pos: usize,
@@ -77,7 +96,7 @@ impl<'a> Preprocessor<'a> {
         None
     }
 
-    pub fn preprocess(&mut self) -> String {
+    pub fn preprocess(&mut self) -> Result<String, PreprocessorError> {
         let mut output = String::new();
         while self.current() != '\0' {
             output.push_str(
@@ -111,10 +130,10 @@ impl<'a> Preprocessor<'a> {
                             } else {
                                 format!("{}/{}.gos", self.path, file)
                             };
-                            match fs::read_to_string(src) {
+                            match fs::read_to_string(&src) {
                                 Ok(raw) => {
                                     let mut pp = Preprocessor::new(raw.as_str(), self.path.clone());
-                                    let conent = pp.preprocess();
+                                    let conent = pp.preprocess()?;
                                     output.push_str(&conent);
                                 }
                                 Err(_) => {
@@ -124,17 +143,19 @@ impl<'a> Preprocessor<'a> {
                                     } else {
                                         format!("{}/{}.gos", self.path, file)
                                     };
-                                    match fs::read_to_string(src) {
+                                    match fs::read_to_string(&src) {
                                         Ok(raw) => {
                                             let mut pp =
                                                 Preprocessor::new(raw.as_str(), self.path.clone());
-                                            let conent = pp.preprocess();
+                                            let conent = pp.preprocess()?;
                                             output.push_str(&conent);
                                         }
                                         Err(_) => {
-                                            let mut err = GosError::new(self.row, self.col);
-                                            err.import_error(file);
-                                            err.panic();
+                                            return Err(PreprocessorError::ImportError {
+                                                file: file.clone(),
+                                                row: self.row,
+                                                col: self.col,
+                                            });
                                         }
                                     }
                                 }
@@ -153,6 +174,6 @@ impl<'a> Preprocessor<'a> {
                 }
             }
         }
-        output
+        Ok(output)
     }
 }
