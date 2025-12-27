@@ -1,5 +1,7 @@
 use std::{collections::HashMap, iter::zip, mem::take};
 
+use ordered_float::OrderedFloat;
+
 use crate::{
     ast::{Expr, Extern, FuncDecl, Program, Var},
     gir::{IRConst, IRFunction, IRProgram, IRType, Instruction, Op, Operand},
@@ -167,15 +169,12 @@ impl IRGen {
                     Literal::Void => return ctx.new_tmp(IRType::Void),
                     Literal::Array(len, arr) => {
                         let is_fill_syntax = len > 1 && arr.len() == 1;
-
                         if is_fill_syntax {
                             let fill_element = self.compile_expr(arr[0].clone(), ctx);
-
                             let mut elements = Vec::new();
                             for _ in 0..len {
                                 elements.push(fill_element.clone());
                             }
-
                             (
                                 IRConst::Array(elements.len(), elements.clone()),
                                 IRType::Array(Some(elements.len())),
@@ -202,16 +201,22 @@ impl IRGen {
                     }
                 };
 
-                let res_tmp = ctx.new_tmp(ir_type);
-
+                let res_tmp = ctx.new_tmp(ir_type.clone());
                 let const_idx = self.get_const_index(ir_const);
-
-                ctx.instructions.push(Instruction {
-                    op: Op::Move,
-                    dst: Some(res_tmp.clone()),
-                    src1: Some(Operand::ConstIdx(const_idx)),
-                    src2: None,
-                });
+                match ir_type {
+                    IRType::Float => ctx.instructions.push(Instruction {
+                        op: Op::FMove,
+                        dst: Some(res_tmp.clone()),
+                        src1: Some(Operand::ConstIdx(const_idx)),
+                        src2: None,
+                    }),
+                    _ => ctx.instructions.push(Instruction {
+                        op: Op::Move,
+                        dst: Some(res_tmp.clone()),
+                        src1: Some(Operand::ConstIdx(const_idx)),
+                        src2: None,
+                    }),
+                }
                 res_tmp
             }
 
@@ -258,12 +263,20 @@ impl IRGen {
                 };
 
                 ctx.declare_var(decl.name.clone(), var_ir_type.clone());
-                ctx.instructions.push(Instruction {
-                    op: Op::Store,
-                    dst: Some(Operand::Var(decl.name)),
-                    src1: Some(value),
-                    src2: None,
-                });
+                match var_ir_type {
+                    IRType::Float => ctx.instructions.push(Instruction {
+                        op: Op::FStore,
+                        dst: Some(Operand::Var(decl.name)),
+                        src1: Some(value),
+                        src2: None,
+                    }),
+                    _ => ctx.instructions.push(Instruction {
+                        op: Op::Store,
+                        dst: Some(Operand::Var(decl.name)),
+                        src1: Some(value),
+                        src2: None,
+                    }),
+                }
                 ctx.new_tmp(IRType::Void)
             }
             Expr::VarMod(modi) => {
@@ -272,23 +285,39 @@ impl IRGen {
                 if typ != ctx.get_var_type(&modi.name) {
                     panic!("TypeError: unexpected type: {:?}", typ);
                 }
-                ctx.instructions.push(Instruction {
-                    op: Op::Store,
-                    dst: Some(Operand::Var(modi.name)),
-                    src1: Some(value),
-                    src2: None,
-                });
+                match typ {
+                    IRType::Float => ctx.instructions.push(Instruction {
+                        op: Op::FStore,
+                        dst: Some(Operand::Var(modi.name)),
+                        src1: Some(value),
+                        src2: None,
+                    }),
+                    _ => ctx.instructions.push(Instruction {
+                        op: Op::Store,
+                        dst: Some(Operand::Var(modi.name)),
+                        src1: Some(value),
+                        src2: None,
+                    }),
+                }
                 ctx.new_tmp(IRType::Void)
             }
             Expr::Var(var) => {
                 let var_type = ctx.get_var_type(&var.name);
-                let res_tmp = ctx.new_tmp(var_type);
-                ctx.instructions.push(Instruction {
-                    op: Op::Load,
-                    dst: Some(res_tmp.clone()),
-                    src1: Some(Operand::Var(var.name)),
-                    src2: None,
-                });
+                let res_tmp = ctx.new_tmp(var_type.clone());
+                match var_type {
+                    IRType::Float => ctx.instructions.push(Instruction {
+                        op: Op::FLoad,
+                        dst: Some(res_tmp.clone()),
+                        src1: Some(Operand::Var(var.name)),
+                        src2: None,
+                    }),
+                    _ => ctx.instructions.push(Instruction {
+                        op: Op::Load,
+                        dst: Some(res_tmp.clone()),
+                        src1: Some(Operand::Var(var.name)),
+                        src2: None,
+                    }),
+                }
                 res_tmp
             }
             Expr::BinOp(bin) => {
@@ -299,23 +328,55 @@ impl IRGen {
                 if bin.operator == TokenType::RANGE {
                     res_tmp = ctx.new_tmp(IRType::Array(None));
                 } else {
-                    res_tmp = ctx.new_tmp(typ);
+                    res_tmp = ctx.new_tmp(typ.clone());
                 }
 
                 ctx.instructions.push(Instruction {
                     op: match bin.operator {
-                        TokenType::ADD => Op::Add,
-                        TokenType::SUB => Op::Sub,
-                        TokenType::MUL => Op::Mul,
-                        TokenType::DIV => Op::Div,
-                        TokenType::COMPEQ => Op::Eq,
-                        TokenType::COMPNE => Op::Ne,
-                        TokenType::COMPGT => Op::Gt,
-                        TokenType::COMPGE => Op::Ge,
-                        TokenType::COMPLT => Op::Lt,
-                        TokenType::COMPLE => Op::Le,
-                        TokenType::COMPAND => Op::And,
-                        TokenType::COMPOR => Op::Or,
+                        TokenType::ADD
+                        | TokenType::SUB
+                        | TokenType::MUL
+                        | TokenType::DIV
+                        | TokenType::COMPEQ
+                        | TokenType::COMPNE
+                        | TokenType::COMPGT
+                        | TokenType::COMPGE
+                        | TokenType::COMPLT
+                        | TokenType::COMPLE
+                        | TokenType::COMPAND
+                        | TokenType::COMPOR => match typ {
+                            IRType::Float => match bin.operator {
+                                TokenType::ADD => Op::FAdd,
+                                TokenType::SUB => Op::FSub,
+                                TokenType::MUL => Op::FMul,
+                                TokenType::DIV => Op::FDiv,
+                                TokenType::COMPEQ => Op::FEq,
+                                TokenType::COMPNE => Op::FNe,
+                                TokenType::COMPGT => Op::FGt,
+                                TokenType::COMPGE => Op::FGe,
+                                TokenType::COMPLT => Op::FLt,
+                                TokenType::COMPLE => Op::FLe,
+                                _ => panic!(
+                                    "OpError: unsupported float operation: {:?}",
+                                    bin.operator
+                                ),
+                            },
+                            _ => match bin.operator {
+                                TokenType::ADD => Op::Add,
+                                TokenType::SUB => Op::Sub,
+                                TokenType::MUL => Op::Mul,
+                                TokenType::DIV => Op::Div,
+                                TokenType::COMPEQ => Op::Eq,
+                                TokenType::COMPNE => Op::Ne,
+                                TokenType::COMPGT => Op::Gt,
+                                TokenType::COMPGE => Op::Ge,
+                                TokenType::COMPLT => Op::Lt,
+                                TokenType::COMPLE => Op::Le,
+                                TokenType::COMPAND => Op::And,
+                                TokenType::COMPOR => Op::Or,
+                                _ => panic!("OpError: unsupported operation: {:?}", bin.operator),
+                            },
+                        },
                         TokenType::LOGAND => Op::LAnd,
                         TokenType::LOGOR => Op::LOr,
                         TokenType::LOGXOR => Op::Xor,
@@ -330,19 +391,43 @@ impl IRGen {
             }
             Expr::UnaryOp(unary) => {
                 let argument = self.compile_expr(*unary.argument, ctx);
-                let res_tmp = ctx.new_tmp(ctx.get_operand_type(&argument));
-                ctx.instructions.push(Instruction {
-                    op: match unary.operator {
-                        TokenType::NEG => Op::Neg,
-                        TokenType::INC => Op::Inc,
-                        TokenType::DEC => Op::Dec,
-                        TokenType::SIZEOF => Op::SizeOf,
-                        _ => panic!(),
+                let typ = ctx.get_operand_type(&argument);
+                let res_tmp = ctx.new_tmp(typ.clone());
+                match typ {
+                    IRType::Float => match unary.operator {
+                        TokenType::NEG => ctx.instructions.push(Instruction {
+                            op: Op::FNeg,
+                            dst: Some(res_tmp.clone()),
+                            src1: Some(argument.clone()),
+                            src2: None,
+                        }),
+                        TokenType::INC => ctx.instructions.push(Instruction {
+                            op: Op::FAdd,
+                            dst: Some(res_tmp.clone()),
+                            src1: Some(argument.clone()),
+                            src2: Some(Operand::Const(IRConst::Float(OrderedFloat(1.0)))),
+                        }),
+                        TokenType::DEC => ctx.instructions.push(Instruction {
+                            op: Op::FSub,
+                            dst: Some(res_tmp.clone()),
+                            src1: Some(argument.clone()),
+                            src2: Some(Operand::Const(IRConst::Float(OrderedFloat(1.0)))),
+                        }),
+                        _ => panic!("OpError: unsupported float unary operation"),
                     },
-                    dst: Some(res_tmp.clone()),
-                    src1: Some(argument),
-                    src2: None,
-                });
+                    _ => ctx.instructions.push(Instruction {
+                        op: match unary.operator {
+                            TokenType::NEG => Op::Neg,
+                            TokenType::INC => Op::Inc,
+                            TokenType::DEC => Op::Dec,
+                            TokenType::SIZEOF => Op::SizeOf,
+                            _ => panic!(),
+                        },
+                        dst: Some(res_tmp.clone()),
+                        src1: Some(argument),
+                        src2: None,
+                    }),
+                }
                 res_tmp
             }
             Expr::Stmt(stmt) => {
@@ -365,12 +450,20 @@ impl IRGen {
             Expr::Return(ret_expr) => {
                 if let Some(val) = ret_expr.value {
                     let res_op = self.compile_expr(*val, ctx);
-                    ctx.instructions.push(Instruction {
-                        op: Op::Return,
-                        dst: None,
-                        src1: Some(res_op),
-                        src2: None,
-                    });
+                    match ctx.get_operand_type(&res_op) {
+                        IRType::Float => ctx.instructions.push(Instruction {
+                            op: Op::Return(String::from("xmm0")),
+                            dst: None,
+                            src1: Some(res_op),
+                            src2: None,
+                        }),
+                        _ => ctx.instructions.push(Instruction {
+                            op: Op::Return(String::from("rax")),
+                            dst: None,
+                            src1: Some(res_op),
+                            src2: None,
+                        }),
+                    }
                 }
                 ctx.new_tmp(IRType::Void)
             }
@@ -624,12 +717,20 @@ impl IRGen {
                             param.1
                         );
                     }
-                    ctx.instructions.push(Instruction {
-                        op: Op::Arg(n),
-                        dst: None,
-                        src1: Some(operand),
-                        src2: None,
-                    });
+                    match param.1 {
+                        IRType::Float => ctx.instructions.push(Instruction {
+                            op: Op::FArg(n),
+                            dst: None,
+                            src1: Some(operand),
+                            src2: None,
+                        }),
+                        _ => ctx.instructions.push(Instruction {
+                            op: Op::Arg(n),
+                            dst: None,
+                            src1: Some(operand),
+                            src2: None,
+                        }),
+                    }
                     n += 1;
                 }
                 ctx.instructions.push(Instruction {
@@ -741,9 +842,12 @@ impl IRGen {
         let last_op = self.compile_expr(body, &mut ctx);
         ctx.exit_scope();
 
-        if ctx.instructions.last().map(|i| i.op.clone()) != Some(Op::Return) {
+        if matches!(
+            ctx.instructions.last().map(|i| i.op.clone()),
+            Some(Op::Return(_))
+        ) {
             ctx.instructions.push(Instruction {
-                op: Op::Return,
+                op: Op::Return(String::from("rax")),
                 dst: None,
                 src1: Some(last_op),
                 src2: None,

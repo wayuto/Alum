@@ -756,7 +756,6 @@ impl<'a> Parser<'a> {
                     ret_type = vt;
                 }
                 _ => {
-                    println!("{:?}", self.lexer.curr_tok().token);
                     let mut err =
                         GosError::new(self.lexer.curr_tok().row, self.lexer.curr_tok().col);
                     err.unexpected_char(Some("TYPE"), self.lexer.curr_ch());

@@ -1,5 +1,5 @@
-extern write(num str num): num
-extern read(num str num): num
-extern print(str): num
-extern println(str): num
+extern write(int str int): int
+extern read(int str int): int
+extern print(str): int
+extern println(str): int
 extern input(str): str

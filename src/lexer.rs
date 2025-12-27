@@ -11,6 +11,7 @@ use crate::{
 pub struct Lexer<'a> {
     tok: Token,
     src: Peekable<Chars<'a>>,
+    is_flt: bool,
 }
 
 impl<'a> Lexer<'a> {
@@ -23,6 +24,7 @@ impl<'a> Lexer<'a> {
                 col: 1,
             },
             src: src.chars().peekable(),
+            is_flt: false,
         }
     }
 
@@ -49,6 +51,7 @@ impl<'a> Lexer<'a> {
         let mut int_part = 0;
         let mut frac_part = 0;
         let mut frac_div = 1;
+        self.is_flt = false;
 
         while self.current().is_numeric() {
             int_part = int_part * 10 + self.current().to_digit(10).unwrap();
@@ -56,6 +59,7 @@ impl<'a> Lexer<'a> {
         }
 
         if self.current() == '.' {
+            self.is_flt = true;
             self.bump();
             if !self.current().is_numeric() {
                 panic!("Lexer: Invalid number: expected digit after '.'")
@@ -106,17 +110,17 @@ impl<'a> Lexer<'a> {
             return;
         } else if self.current().is_numeric() {
             let val = self.parse_number();
-            if val.fract() == 0f64 {
+            if self.is_flt {
                 self.tok = Token {
-                    token: TokenType::LITERAL(VarType::Int),
-                    value: Some(Literal::Int(val as i64)),
+                    token: TokenType::LITERAL(VarType::Float),
+                    value: Some(Literal::Float(OrderedFloat(val))),
                     row: self.tok.row,
                     col: self.tok.col,
                 };
             } else {
                 self.tok = Token {
-                    token: TokenType::LITERAL(VarType::Float),
-                    value: Some(Literal::Float(OrderedFloat(val))),
+                    token: TokenType::LITERAL(VarType::Int),
+                    value: Some(Literal::Int(val as i64)),
                     row: self.tok.row,
                     col: self.tok.col,
                 };
