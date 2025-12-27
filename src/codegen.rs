@@ -516,6 +516,9 @@ impl CodeGen {
                         let lbl = self.alloc_str(s.clone());
                         assemble!(self.text, "lea {}, [rel {}]", reg, lbl);
                     }
+                    IRConst::Array(len, arr) => {
+                        self.alloc_arr(*len, arr.clone(), reg);
+                    }
                     _ => {}
                 }
             }
@@ -533,6 +536,9 @@ impl CodeGen {
                 IRConst::Str(s) => {
                     let lbl = self.alloc_str(s.clone());
                     assemble!(self.text, "lea {}, [rel {}]", reg, lbl);
+                }
+                IRConst::Array(len, arr) => {
+                    self.alloc_arr(*len, arr.clone(), reg);
                 }
                 _ => {}
             },
