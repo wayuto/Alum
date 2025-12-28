@@ -1,4 +1,4 @@
-use std::{fs, iter::Peekable, str::Chars};
+use std::{collections::HashMap, fs, iter::Peekable, str::Chars};
 
 #[derive(Debug, Clone)]
 pub enum PreprocessorError {
@@ -22,52 +22,59 @@ impl std::fmt::Display for PreprocessorError {
 }
 
 pub struct Preprocessor<'a> {
-    pos: usize,
     src: Peekable<Chars<'a>>,
     path: String,
     row: usize,
     col: usize,
+    // 1. 添加宏定义存储
+    defines: HashMap<String, String>,
 }
 
 impl<'a> Preprocessor<'a> {
     pub fn new(src: &'a str, path: String) -> Self {
         Self {
-            pos: 0,
             src: src.chars().peekable(),
             path,
             row: 1,
             col: 0,
+            defines: HashMap::new(),
         }
+    }
+
+    // 辅助方法：将外部定义的宏传入（用于递归处理）
+    pub fn with_defines(mut self, defines: HashMap<String, String>) -> Self {
+        self.defines = defines;
+        self
     }
 
     fn current(&mut self) -> char {
         *self.src.peek().unwrap_or(&'\0')
     }
 
-    fn bump(&mut self) -> () {
-        self.src.next();
-        self.col += 1;
-    }
-
-    fn skip_spaces(&mut self) -> () {
-        while self.current() == ' ' || self.current() == '\t' || self.current() == '\n' {
-            if self.current() == '\n' {
+    fn bump(&mut self) {
+        if let Some(c) = self.src.next() {
+            if c == '\n' {
                 self.row += 1;
                 self.col = 0;
+            } else {
+                self.col += 1;
             }
+        }
+    }
+
+    fn skip_spaces(&mut self) {
+        while self.current() == ' ' || self.current() == '\t' {
             self.bump();
         }
     }
 
     fn parse_ident(&mut self) -> String {
         let mut ident = String::new();
-
-        if self.current().is_ascii_alphabetic() {
+        if self.current().is_ascii_alphabetic() || self.current() == '_' {
             ident.push(self.current());
             self.bump();
         }
-
-        while self.current().is_alphanumeric() {
+        while self.current().is_alphanumeric() || self.current() == '_' {
             ident.push(self.current());
             self.bump();
         }
@@ -76,102 +83,87 @@ impl<'a> Preprocessor<'a> {
 
     fn parser_file_path(&mut self) -> Option<String> {
         self.skip_spaces();
-        if self.current() != '"' {
-            return None;
-        }
-
+        if self.current() != '"' { return None; }
         self.bump();
-
         let mut file = String::new();
         while self.current() != '"' && self.current() != '\0' {
             file.push(self.current());
             self.bump();
         }
-
         if self.current() == '"' {
             self.bump();
             return Some(file);
         }
-
         None
     }
 
     pub fn preprocess(&mut self) -> Result<String, PreprocessorError> {
         let mut output = String::new();
+
         while self.current() != '\0' {
-            output.push_str(
-                (|| {
-                    let mut chunk = String::new();
-                    while self.current() != '\0' && self.current() != '$' {
-                        chunk.push(self.current());
-                        self.bump();
-                    }
-                    chunk
-                })()
-                .as_str(),
-            );
-            if self.current() == '\0' {
-                break;
-            }
             if self.current() == '$' {
-                let start_pos = self.pos;
                 self.bump();
                 let cmd = self.parse_ident();
 
                 match cmd.as_str() {
+                    "define" => {
+                        self.skip_spaces();
+                        let name = self.parse_ident();
+                        self.skip_spaces();
+                        let mut value = String::new();
+                        // 读取到行尾作为宏的值
+                        while self.current() != '\n' && self.current() != '\0' {
+                            value.push(self.current());
+                            self.bump();
+                        }
+                        self.defines.insert(name, value.trim().to_string());
+                    }
                     "import" => {
                         let file = self.parser_file_path();
-                        if let Some(file) = file {
-                            if self.path.is_empty() {
-                                self.path = '.'.to_string();
-                            }
-                            let src = if file.ends_with(".gos") {
-                                format!("{}/{}", self.path, file)
-                            } else {
-                                format!("{}/{}.gos", self.path, file)
-                            };
-                            match fs::read_to_string(&src) {
-                                Ok(raw) => {
-                                    let mut pp = Preprocessor::new(raw.as_str(), self.path.clone());
-                                    let conent = pp.preprocess()?;
-                                    output.push_str(&conent);
-                                }
-                                Err(_) => {
-                                    self.path = "/usr/local/gos".to_string();
-                                    let src = if file.ends_with(".gos") {
-                                        format!("{}/{}", self.path, file)
-                                    } else {
-                                        format!("{}/{}.gos", self.path, file)
-                                    };
-                                    match fs::read_to_string(&src) {
-                                        Ok(raw) => {
-                                            let mut pp =
-                                                Preprocessor::new(raw.as_str(), self.path.clone());
-                                            let conent = pp.preprocess()?;
-                                            output.push_str(&conent);
-                                        }
-                                        Err(_) => {
-                                            return Err(PreprocessorError::ImportError {
-                                                file: file.clone(),
-                                                row: self.row,
-                                                col: self.col,
-                                            });
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            self.pos = start_pos;
-                            output.push(self.current());
-                            self.bump();
+                        if let Some(file_name) = file {
+                            let base_path = if self.path.is_empty() { "." } else { &self.path };
+                            let mut src_path = format!("{}/{}", base_path, file_name);
+                            if !src_path.ends_with(".gos") { src_path.push_str(".gos"); }
+
+                            let content = fs::read_to_string(&src_path).or_else(|_| {
+                                let alt_path = format!("/usr/local/gos/{}", if file_name.ends_with(".gos") { file_name.clone() } else { format!("{}.gos", file_name) });
+                                fs::read_to_string(alt_path)
+                            }).map_err(|_| PreprocessorError::ImportError {
+                                file: file_name,
+                                row: self.row,
+                                col: self.col,
+                            })?;
+
+                            // 递归处理，传递当前的宏定义
+                            let mut pp = Preprocessor::new(&content, self.path.clone())
+                                .with_defines(self.defines.clone());
+                            output.push_str(&pp.preprocess()?);
+                            // 更新宏定义（如果 import 的文件里有新 define）
+                            self.defines = pp.defines;
                         }
                     }
                     _ => {
-                        self.pos = start_pos;
-                        output.push(self.current());
-                        self.bump();
+                        // 如果不是已知指令，可能是一个需要替换的宏
+                        if let Some(val) = self.defines.get(&cmd) {
+                            output.push_str(val);
+                        } else {
+                            // 原样输出
+                            output.push('$');
+                            output.push_str(&cmd);
+                        }
                     }
                 }
+            } else if self.current().is_ascii_alphabetic() || self.current() == '_' {
+                // 3. 自动识别并替换文本中的宏
+                let ident = self.parse_ident();
+                if let Some(val) = self.defines.get(&ident) {
+                    output.push_str(val);
+                } else {
+                    output.push_str(&ident);
+                }
+            } else {
+                output.push(self.current());
+                self.bump();
             }
         }
         Ok(output)
