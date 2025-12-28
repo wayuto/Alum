@@ -123,14 +123,14 @@ let area: flt = PI * radius * radius
 
 Gos 标准库提供了常用的基础功能。使用 `$import` 引入模块。
 
-| 模块        | 主要函数                                   |
-| :---------- | :----------------------------------------- |
-| **gosio**   | print, println, input, read, write         |
-| **math**    | abs, sqrt, max, min, pow, fact             |
-| **string**  | strlen, strcpy, strcat, memcpy, memset     |
-| **convert** | itoa（整数转字符串）, atoi（字符串转整数） |
-| **array**   | range, find                                |
-| **stdlib**  | syscall, exit                              |
+| 模块        | 主要函数                               |
+| :---------- | :------------------------------------- |
+| **gosio**   | print, println, input, read, write     |
+| **math**    | abs, sqrt, max, min, pow, fact         |
+| **string**  | strlen, strcpy, strcat, memcpy, memset |
+| **convert** | itoa, atoi, ftoa, atof                 |
+| **array**   | range, find                            |
+| **stdlib**  | syscall, exit                          |
 
 ## **💻 语言示例**
 

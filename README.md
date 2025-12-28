@@ -140,14 +140,14 @@ are not currently supported.
 The Gos Standard Library provides essential functionality out of the box. Use
 `$import` to include them.
 
-| Module      | Key Functions                              |
-| :---------- | :----------------------------------------- |
-| **gosio**   | print, println, input, read, write         |
-| **math**    | abs, sqrt, max, min, pow, fact             |
-| **string**  | strlen, strcpy, strcat, memcpy, memset     |
-| **convert** | itoa (int to string), atoi (string to int) |
-| **array**   | range, find                                |
-| **stdlib**  | syscall, exit                              |
+| Module      | Key Functions                          |
+| :---------- | :------------------------------------- |
+| **gosio**   | print, println, input, read, write     |
+| **math**    | abs, sqrt, max, min, pow, fact         |
+| **string**  | strlen, strcpy, strcat, memcpy, memset |
+| **convert** | itoa, atoi, ftoa, atof                 |
+| **array**   | range, find                            |
+| **stdlib**  | syscall, exit                          |
 
 ## **💻 Language Examples**
 
