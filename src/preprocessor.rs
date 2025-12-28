@@ -2,8 +2,16 @@ use std::{collections::HashMap, fs, iter::Peekable, str::Chars};
 
 #[derive(Debug, Clone)]
 pub enum PreprocessorError {
-    ImportError { file: String, row: usize, col: usize },
-    IoError { message: String, row: usize, col: usize },
+    ImportError {
+        file: String,
+        row: usize,
+        col: usize,
+    },
+    IoError {
+        message: String,
+        row: usize,
+        col: usize,
+    },
 }
 
 impl std::error::Error for PreprocessorError {}
@@ -12,7 +20,11 @@ impl std::fmt::Display for PreprocessorError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             PreprocessorError::ImportError { file, row, col } => {
-                write!(f, "Import error at {}:{}: cannot import '{}'", row, col, file)
+                write!(
+                    f,
+                    "Import error at {}:{}: cannot import '{}'",
+                    row, col, file
+                )
             }
             PreprocessorError::IoError { message, row, col } => {
                 write!(f, "IO error at {}:{}: {}", row, col, message)
@@ -26,7 +38,7 @@ pub struct Preprocessor<'a> {
     path: String,
     row: usize,
     col: usize,
-    // 1. 添加宏定义存储
+
     defines: HashMap<String, String>,
 }
 
@@ -41,7 +53,6 @@ impl<'a> Preprocessor<'a> {
         }
     }
 
-    // 辅助方法：将外部定义的宏传入（用于递归处理）
     pub fn with_defines(mut self, defines: HashMap<String, String>) -> Self {
         self.defines = defines;
         self
@@ -83,7 +94,9 @@ impl<'a> Preprocessor<'a> {
 
     fn parser_file_path(&mut self) -> Option<String> {
         self.skip_spaces();
-        if self.current() != '"' { return None; }
+        if self.current() != '"' {
+            return None;
+        }
         self.bump();
         let mut file = String::new();
         while self.current() != '"' && self.current() != '\0' {
@@ -111,7 +124,7 @@ impl<'a> Preprocessor<'a> {
                         let name = self.parse_ident();
                         self.skip_spaces();
                         let mut value = String::new();
-                        // 读取到行尾作为宏的值
+
                         while self.current() != '\n' && self.current() != '\0' {
                             value.push(self.current());
                             self.bump();
@@ -121,40 +134,51 @@ impl<'a> Preprocessor<'a> {
                     "import" => {
                         let file = self.parser_file_path();
                         if let Some(file_name) = file {
-                            let base_path = if self.path.is_empty() { "." } else { &self.path };
+                            let base_path = if self.path.is_empty() {
+                                "."
+                            } else {
+                                &self.path
+                            };
                             let mut src_path = format!("{}/{}", base_path, file_name);
-                            if !src_path.ends_with(".gos") { src_path.push_str(".gos"); }
+                            if !src_path.ends_with(".gos") {
+                                src_path.push_str(".gos");
+                            }
 
-                            let content = fs::read_to_string(&src_path).or_else(|_| {
-                                let alt_path = format!("/usr/local/gos/{}", if file_name.ends_with(".gos") { file_name.clone() } else { format!("{}.gos", file_name) });
-                                fs::read_to_string(alt_path)
-                            }).map_err(|_| PreprocessorError::ImportError {
-                                file: file_name,
-                                row: self.row,
-                                col: self.col,
-                            })?;
+                            let content = fs::read_to_string(&src_path)
+                                .or_else(|_| {
+                                    let alt_path = format!(
+                                        "/usr/local/gos/{}",
+                                        if file_name.ends_with(".gos") {
+                                            file_name.clone()
+                                        } else {
+                                            format!("{}.gos", file_name)
+                                        }
+                                    );
+                                    fs::read_to_string(alt_path)
+                                })
+                                .map_err(|_| PreprocessorError::ImportError {
+                                    file: file_name,
+                                    row: self.row,
+                                    col: self.col,
+                                })?;
 
-                            // 递归处理，传递当前的宏定义
                             let mut pp = Preprocessor::new(&content, self.path.clone())
                                 .with_defines(self.defines.clone());
                             output.push_str(&pp.preprocess()?);
-                            // 更新宏定义（如果 import 的文件里有新 define）
+
                             self.defines = pp.defines;
                         }
                     }
                     _ => {
-                        // 如果不是已知指令，可能是一个需要替换的宏
                         if let Some(val) = self.defines.get(&cmd) {
                             output.push_str(val);
                         } else {
-                            // 原样输出
                             output.push('$');
                             output.push_str(&cmd);
                         }
                     }
                 }
             } else if self.current().is_ascii_alphabetic() || self.current() == '_' {
-                // 3. 自动识别并替换文本中的宏
                 let ident = self.parse_ident();
                 if let Some(val) = self.defines.get(&ident) {
                     output.push_str(val);
