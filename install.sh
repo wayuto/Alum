@@ -1,5 +1,5 @@
 cargo install --path .
-cd gos-std
+cd alum-std
 cargo build --release
-sudo cp target/release/libgos_std.a /usr/local/lib/libgos.a
-sudo cp -r gos/ /usr/local
+sudo cp target/release/libalum_std.a /usr/local/lib/libalum.a
+sudo cp -r alum/ /usr/local

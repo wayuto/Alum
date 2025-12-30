@@ -1,4 +1,4 @@
-$import "stdlib"
+$import "lib"
 
 pub fun main(): int {
     let x: arr<_> = [10 9 8 7 6 5 4 3 2 1]

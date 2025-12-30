@@ -3,6 +3,14 @@
 version = 4
 
 [[package]]
+name = "al"
+version = "0.5.2"
+dependencies = [
+ "clap",
+ "ordered-float",
+]
+
+[[package]]
 name = "anstream"
 version = "0.6.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -90,14 +98,6 @@ name = "colorchoice"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
-
-[[package]]
-name = "gos"
-version = "0.5.2"
-dependencies = [
- "clap",
- "ordered-float",
-]
 
 [[package]]
 name = "is_terminal_polyfill"

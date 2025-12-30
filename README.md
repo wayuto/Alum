@@ -1,14 +1,14 @@
-# **The Gos Programming Language([中文版](README.zh.md))**
+# **The Alum Programming Language**
 
-Gos is a lightweight, efficient programming language which is implemented in
+Alum is a lightweight, efficient programming language which is implemented in
 **Rust**
 
 ## **🚀 Installation**
 
 ### **Prerequisites**
 
-Gos is designed for **x86_64 Linux** environments. Ensure you have the following
-installed:
+Alum is designed for **x86_64 Linux** environments. Ensure you have the
+following installed:
 
 - **Rust & Cargo** (2024 edition)
 - **NASM** (The Netwide Assembler)
@@ -17,16 +17,16 @@ installed:
 ### **Setup**
 
 Clone the repository and run the automated installation script to set up the
-`gos` binary and the standard library:
+`al` binary and the standard library:
 
 ```bash
 # Clone the repository  
-git clone --depth 1 https://github.com/wayuto/Gos ~/Gos
-cd ~/Gos
+git clone --depth 1 https://github.com/wayuto/Alum ~/Alum
+cd ~/Alum
 
 # Run the installation script  
-# This installs the 'gos' CLI, builds the standard library,   
-# and moves 'libgos.a' to /usr/local/lib  
+# This installs the 'al' CLI, builds the standard library,   
+# and moves 'libal.a' to /usr/local/lib  
 sh ./install.sh
 ```
 
@@ -46,17 +46,17 @@ sh ./install.sh
 ```
 let x: int = 42 
 let pi: flt = 3.14159
-let message: str = "Hello, Gos!"
+let message: str = "Hello, Alum!"
 let flags: arr<3> = [1 2 3] 
 let dynamic: arr<_> = [1 2 3 4] # Length inferred as 4
 ```
 
 ### **Floating-Point Numbers**
 
-Gos supports 64-bit floating-point numbers using the `flt` keyword.
+Alum supports 64-bit floating-point numbers using the `flt` keyword.
 Floating-point literals can be written with decimal notation:
 
-```gos
+```alum
 let pi: flt = 3.14159
 let e: flt = 2.71828
 let result: flt = 10.5 + 20.3
@@ -67,7 +67,7 @@ and comparisons (==, !=, >, >=, <, <=).
 
 ### **Control Flow**
 
-Gos supports modern control flow structures, including if-else expressions and
+Alum supports modern control flow structures, including if-else expressions and
 loops.
 
 ```
@@ -83,7 +83,7 @@ for i in 0..10 { println(itoa(i)) }
 
 ### **Block Scopes**
 
-In Gos, code blocks are expressions. The last value in a block is returned as
+In Alum, code blocks are expressions. The last value in a block is returned as
 the block's value.
 
 ```
@@ -96,31 +96,31 @@ let computed: int = {
 
 ## **🔧 Preprocessor Directives**
 
-Gos includes a preprocessor that supports directives for code organization and
+Alum includes a preprocessor that supports directives for code organization and
 reuse.
 
 ### **$import**
 
-The `$import` directive includes external Gos source files into your program:
+The `$import` directive includes external Alum source files into your program:
 
-```gos
-$import "gosio"
+```alum
+$import "io"
 $import "math"
 ```
 
 The preprocessor searches for imported files in:
 
 1. The same directory as the current file
-2. `/usr/local/gos/` (standard library location)
+2. `/usr/local/alum/` (standard library location)
 
 ### **$define**
 
 The `$define` directive allows you to define macros for text substitution:
 
-```gos
+```alum
 $define PI 3.14159
 $define MAX_SIZE 100
-$define GREETING "Hello, Gos!"
+$define GREETING "Hello, Alum!"
 
 pub fun main(): int {
   let arr: arr<MAX_SIZE> = [0]
@@ -135,14 +135,14 @@ Macros are simple text replacements that occur during preprocessing. They can be
 used for constants, simple expressions, or code snippets. Parameterized macros
 are not currently supported.
 
-## **📚 Standard Library (gos-std)**
+## **📚 Standard Library (alum-std)**
 
-The Gos Standard Library provides essential functionality out of the box. Use
+The Alum Standard Library provides essential functionality out of the box. Use
 `$import` to include them.
 
 | Module      | Key Functions                          |
 | :---------- | :------------------------------------- |
-| **gosio**   | print, println, input, read, write     |
+| **io**      | print, println, input, read, write     |
 | **math**    | abs, sqrt, max, min, pow, fact         |
 | **string**  | strlen, strcpy, strcat, memcpy, memset |
 | **convert** | itoa, atoi, ftoa, atof                 |
@@ -153,10 +153,10 @@ The Gos Standard Library provides essential functionality out of the box. Use
 
 ### **Hello World**
 
-Save this as `hello.gos`:
+Save this as `hello.al`:
 
 ```
-$import "gosio"
+$import "io"
 
 pub fun main(): int {
   println("Hello world!") 
@@ -167,23 +167,23 @@ pub fun main(): int {
 Run with:
 
 ```bash
-gos -c hello.gos
+al hello.al
 ./hello
 ```
 
 ### **Recursive Fibonacci**
 
 ```
-$import "gosio"
+$import "io"
 $import "convert"
 
-fun fib(n: int a: int b: int): int {
-  if n == 0 return a
-  return fib(n - 1 b a + b)
+fun fib(n: int): int {
+  if n < 2 return n
+  return fib(n - 1) + fib(n - 2)
 }
 
 pub fn main(): int {
-  let n: int = fib(40 0 1)
+  let n: int = fib(40)
   println(
     itoa(n)
   ) 
@@ -191,26 +191,10 @@ pub fn main(): int {
 }
 ```
 
-### **Floating-Point Calculation Example**
-
-```
-$import "gosio"
-$import "convert"
-
-pub fun main(): int {
-  let radius: flt = 5.0
-  let pi: flt = 3.14159
-  let area: flt = pi * radius * radius
-  println("Circle area: ")
-  # Note: You can use the ftoa function from the convert module to convert floats to strings
-  return 0
-}
-```
-
 ## **🔗 FFI & Interoperability**
 
-Gos is designed to play well with C. You can declare external functions and call
-them directly. **Calling a C function in Gos:**
+Alum is designed to play well with C. You can declare external functions and
+call them directly. **Calling a C function in Alum:**
 
 # Declare the external C function
 
@@ -223,7 +207,7 @@ pub fun main(): int {
 }
 ```
 
-**Exposing a Gos function to C:**
+**Exposing a Alum function to C:**
 
 # Use `pub` to make it visible to the linker
 
@@ -249,7 +233,7 @@ pub fun add(x: int y: int): int {
 Performance test comparing three programming languages using tail recursion to
 compute the 1000th Fibonacci number:
 
-- Gos Native 0.5.2: Gos language compiled to native
+- Alum Native 0.5.2: Alum language compiled to native
 - executable C (GCC -O3): C language compiled with GCC's highest optimization
   level
 - Python 3.13.11: Python interpreted execution
@@ -281,21 +265,22 @@ Summary
 ## **⚙️ CLI Reference**
 
 ```bash
-The Gos programming language
+The Alum programming language compiler
 
-Usage: gos [OPTIONS] [FILE]
+Usage: al [OPTIONS] <input_files>...
 
 Arguments:
-  [FILE]  Run the Gos source file
+  <input_files>...  Input source files
 
 Options:
-  -a, --ast <ast>                  Print AST of the Gos source file
-  -c, --compile <compile>          Compile the Gos source file to native
-  -s                               Compile the Gos source file to assembly
-  -o                               Compile the Gos source file to object
-  -n                               Do not link the Gos Standard Library
-  -p, --preprocess <preprocess>    Print the preprocessed Gos source file
-  -d, --disassemble <disassemble>  Run the Gos source file
-  -h, --help                       Print help
-  -V, --version                    Print version
+  -o, --output <file>  Place output in <file>
+  -E                   Preprocess only; do not compile, assemble or link
+  -S                   Compile only; do not assemble or link
+  -c                   Compile and assemble, but do not link
+      --dump-ast       Dump AST representation
+      --dump-ir        Dump IR representation
+      --nostdlib       Do not link with standard library
+  -v, --verbose        Verbose output
+  -h, --help           Print help
+  -V, --version        Print version
 ```

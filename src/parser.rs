@@ -12,10 +12,26 @@ use crate::{
 #[derive(Debug, Clone)]
 pub enum ParserError {
     LexerError(LexerError),
-    SyntaxError { message: String, row: usize, col: usize },
-    UnexpectedChar { expected: Option<String>, found: char, row: usize, col: usize },
-    UnknownType { row: usize, col: usize },
-    TypeError { message: String, row: usize, col: usize },
+    SyntaxError {
+        message: String,
+        row: usize,
+        col: usize,
+    },
+    UnexpectedChar {
+        expected: Option<String>,
+        found: char,
+        row: usize,
+        col: usize,
+    },
+    UnknownType {
+        row: usize,
+        col: usize,
+    },
+    TypeError {
+        message: String,
+        row: usize,
+        col: usize,
+    },
 }
 
 impl From<LexerError> for ParserError {
@@ -33,9 +49,18 @@ impl std::fmt::Display for ParserError {
             ParserError::SyntaxError { message, row, col } => {
                 write!(f, "Syntax error at {}:{}: {}", row, col, message)
             }
-            ParserError::UnexpectedChar { expected, found, row, col } => {
+            ParserError::UnexpectedChar {
+                expected,
+                found,
+                row,
+                col,
+            } => {
                 if let Some(exp) = expected {
-                    write!(f, "Unexpected char at {}:{}: expected '{}', found '{}'", row, col, exp, found)
+                    write!(
+                        f,
+                        "Unexpected char at {}:{}: expected '{}', found '{}'",
+                        row, col, exp, found
+                    )
                 } else {
                     write!(f, "Unexpected char at {}:{}: '{}'", row, col, found)
                 }
@@ -171,6 +196,14 @@ impl<'a> Parser<'a> {
             }
             TokenType::PUB => {
                 self.lexer.next_token()?;
+                if self.lexer.curr_tok().token != TokenType::FUNCDECL {
+                    return Err(ParserError::UnexpectedChar {
+                        expected: Some("fun".to_string()),
+                        found: self.lexer.curr_ch(),
+                        row: self.lexer.curr_tok().row,
+                        col: self.lexer.curr_tok().col,
+                    });
+                }
                 self.func_decl(true)
             }
             TokenType::FUNCDECL => self.func_decl(false),
@@ -734,13 +767,11 @@ impl<'a> Parser<'a> {
                     _ => Ok(Expr::Var(Var { name })),
                 }
             }
-            _ => {
-                Err(ParserError::SyntaxError {
-                    message: format!("unexpected token: {:?}", self.lexer.curr_tok().token),
-                    row: self.lexer.curr_tok().row,
-                    col: self.lexer.curr_tok().col,
-                })
-            }
+            _ => Err(ParserError::SyntaxError {
+                message: format!("unexpected token: {:?}", self.lexer.curr_tok().token),
+                row: self.lexer.curr_tok().row,
+                col: self.lexer.curr_tok().col,
+            }),
         }
     }
 
@@ -864,10 +895,13 @@ impl<'a> Parser<'a> {
     }
 
     fn find_func_ret_type(&self, name: &String) -> Result<VarType, ParserError> {
-        self.functions.get(name).ok_or_else(|| ParserError::SyntaxError {
-            message: format!("undefined function: '{}'", name),
-            row: 0,
-            col: 0,
-        }).map(|t| t.to_owned())
+        self.functions
+            .get(name)
+            .ok_or_else(|| ParserError::SyntaxError {
+                message: format!("undefined function: '{}'", name),
+                row: 0,
+                col: 0,
+            })
+            .map(|t| t.to_owned())
     }
 }

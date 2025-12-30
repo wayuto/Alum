@@ -1,6 +1,6 @@
 use ordered_float::OrderedFloat;
 
-use crate::gir::{IRConst, IRFunction, IRProgram, IRType, Instruction, Op, Operand};
+use crate::ir::{IRConst, IRFunction, IRProgram, IRType, Instruction, Op, Operand};
 use std::{collections::HashMap, mem::take};
 
 #[derive(Debug, Clone)]

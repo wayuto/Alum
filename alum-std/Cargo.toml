@@ -1,10 +1,10 @@
 [package]
-name = "gos-std"
+name = "alum-std"
 version = "0.1.0"
 edition = "2024"
 
 [lib]
-name = "gos_std"
+name = "alum_std"
 crate-type = ["staticlib"]
 path = "src/lib.rs"
 

@@ -145,7 +145,7 @@ impl<'a> Preprocessor<'a> {
                                 file_name
                             ),
                             format!(
-                                "{}/{}.gos",
+                                "{}/{}.al",
                                 if self.path.is_empty() {
                                     "."
                                 } else {
@@ -153,8 +153,8 @@ impl<'a> Preprocessor<'a> {
                                 },
                                 file_name
                             ),
-                            format!("/usr/local/gos/{}", file_name),
-                            format!("/usr/local/gos/{}.gos", file_name),
+                            format!("/usr/local/alum/{}", file_name),
+                            format!("/usr/local/alum/{}.al", file_name),
                         ];
 
                         let mut raw_content = None;

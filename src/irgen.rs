@@ -4,7 +4,7 @@ use ordered_float::OrderedFloat;
 
 use crate::{
     ast::{Expr, Extern, FuncDecl, Program, Var},
-    gir::{IRConst, IRFunction, IRProgram, IRType, Instruction, Op, Operand},
+    ir::{IRConst, IRFunction, IRProgram, IRType, Instruction, Op, Operand},
     token::{Literal, TokenType, VarType},
 };
 
@@ -116,9 +116,12 @@ impl Context {
     }
 
     pub fn declare_var(&mut self, name: String, ir_type: IRType) -> Result<(), IRGenError> {
-        let current_scope = self.scope.last_mut().ok_or_else(|| IRGenError::ScopeError {
-            message: "No scope available".to_string(),
-        })?;
+        let current_scope = self
+            .scope
+            .last_mut()
+            .ok_or_else(|| IRGenError::ScopeError {
+                message: "No scope available".to_string(),
+            })?;
         if current_scope.contains_key(&name) {
             return Err(IRGenError::NameError {
                 message: format!("variable '{}' already declared in this scope.", name),
@@ -270,8 +273,10 @@ impl IRGen {
                                                     IRConst::Array(*declared_len, new_elems);
                                                 let new_idx = self.get_const_index(new_const);
 
-                                                if let Some(last_inst) = ctx.instructions.last_mut() {
-                                                    last_inst.src1 = Some(Operand::ConstIdx(new_idx));
+                                                if let Some(last_inst) = ctx.instructions.last_mut()
+                                                {
+                                                    last_inst.src1 =
+                                                        Some(Operand::ConstIdx(new_idx));
                                                 }
 
                                                 value = Operand::Temp(
@@ -396,7 +401,10 @@ impl IRGen {
                                 TokenType::COMPLE => Op::FLe,
                                 _ => {
                                     return Err(IRGenError::TypeError {
-                                        message: format!("unsupported float operation: {:?}", bin.operator),
+                                        message: format!(
+                                            "unsupported float operation: {:?}",
+                                            bin.operator
+                                        ),
                                     });
                                 }
                             },
@@ -415,7 +423,10 @@ impl IRGen {
                                 TokenType::COMPOR => Op::Or,
                                 _ => {
                                     return Err(IRGenError::TypeError {
-                                        message: format!("unsupported operation: {:?}", bin.operator),
+                                        message: format!(
+                                            "unsupported operation: {:?}",
+                                            bin.operator
+                                        ),
                                     });
                                 }
                             },
@@ -474,7 +485,10 @@ impl IRGen {
                             TokenType::SIZEOF => Op::SizeOf,
                             _ => {
                                 return Err(IRGenError::TypeError {
-                                    message: format!("unsupported unary operation: {:?}", unary.operator),
+                                    message: format!(
+                                        "unsupported unary operation: {:?}",
+                                        unary.operator
+                                    ),
                                 });
                             }
                         },
@@ -650,7 +664,10 @@ impl IRGen {
                     }
                     _ => {
                         return Err(IRGenError::TypeError {
-                            message: format!("can only iterate over arrays, found {:?}", array_type),
+                            message: format!(
+                                "can only iterate over arrays, found {:?}",
+                                array_type
+                            ),
                         });
                     }
                 };
@@ -775,8 +792,7 @@ impl IRGen {
                         return Err(IRGenError::TypeError {
                             message: format!(
                                 "unexpected type {:?}, expected {:?}",
-                                operand_type,
-                                param.1
+                                operand_type, param.1
                             ),
                         });
                     }

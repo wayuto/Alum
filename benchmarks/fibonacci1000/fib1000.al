@@ -1,5 +1,4 @@
-$import "gosio"
-$import "convert"
+$import "lib"
 
 fun fib(n: int a: int b: int): int {
     if n == 0 return a

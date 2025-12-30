@@ -1,6 +1,6 @@
 extern range(int int): arr<_>
 
-pub fn find(a: arr<_> e: int): int {
+pub fun find(a: arr<_> e: int): int {
     let i: int = 0
     while i < sizeof a {
         if a[i] == e {

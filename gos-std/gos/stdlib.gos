@@ -1,7 +1,0 @@
-$import "gosio.gos"
-$import "string.gos"
-$import "convert.gos"
-$import "math.gos"
-$import "array.gos"
-extern syscall(int int int int): int
-extern exit(int): void

@@ -7,7 +7,7 @@ use std::{fs, path::Path};
 
 pub mod ast;
 pub mod codegen;
-pub mod gir;
+pub mod ir;
 pub mod irgen;
 pub mod lexer;
 pub mod parser;
@@ -64,9 +64,14 @@ fn print_pred(file: &String) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn compile_native(file: &String, typ: &str, no_std: bool) -> Result<(), Box<dyn std::error::Error>> {
-    let src = fs::read_to_string(file)?;
-    let path = Path::new(&file)
+fn compile(
+    input_file: &str,
+    output_file: Option<&str>,
+    emit_type: &str,
+    no_std: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let src = fs::read_to_string(input_file)?;
+    let path = Path::new(&input_file)
         .parent()
         .ok_or("Invalid file path")?
         .to_str()
@@ -82,54 +87,71 @@ fn compile_native(file: &String, typ: &str, no_std: bool) -> Result<(), Box<dyn 
     let mut codegen = CodeGen::new(ir);
     let assembly = codegen.compile()?;
 
-    let stem = if let Some(idx) = file.rfind('.') {
-        &file[..idx]
-    } else {
-        file.as_str()
-    };
-    let asm_file = format!("{}.s", stem);
-    let obj_file = format!("{}.o", stem);
-    let bin_file = stem.to_string();
+    let input_path = Path::new(input_file);
+    let stem = input_path
+        .file_stem()
+        .ok_or("Invalid input filename")?
+        .to_str()
+        .ok_or("Invalid filename encoding")?;
 
-    match typ {
+    let output = if let Some(output_path) = output_file {
+        output_path.to_string()
+    } else {
+        match emit_type {
+            "asm" => format!("{}.s", stem),
+            "obj" => format!("{}.o", stem),
+            "bin" => stem.to_string(),
+            _ => stem.to_string(),
+        }
+    };
+
+    match emit_type {
         "asm" => {
-            fs::write(&asm_file, &assembly)?;
+            fs::write(&output, &assembly)?;
         }
         "obj" => {
+            let asm_file = format!("{}.s", output);
             fs::write(&asm_file, &assembly)?;
+
             let nasm_status = std::process::Command::new("nasm")
-                .args(&["-f", "elf64", "-o", &obj_file, &asm_file])
+                .args(&["-f", "elf64", "-o", &output, &asm_file])
                 .status()?;
+
             if !nasm_status.success() {
                 let _ = fs::remove_file(&asm_file);
                 return Err("nasm failed".into());
             }
+
             let _ = fs::remove_file(&asm_file);
         }
         "bin" => {
+            let asm_file = format!("{}.asm", output);
+            let obj_file = format!("{}.o", output);
+
             fs::write(&asm_file, &assembly)?;
+
             let nasm_status = std::process::Command::new("nasm")
                 .args(&["-f", "elf64", "-o", &obj_file, &asm_file])
                 .status()?;
+
             if !nasm_status.success() {
+                let _ = fs::remove_file(&asm_file);
                 return Err("nasm failed".into());
             }
 
-            let mut ld_args = vec!["-o", &bin_file, &obj_file];
+            let mut ld_args = vec!["-o", &output, &obj_file];
             if !no_std {
-                ld_args.push("/usr/local/lib/libgos.a");
+                ld_args.push("/usr/local/lib/libalum.a");
             }
-            let ld_status = std::process::Command::new("ld")
-                .args(&ld_args)
-                .status()?;
-            if !ld_status.success() {
-                let _ = fs::remove_file(&asm_file);
-                let _ = fs::remove_file(&obj_file);
-                return Err("ld failed".into());
-            }
+
+            let ld_status = std::process::Command::new("ld").args(&ld_args).status()?;
 
             let _ = fs::remove_file(&asm_file);
             let _ = fs::remove_file(&obj_file);
+
+            if !ld_status.success() {
+                return Err("ld failed".into());
+            }
         }
         _ => {}
     }
@@ -137,81 +159,101 @@ fn compile_native(file: &String, typ: &str, no_std: bool) -> Result<(), Box<dyn 
 }
 
 fn main() {
-    let cmd = Command::new("gos")
+    let cmd = Command::new("al")
         .version("0.5.2")
-        .about("The Gos programming language")
+        .about("The Alum programming language compiler")
+        .arg_required_else_help(true)
         .arg(
-            Arg::new("ast")
-                .short('a')
-                .long("ast")
-                .help("Print AST of the Gos source file"),
+            Arg::new("input_files")
+                .help("Input source files")
+                .required(true)
+                .num_args(1..),
         )
         .arg(
-            Arg::new("ir")
-                .short('i')
-                .long("ir")
-                .help("Print IR of the Gos source file"),
+            Arg::new("output")
+                .short('o')
+                .long("output")
+                .help("Place output in <file>")
+                .value_name("file"),
+        )
+        .arg(
+            Arg::new("preprocess")
+                .short('E')
+                .help("Preprocess only; do not compile, assemble or link")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("assemble")
+                .short('S')
+                .help("Compile only; do not assemble or link")
+                .action(ArgAction::SetTrue),
         )
         .arg(
             Arg::new("compile")
                 .short('c')
-                .long("compile")
-                .help("Compile the Gos source file to native"),
-        )
-        .arg(
-            Arg::new("assembly")
-                .short('s')
-                .help("Compile the Gos source file to assembly")
+                .help("Compile and assemble, but do not link")
                 .action(ArgAction::SetTrue),
         )
         .arg(
-            Arg::new("object")
-                .short('o')
-                .help("Compile the Gos source file to object")
+            Arg::new("dump_ast")
+                .long("dump-ast")
+                .help("Dump AST representation")
                 .action(ArgAction::SetTrue),
         )
         .arg(
-            Arg::new("nostd")
-                .short('n')
-                .help("Do not link the Gos Standard Library")
+            Arg::new("dump_ir")
+                .long("dump-ir")
+                .help("Dump IR representation")
                 .action(ArgAction::SetTrue),
         )
         .arg(
-            Arg::new("preprocess")
-                .short('p')
-                .long("preprocess")
-                .help("Print the preprocessed Gos source file"),
+            Arg::new("nostdlib")
+                .long("nostdlib")
+                .help("Do not link with standard library")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("verbose")
+                .short('v')
+                .long("verbose")
+                .help("Verbose output")
+                .action(ArgAction::SetTrue),
         );
 
-    if std::env::args().len() == 1 {
-        if let Err(e) = cmd.clone().print_help() {
-            eprintln!("Error: {}", e);
-            std::process::exit(1);
+    let matches = cmd.get_matches();
+
+    let input_files: Vec<&String> = matches.get_many("input_files").unwrap().collect();
+
+    let input_file = input_files[0];
+    let output_file = matches.get_one::<String>("output").map(|s| s.as_str());
+
+    let verbose = matches.get_flag("verbose");
+    let no_std = matches.get_flag("nostdlib");
+
+    if verbose {
+        eprintln!("Alum compiler v0.5.2");
+        eprintln!("Input: {}", input_file);
+        if let Some(out) = output_file {
+            eprintln!("Output: {}", out);
         }
-        std::process::exit(0);
     }
 
-    let matches = cmd.get_matches();
-    let result = if let Some(file) = matches.get_one::<String>("ast") {
-        print_ast(file)
-    } else if let Some(file) = matches.get_one::<String>("ir") {
-        print_ir(file)
-    } else if let Some(file) = matches.get_one::<String>("preprocess") {
-        print_pred(file)
-    } else if let Some(file) = matches.get_one::<String>("compile") {
-        if matches.get_flag("assembly") {
-            compile_native(file, "asm", false)
-        } else if matches.get_flag("object") {
-            compile_native(file, "obj", false)
-        } else {
-            compile_native(file, "bin", matches.get_flag("nostd"))
-        }
+    let result = if matches.get_flag("dump_ast") {
+        print_ast(input_file)
+    } else if matches.get_flag("dump_ir") {
+        print_ir(input_file)
+    } else if matches.get_flag("preprocess") {
+        print_pred(input_file)
+    } else if matches.get_flag("assemble") {
+        compile(input_file, output_file, "asm", no_std)
+    } else if matches.get_flag("compile") {
+        compile(input_file, output_file, "obj", no_std)
     } else {
-        Ok(())
+        compile(input_file, output_file, "bin", no_std)
     };
 
     if let Err(e) = result {
-        eprintln!("Error: {}", e);
+        eprintln!("al: error: {}", e);
         std::process::exit(1);
     }
 }

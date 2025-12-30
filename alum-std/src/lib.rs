@@ -7,7 +7,7 @@ use core::panic::PanicInfo;
 
 pub mod array;
 pub mod convert;
-pub mod gosio;
+pub mod io;
 pub mod math;
 pub mod string;
 
