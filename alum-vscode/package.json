@@ -1,0 +1,25 @@
+{
+  "name": "alum-vscode",
+  "displayName": "alum-vscode",
+  "description": "Alum highlight extension for VSCode",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.107.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [{
+      "id": "alum",
+      "aliases": ["alum", "alum"],
+      "extensions": ["al"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "alum",
+      "scopeName": "source.alum",
+      "path": "./syntaxes/alum.tmLanguage.json"
+    }]
+  }
+}

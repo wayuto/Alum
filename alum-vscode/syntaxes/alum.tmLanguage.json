@@ -1,0 +1,237 @@
+{
+	"$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+	"name": "Alum",
+	"scopeName": "source.alum",
+	"patterns": [
+		{
+			"include": "#preprocessor"
+		},
+		{
+			"include": "#comments"
+		},
+		{
+			"include": "#keywords"
+		},
+		{
+			"include": "#types"
+		},
+		{
+			"include": "#literals"
+		},
+		{
+			"include": "#builtin-functions"
+		},
+		{
+			"include": "#function-declarations"
+		},
+		{
+			"include": "#function-calls"
+		},
+		{
+			"include": "#operators"
+		}
+	],
+	"repository": {
+		"comments": {
+			"patterns": [
+				{
+					"name": "comment.line.number-sign.alum",
+					"match": "#.*"
+				}
+			]
+		},
+		"preprocessor": {
+			"patterns": [
+				{
+					"name": "meta.preprocessor.alum",
+					"match": "^\\s*(\\$\\w+)\\b",
+					"captures": {
+						"1": {
+							"name": "keyword.control.preprocessor.alum"
+						}
+					}
+				},
+				{
+					"name": "string.quoted.double.alum",
+					"begin": "\\$import\\s+\"",
+					"end": "\"",
+					"beginCaptures": {
+						"0": {
+							"name": "keyword.control.preprocessor.alum"
+						}
+					}
+				},
+				{
+					"name": "meta.preprocessor.macro.alum",
+					"match": "\\$define\\s+(\\w+)",
+					"captures": {
+						"1": {
+							"name": "entity.name.constant.alum"
+						}
+					}
+				}
+			]
+		},
+		"keywords": {
+			"patterns": [
+				{
+					"name": "keyword.control.alum",
+					"match": "\\b(let|pub|extern|return|if|else|while|for|in|true|false|void)\\b"
+				},
+				{
+					"name": "keyword.declaration.function.alum",
+					"match": "\\bfun\\b"
+				}
+			]
+		},
+		"types": {
+			"patterns": [
+				{
+					"name": "storage.type.alum",
+					"match": "\\b(int|flt|str|bool|arr)\\b"
+				},
+				{
+					"name": "meta.type.array.alum",
+					"match": "arr\\s*<\\s*(\\d+|_)\\s*>",
+					"captures": {
+						"0": {
+							"name": "storage.type.alum"
+						}
+					}
+				}
+			]
+		},
+		"literals": {
+			"patterns": [
+				{
+					"name": "constant.numeric.integer.alum",
+					"match": "\\b\\d+\\b"
+				},
+				{
+					"name": "constant.numeric.float.alum",
+					"match": "\\b\\d+\\.\\d+\\b"
+				},
+				{
+					"name": "string.quoted.double.alum",
+					"begin": "\"",
+					"end": "\"",
+					"patterns": [
+						{
+							"name": "constant.character.escape.alum",
+							"match": "\\\\."
+						}
+					]
+				},
+				{
+					"name": "constant.language.boolean.alum",
+					"match": "\\b(true|false)\\b"
+				},
+				{
+					"name": "meta.array.literal.alum",
+					"begin": "\\[",
+					"end": "\\]",
+					"patterns": [
+						{
+							"include": "#literals"
+						}
+					]
+				}
+			]
+		},
+		"builtin-functions": {
+			"patterns": [
+				{
+					"name": "support.function.builtin.alum",
+					"match": "\\b(println|print|input|read|write|fopen|fread|fwrite|fclose|lseek|abs|sqrt|max|min|pow|fact|strlen|strcpy|strcat|memcpy|memset|itoa|atoi|ftoa|atof|range|find|syscall|exit)\\b"
+				}
+			]
+		},
+		"function-declarations": {
+			"patterns": [
+				{
+					"name": "meta.function.declaration.alum",
+					"begin": "\\b(fun|pub\\s+fun)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+					"end": "(?=\\{|;)",
+					"beginCaptures": {
+						"1": {
+							"name": "keyword.declaration.function.alum"
+						},
+						"2": {
+							"name": "entity.name.function.alum"
+						}
+					},
+					"patterns": [
+						{
+							"include": "#types"
+						},
+						{
+							"name": "variable.parameter.alum",
+							"match": "[a-zA-Z_][a-zA-Z0-9_]*"
+						},
+						{
+							"name": "keyword.operator.alum",
+							"match": "[:,\\(\\)]"
+						}
+					]
+				}
+			]
+		},
+		"function-calls": {
+			"patterns": [
+				{
+					"name": "meta.function.call.alum",
+					"begin": "([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\(",
+					"end": "\\)",
+					"beginCaptures": {
+						"1": {
+							"name": "entity.name.function.alum"
+						}
+					},
+					"patterns": [
+						{
+							"include": "#literals"
+						},
+						{
+							"include": "#types"
+						},
+						{
+							"name": "variable.parameter.alum",
+							"match": "[a-zA-Z_][a-zA-Z0-9_]*"
+						},
+						{
+							"include": "#operators"
+						}
+					]
+				}
+			]
+		},
+		"operators": {
+			"patterns": [
+				{
+					"name": "keyword.operator.arithmetic.alum",
+					"match": "[\\+\\-\\*/]"
+				},
+				{
+					"name": "keyword.operator.assignment.alum",
+					"match": "="
+				},
+				{
+					"name": "keyword.operator.comparison.alum",
+					"match": "==|!=|>|<|>=|<="
+				},
+				{
+					"name": "keyword.operator.increment-decrement.alum",
+					"match": "\\+\\+|--"
+				},
+				{
+					"name": "keyword.operator.access.alum",
+					"match": ":"
+				},
+				{
+					"name": "keyword.operator.range.alum",
+					"match": "\\.\\."
+				}
+			]
+		}
+	}
+}
