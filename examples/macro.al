@@ -1,16 +1,17 @@
 $ifndef MACRO
-$import "io"
 $define MACRO 1
 
+$import "io"
+
 $define BEGIN {
-$define END }
+$define END return 0 }
 
 $ifdef MACRO
+$define ENTRY pub fun main(): int
+$define PRINT println
 
-pub fun main(): int
-BEGIN
-    println("Macro works!")
-    return 0
+MAIN BEGIN
+    PRINT("WORKS!")
 END
 
 $endif
