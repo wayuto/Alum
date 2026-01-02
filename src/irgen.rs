@@ -596,19 +596,23 @@ impl IRGen {
             Expr::While(w) => {
                 let label_start = ctx.new_label("while_start");
                 let label_end = ctx.new_label("while_end");
-                let cond = self.compile_expr(*w.condition, ctx)?;
-                ctx.instructions.push(Instruction {
-                    op: Op::JumpIfFalse,
-                    dst: None,
-                    src1: Some(cond),
-                    src2: Some(Operand::Label(label_end.clone())),
-                });
+
                 ctx.instructions.push(Instruction {
                     op: Op::Label(label_start.clone()),
                     dst: None,
                     src1: None,
                     src2: None,
                 });
+
+                let cond = self.compile_expr(*w.condition, ctx)?;
+
+                ctx.instructions.push(Instruction {
+                    op: Op::JumpIfFalse,
+                    dst: None,
+                    src1: Some(cond),
+                    src2: Some(Operand::Label(label_end.clone())),
+                });
+
                 if !matches!(*w.body, Expr::Stmt(_)) {
                     ctx.enter_scope();
                 }
@@ -616,18 +620,21 @@ impl IRGen {
                 if !matches!(*w.body, Expr::Stmt(_)) {
                     ctx.exit_scope()?;
                 }
+
                 ctx.instructions.push(Instruction {
                     op: Op::Jump,
                     dst: None,
                     src1: Some(Operand::Label(label_start)),
                     src2: None,
                 });
+
                 ctx.instructions.push(Instruction {
                     op: Op::Label(label_end.clone()),
                     dst: None,
                     src1: None,
                     src2: None,
                 });
+
                 Ok(ctx.new_tmp(IRType::Void))
             }
             Expr::For(f) => {
