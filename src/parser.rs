@@ -337,7 +337,6 @@ impl<'a> Parser<'a> {
                             });
                         }
                     }
-                    // self.lexer.next_token()?;
                 }
                 self.lexer.next_token()?;
                 if self.lexer.curr_tok().token != TokenType::COLON {
