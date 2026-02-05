@@ -1,13 +1,10 @@
 [package]
-name = "al"
-version = "0.6.1"
+name = "alum"
+version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-clap = "4.5.53"
-ordered-float = "5.1.0"
-
-[profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
+clap = "4.5.54"
+cranelift = "0.127.2"
+cranelift-module = "0.127.2"
+cranelift-object = "0.127.2"

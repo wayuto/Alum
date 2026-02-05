@@ -1,259 +1,84 @@
 #![allow(warnings)]
-use crate::codegen::CodeGen;
-use crate::irgen::IRGen;
-use crate::{lexer::Lexer, parser::Parser, preprocessor::Preprocessor};
-use clap::{Arg, ArgAction, Command};
-use std::{fs, path::Path};
+use crate::{codegen::CodeGen, lexer::Lexer, parser::Parser};
 
-pub mod ast;
-pub mod codegen;
-pub mod ir;
-pub mod irgen;
-pub mod lexer;
-pub mod parser;
-pub mod preprocessor;
-pub mod token;
+mod ast;
+mod codegen;
+mod lexer;
+mod parser;
 
-fn print_ast(file: &String) -> Result<(), Box<dyn std::error::Error>> {
-    let src = fs::read_to_string(file)?;
-    let path = Path::new(&file.clone())
-        .parent()
-        .ok_or("Invalid file path")?
-        .to_str()
-        .ok_or("Invalid path encoding")?
-        .to_string();
-    let mut preprocessor = Preprocessor::new(src.as_str(), path);
-    let code = preprocessor.preprocess()?;
-    let lexer = Lexer::new(code.as_str());
-    let mut parser = Parser::new(lexer);
-    let ast = parser.parse()?;
-    println!("{:#?}", ast);
-    Ok(())
-}
-
-fn print_ir(file: &String) -> Result<(), Box<dyn std::error::Error>> {
-    let src = fs::read_to_string(file)?;
-    let path = Path::new(&file.clone())
-        .parent()
-        .ok_or("Invalid file path")?
-        .to_str()
-        .ok_or("Invalid path encoding")?
-        .to_string();
-    let mut preprocessor = Preprocessor::new(src.as_str(), path);
-    let code = preprocessor.preprocess()?;
-    let lexer = Lexer::new(code.as_str());
-    let mut parser = Parser::new(lexer);
-    let ast = parser.parse()?;
-    let mut irgen = IRGen::new();
-    let ir = irgen.compile(ast)?;
-    println!("{:#?}", ir);
-    Ok(())
-}
-
-fn print_pred(file: &String) -> Result<(), Box<dyn std::error::Error>> {
-    let src = fs::read_to_string(file)?;
-    let path = Path::new(&file.clone())
-        .parent()
-        .ok_or("Invalid file path")?
-        .to_str()
-        .ok_or("Invalid path encoding")?
-        .to_string();
-    let mut preprocessor = Preprocessor::new(src.as_str(), path);
-    let code = preprocessor.preprocess()?;
-    println!("{}", code);
-    Ok(())
-}
-
-fn compile(
-    input_file: &str,
-    output_file: Option<&str>,
-    emit_type: &str,
-    no_std: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let src = fs::read_to_string(input_file)?;
-    let path = Path::new(&input_file)
-        .parent()
-        .ok_or("Invalid file path")?
-        .to_str()
-        .ok_or("Invalid path encoding")?
-        .to_string();
-    let mut preprocessor = Preprocessor::new(&src, path);
-    let code = preprocessor.preprocess()?;
-    let lexer = Lexer::new(&code);
-    let mut parser = Parser::new(lexer);
-    let ast = parser.parse()?;
-    let mut irgen = IRGen::new();
-    let ir = irgen.compile(ast)?;
-    let mut codegen = CodeGen::new(ir);
-    let assembly = codegen.compile()?;
-
-    let input_path = Path::new(input_file);
-    let stem = input_path
-        .file_stem()
-        .ok_or("Invalid input filename")?
-        .to_str()
-        .ok_or("Invalid filename encoding")?;
-
-    let output = if let Some(output_path) = output_file {
-        output_path.to_string()
-    } else {
-        match emit_type {
-            "asm" => format!("{}.s", stem),
-            "obj" => format!("{}.o", stem),
-            "bin" => stem.to_string(),
-            _ => stem.to_string(),
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let src = "
+    fun main(): int {
+        let a: int = if true {
+            2
+        } else {
+            0
         }
-    };
-
-    match emit_type {
-        "asm" => {
-            fs::write(&output, &assembly)?;
-        }
-        "obj" => {
-            let asm_file = format!("{}.s", output);
-            fs::write(&asm_file, &assembly)?;
-
-            let nasm_status = std::process::Command::new("nasm")
-                .args(&["-f", "elf64", "-o", &output, &asm_file])
-                .status()?;
-
-            if !nasm_status.success() {
-                let _ = fs::remove_file(&asm_file);
-                return Err("nasm failed".into());
-            }
-
-            let _ = fs::remove_file(&asm_file);
-        }
-        "bin" => {
-            let asm_file = format!("{}.asm", output);
-            let obj_file = format!("{}.o", output);
-
-            fs::write(&asm_file, &assembly)?;
-
-            let nasm_status = std::process::Command::new("nasm")
-                .args(&["-f", "elf64", "-o", &obj_file, &asm_file])
-                .status()?;
-
-            if !nasm_status.success() {
-                let _ = fs::remove_file(&asm_file);
-                return Err("nasm failed".into());
-            }
-
-            let mut ld_args = vec!["-o", &output, &obj_file];
-            if !no_std {
-                ld_args.push("/usr/local/lib/libalum.a");
-            }
-
-            let ld_status = std::process::Command::new("ld").args(&ld_args).status()?;
-
-            let _ = fs::remove_file(&asm_file);
-            let _ = fs::remove_file(&obj_file);
-
-            if !ld_status.success() {
-                return Err("ld failed".into());
-            }
-        }
-        _ => {}
+        return a
     }
-    Ok(())
-}
+    ";
 
-fn main() {
-    let cmd = Command::new("al")
-        .version("0.6.1#happy 2026!")
-        .about("The Alum programming language compiler")
-        .arg_required_else_help(true)
-        .arg(
-            Arg::new("input_files")
-                .help("Input source files")
-                .required(true)
-                .num_args(1..),
-        )
-        .arg(
-            Arg::new("output")
-                .short('o')
-                .long("output")
-                .help("Place output in <file>")
-                .value_name("file"),
-        )
-        .arg(
-            Arg::new("preprocess")
-                .short('E')
-                .help("Preprocess only; do not compile, assemble or link")
-                .action(ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new("assemble")
-                .short('S')
-                .help("Compile only; do not assemble or link")
-                .action(ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new("compile")
-                .short('c')
-                .help("Compile and assemble, but do not link")
-                .action(ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new("dump_ast")
-                .long("dump-ast")
-                .help("Dump AST representation")
-                .action(ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new("dump_ir")
-                .long("dump-ir")
-                .help("Dump IR representation")
-                .action(ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new("nostdlib")
-                .long("nostdlib")
-                .help("Do not link with standard library")
-                .action(ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new("verbose")
-                .short('v')
-                .long("verbose")
-                .help("Verbose output")
-                .action(ArgAction::SetTrue),
-        );
+    let lex = Lexer::new(src);
+    let ast = Parser::new(lex).parse()?;
+    println!("AST:\n{:#?}", ast.body);
 
-    let matches = cmd.get_matches();
+    let codegen = CodeGen::new(ast);
+    let object_code = codegen.generate()?;
 
-    let input_files: Vec<&String> = matches.get_many("input_files").unwrap().collect();
+    println!("\nCompiled successfully!");
+    println!("Object code size: {} bytes", object_code.len());
 
-    let input_file = input_files[0];
-    let output_file = matches.get_one::<String>("output").map(|s| s.as_str());
-
-    let verbose = matches.get_flag("verbose");
-    let no_std = matches.get_flag("nostdlib");
-
-    if verbose {
-        eprintln!("Alum compiler v0.5.2");
-        eprintln!("Input: {}", input_file);
-        if let Some(out) = output_file {
-            eprintln!("Output: {}", out);
+    println!(
+        "\nFirst {} bytes of object code:",
+        object_code.len().min(128)
+    );
+    for (i, chunk) in object_code.chunks(16).enumerate() {
+        print!("{:04x}: ", i * 16);
+        for byte in chunk {
+            print!("{:02x} ", byte);
+        }
+        println!();
+        if i * 16 >= 128 {
+            break;
         }
     }
 
-    let result = if matches.get_flag("dump_ast") {
-        print_ast(input_file)
-    } else if matches.get_flag("dump_ir") {
-        print_ir(input_file)
-    } else if matches.get_flag("preprocess") {
-        print_pred(input_file)
-    } else if matches.get_flag("assemble") {
-        compile(input_file, output_file, "asm", no_std)
-    } else if matches.get_flag("compile") {
-        compile(input_file, output_file, "obj", no_std)
-    } else {
-        compile(input_file, output_file, "bin", no_std)
-    };
+    let obj_path = "output.o";
+    std::fs::write(obj_path, object_code)?;
+    println!("\nObject code written to: {}", obj_path);
 
-    if let Err(e) = result {
-        eprintln!("{}", e);
-        std::process::exit(1);
+    let exe_path = "output";
+    println!("Linking object file to executable...");
+
+    let output = std::process::Command::new("cc")
+        .arg(obj_path)
+        .arg("-o")
+        .arg(exe_path)
+        .output()?;
+
+    if !output.status.success() {
+        eprintln!("Linker failed:");
+        eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
+        eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+        return Err("Linking failed".into());
     }
+
+    println!("Executable created: {}", exe_path);
+
+    println!("\nRunning the executable:");
+    let run_output = std::process::Command::new(format!("./{}", exe_path))
+        .current_dir(".")
+        .output()?;
+
+    println!("Exit code: {}", run_output.status.code().unwrap_or(-1));
+    if !run_output.stdout.is_empty() {
+        println!("stdout: {}", String::from_utf8_lossy(&run_output.stdout));
+    }
+    if !run_output.stderr.is_empty() {
+        println!("stderr: {}", String::from_utf8_lossy(&run_output.stderr));
+    }
+
+    println!("\nYou can run the executable with: ./{}", exe_path);
+
+    Ok(())
 }

@@ -1,804 +1,319 @@
-use std::{iter::Peekable, str::Chars};
+use std::{fmt::Display, str::Chars};
 
-use ordered_float::OrderedFloat;
-
-use crate::token::{Literal, Token, TokenType, VarType};
+use crate::ast::Type;
 
 #[derive(Debug, Clone)]
 pub enum LexerError {
-    SyntaxError {
-        message: String,
-        row: usize,
-        col: usize,
-    },
     InvalidNumber {
-        row: usize,
+        line: usize,
         col: usize,
     },
     UnexpectedChar {
         expected: Option<String>,
         found: char,
-        row: usize,
+        line: usize,
         col: usize,
     },
 }
 
-impl std::error::Error for LexerError {}
-
-impl std::fmt::Display for LexerError {
+impl Display for LexerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            LexerError::SyntaxError { message, row, col } => {
-                write!(f, "Syntax error at {}:{}: {}", row, col, message)
-            }
-            LexerError::InvalidNumber { row, col } => {
-                write!(f, "Invalid number at {}:{}", row, col)
-            }
             LexerError::UnexpectedChar {
                 expected,
                 found,
-                row,
+                line,
                 col,
             } => {
                 if let Some(exp) = expected {
                     write!(
                         f,
                         "Unexpected char at {}:{}: expected '{}', found '{}'",
-                        row, col, exp, found
+                        line, col, exp, found
                     )
                 } else {
-                    write!(f, "Unexpected char at {}:{}: '{}'", row, col, found)
+                    write!(f, "Unexpected char at {}:{}: '{}'", line, col, found)
                 }
+            }
+            LexerError::InvalidNumber { line, col } => {
+                write!(f, "Invalid number at {}:{}", line, col)
             }
         }
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
+pub enum Token {
+    INT(isize),
+    BOOL(bool),
+    NIL,
+    PLUS,
+    MINUS,
+    STAR,
+    SLASH,
+    CEQ,
+    NE,
+    LT,
+    LE,
+    GT,
+    GE,
+    AND,
+    OR,
+    LAND,
+    LOR,
+    XOR,
+    NOT,
+    LPAREN,
+    RPAREN,
+    LBRACE,
+    RBRACE,
+    EQ,
+    COLON,
+    COMMA,
+    LET,
+    FUN,
+    RET,
+    IF,
+    ELSE,
+    WHILE,
+    Type(Type),
+    IDENT(String),
+    EOF,
+}
+
 pub struct Lexer<'a> {
-    tok: Token,
-    src: Peekable<Chars<'a>>,
-    is_flt: bool,
+    chars: Chars<'a>,
+    current: Option<char>,
+    line: usize,
+    col: usize,
 }
 
 impl<'a> Lexer<'a> {
     pub fn new(src: &'a str) -> Self {
-        Lexer {
-            tok: Token {
-                token: TokenType::EOF,
-                value: None,
-                row: 1,
-                col: 1,
-            },
-            src: src.chars().peekable(),
-            is_flt: false,
+        let mut chars = src.chars();
+        let current = chars.next();
+        Self {
+            chars,
+            current,
+            line: 1,
+            col: 1,
         }
     }
 
-    fn current(&mut self) -> char {
-        *self.src.peek().unwrap_or(&'\0')
+    fn bump(&mut self) {
+        self.current = self.chars.next();
+        self.col += 1;
     }
 
-    fn current_safe(&mut self) -> Result<char, LexerError> {
-        Ok(*self.src.peek().ok_or_else(|| LexerError::UnexpectedChar {
-            expected: None,
-            found: '\0',
-            row: self.tok.row,
-            col: self.tok.col,
-        })?)
-    }
-
-    fn bump(&mut self) -> () {
-        self.src.next();
-        self.tok.col += 1;
-    }
-
-    fn skip_spaces(&mut self) -> () {
-        while self.current() == ' ' || self.current() == '\t' || self.current() == '\n' {
-            if self.current() == '\n' {
-                self.tok.row += 1;
-                self.tok.col = 0;
-            }
-            self.bump();
-        }
-    }
-
-    fn parse_number(&mut self) -> Result<f64, LexerError> {
-        let mut int_part = 0;
-        let mut frac_part = 0;
-        let mut frac_div = 1;
-        self.is_flt = false;
-
-        while self.current().is_numeric() {
-            int_part = int_part * 10
-                + self
-                    .current()
-                    .to_digit(10)
-                    .ok_or_else(|| LexerError::InvalidNumber {
-                        row: self.tok.row,
-                        col: self.tok.col,
-                    })?;
-            self.bump();
-        }
-
-        if self.current() == '.' {
-            self.is_flt = true;
-            self.bump();
-            if !self.current().is_numeric() {
-                return Err(LexerError::InvalidNumber {
-                    row: self.tok.row,
-                    col: self.tok.col,
-                });
-            }
-            while self.current().is_numeric() {
-                frac_div *= 10;
-                frac_part = frac_part * 10
-                    + self
-                        .current()
-                        .to_digit(10)
-                        .ok_or_else(|| LexerError::InvalidNumber {
-                            row: self.tok.row,
-                            col: self.tok.col,
-                        })?;
-                self.bump();
+    fn sw(&mut self) {
+        while let Some(c) = self.current {
+            if c.is_whitespace() {
+                if c == '\n' {
+                    self.line += 1;
+                    self.col = 1;
+                }
+                self.bump()
+            } else {
+                break;
             }
         }
-
-        Ok((int_part * frac_div + frac_part) as f64 / frac_div as f64)
     }
 
-    fn parse_ident(&mut self) -> String {
+    fn lex_int(&mut self) -> Result<isize, LexerError> {
+        let mut buf = String::new();
+        while let Some(c) = self.current
+            && c.is_ascii_digit()
+        {
+            buf.push(c);
+            self.bump();
+        }
+        buf.parse::<isize>().map_err(|_| LexerError::InvalidNumber {
+            line: self.line,
+            col: self.col,
+        })
+    }
+
+    fn lex_ident(&mut self) -> Result<String, LexerError> {
         let mut ident = String::new();
 
-        if self.current().is_ascii_alphabetic() || self.current() == '_' {
-            ident.push(self.current());
+        if let Some(c) = self.current
+            && (c.is_alphabetic() || c == '_')
+        {
+            ident.push(c);
             self.bump();
-        }
-
-        while self.current().is_alphanumeric() || self.current() == '_' {
-            ident.push(self.current());
-            self.bump();
-        }
-        ident
-    }
-
-    fn is_prefix(&mut self) -> bool {
-        let prev = *self.src.peek().unwrap_or(&' ');
-        self.tok.token == TokenType::EOF
-            || self.tok.token == TokenType::LPAREN
-            || self.tok.token == TokenType::EQ
-            || prev == '='
-            || prev == '('
-    }
-
-    pub fn next_token(&mut self) -> Result<(), LexerError> {
-        self.skip_spaces();
-        if self.current() == '\0' {
-            self.tok = Token {
-                token: TokenType::EOF,
-                value: None,
-                row: self.tok.row,
-                col: self.tok.col,
-            };
-            return Ok(());
-        } else if self.current().is_numeric() {
-            let val = self.parse_number()?;
-            if self.is_flt {
-                self.tok = Token {
-                    token: TokenType::LITERAL(VarType::Float),
-                    value: Some(Literal::Float(OrderedFloat(val))),
-                    row: self.tok.row,
-                    col: self.tok.col,
-                };
-            } else {
-                self.tok = Token {
-                    token: TokenType::LITERAL(VarType::Int),
-                    value: Some(Literal::Int(val as i64)),
-                    row: self.tok.row,
-                    col: self.tok.col,
-                };
-            }
-            return Ok(());
-        } else if self.current().is_alphabetic() || self.current() == '_' {
-            let ident: String = self.parse_ident();
-            match ident.as_str() {
-                "true" => {
-                    self.tok = Token {
-                        token: TokenType::LITERAL(VarType::Bool),
-                        value: Some(Literal::Bool(true)),
-                        row: self.tok.row,
-                        col: self.tok.col,
-                    };
-                }
-                "false" => {
-                    self.tok = Token {
-                        token: TokenType::LITERAL(VarType::Bool),
-                        value: Some(Literal::Bool(false)),
-                        row: self.tok.row,
-                        col: self.tok.col,
-                    };
-                }
-                "null" => {
-                    self.tok = Token {
-                        token: TokenType::LITERAL(VarType::Void),
-                        value: Some(Literal::Void),
-                        row: self.tok.row,
-                        col: self.tok.col,
-                    };
-                }
-                "let" => {
-                    self.tok = Token {
-                        token: TokenType::VARDECL,
-                        value: None,
-                        row: self.tok.row,
-                        col: self.tok.col,
-                    };
-                }
-                "fun" => {
-                    self.tok = Token {
-                        token: TokenType::FUNCDECL,
-                        value: None,
-                        row: self.tok.row,
-                        col: self.tok.col,
-                    }
-                }
-                "return" => {
-                    self.tok = Token {
-                        token: TokenType::RETURN,
-                        value: None,
-                        row: self.tok.row,
-                        col: self.tok.col,
-                    }
-                }
-                "if" => {
-                    self.tok = Token {
-                        token: TokenType::IF,
-                        value: None,
-                        row: self.tok.row,
-                        col: self.tok.col,
-                    }
-                }
-                "else" => {
-                    self.tok = Token {
-                        token: TokenType::ELSE,
-                        value: None,
-                        row: self.tok.row,
-                        col: self.tok.col,
-                    }
-                }
-                "while" => {
-                    self.tok = Token {
-                        token: TokenType::WHILE,
-                        value: None,
-                        row: self.tok.row,
-                        col: self.tok.col,
-                    }
-                }
-                "goto" => {
-                    self.tok = Token {
-                        token: TokenType::GOTO,
-                        value: None,
-                        row: self.tok.row,
-                        col: self.tok.col,
-                    }
-                }
-                "extern" => {
-                    self.tok = Token {
-                        token: TokenType::EXTERN,
-                        value: None,
-                        row: self.tok.row,
-                        col: self.tok.col,
-                    }
-                }
-                "pub" => {
-                    self.tok = Token {
-                        token: TokenType::PUB,
-                        value: None,
-                        row: self.tok.row,
-                        col: self.tok.col,
-                    }
-                }
-                "int" => {
-                    self.tok = Token {
-                        token: TokenType::Type(VarType::Int),
-                        value: None,
-                        row: self.tok.row,
-                        col: self.tok.col,
-                    }
-                }
-                "flt" => {
-                    self.tok = Token {
-                        token: TokenType::Type(VarType::Float),
-                        value: None,
-                        row: self.tok.row,
-                        col: self.tok.col,
-                    }
-                }
-                "str" => {
-                    self.tok = Token {
-                        token: TokenType::Type(VarType::Str),
-                        value: None,
-                        row: self.tok.row,
-                        col: self.tok.col,
-                    }
-                }
-                "bool" => {
-                    self.tok = Token {
-                        token: TokenType::Type(VarType::Bool),
-                        value: None,
-                        row: self.tok.row,
-                        col: self.tok.col,
-                    }
-                }
-                "void" => {
-                    self.tok = Token {
-                        token: TokenType::Type(VarType::Void),
-                        value: None,
-                        row: self.tok.row,
-                        col: self.tok.col,
-                    }
-                }
-                "arr" => {
-                    if self.current() != '<' {
-                        return Err(LexerError::UnexpectedChar {
-                            expected: Some("<".to_string()),
-                            found: self.current(),
-                            row: self.tok.row,
-                            col: self.tok.col,
-                        });
-                    }
-                    self.bump();
-                    let len: Option<usize>;
-                    if self.current().is_numeric() {
-                        len = Some(self.parse_number()? as usize);
-                    } else if self.current() == '_' {
-                        len = None;
-                        self.bump();
-                    } else {
-                        return Err(LexerError::UnexpectedChar {
-                            expected: None,
-                            found: self.current(),
-                            row: self.tok.row,
-                            col: self.tok.col,
-                        });
-                    }
-                    if self.current() != '>' {
-                        return Err(LexerError::UnexpectedChar {
-                            expected: Some(">".to_string()),
-                            found: self.current(),
-                            row: self.tok.row,
-                            col: self.tok.col,
-                        });
-                    }
-                    self.bump();
-                    self.tok = Token {
-                        token: TokenType::Type(VarType::Array(len)),
-                        value: None,
-                        row: self.tok.row,
-                        col: self.tok.col,
-                    }
-                }
-                "sizeof" => {
-                    self.tok = Token {
-                        token: TokenType::SIZEOF,
-                        value: None,
-                        row: self.tok.row,
-                        col: self.tok.col,
-                    }
-                }
-                "for" => {
-                    self.tok = Token {
-                        token: TokenType::FOR,
-                        value: None,
-                        row: self.tok.row,
-                        col: self.tok.col,
-                    }
-                }
-                "in" => {
-                    self.tok = Token {
-                        token: TokenType::IN,
-                        value: None,
-                        row: self.tok.row,
-                        col: self.tok.col,
-                    }
-                }
-                _ => {
-                    self.tok = Token {
-                        token: TokenType::IDENT,
-                        value: Some(Literal::Str(ident)),
-                        row: self.tok.row,
-                        col: self.tok.col,
-                    }
-                }
-            }
-            return Ok(());
-        } else if self.current() == '"' {
-            self.bump();
-            let mut s = String::new();
-            loop {
-                match self.current() {
-                    '"' => {
-                        self.bump();
-                        break;
-                    }
-                    '\0' => {}
-                    '\\' => {
-                        self.bump();
-                        match self.current() {
-                            'n' => {
-                                s.push('\n');
-                                self.bump();
-                            }
-                            't' => {
-                                s.push('\t');
-                                self.bump();
-                            }
-                            'r' => {
-                                s.push('\r');
-                                self.bump();
-                            }
-                            '\\' => {
-                                s.push('\\');
-                                self.bump();
-                            }
-                            '"' => {
-                                s.push('"');
-                                self.bump();
-                            }
-                            _ => self.bump(),
-                        }
-                    }
-                    c => {
-                        s.push(c);
-                        self.bump();
-                    }
-                }
-            }
-            self.tok = Token {
-                token: TokenType::LITERAL(VarType::Str),
-                value: Some(Literal::Str(s)),
-                row: self.tok.row,
-                col: self.tok.col,
-            };
-            return Ok(());
-        } else if self.current() == '\'' {
-            self.bump();
-            let mut s = String::new();
-            while self.current() != '\'' {
-                if self.current() == '\0' {
-                    return Err(LexerError::UnexpectedChar {
-                        expected: Some("'".to_string()),
-                        found: self.current(),
-                        row: self.tok.row,
-                        col: self.tok.col,
-                    });
-                }
-                s.push(self.current());
-                self.bump();
-            }
-            self.bump();
-            self.tok = Token {
-                token: TokenType::LITERAL(VarType::Str),
-                value: Some(Literal::Str(s)),
-                row: self.tok.row,
-                col: self.tok.col,
-            };
-            return Ok(());
-        } else if self.current() == '+' {
-            if self.is_prefix() {
-                self.bump();
-                return Ok(());
-            }
-            self.bump();
-            if self.current() == '=' {
-                self.tok = Token {
-                    token: TokenType::ADDEQ,
-                    value: None,
-                    row: self.tok.row,
-                    col: self.tok.col,
-                };
-                self.bump();
-                return Ok(());
-            }
-            self.tok = Token {
-                token: TokenType::ADD,
-                value: None,
-                row: self.tok.row,
-                col: self.tok.col,
-            };
-            return Ok(());
-        } else if self.current() == '-' {
-            if self.is_prefix() {
-                self.tok = Token {
-                    token: TokenType::NEG,
-                    value: None,
-                    row: self.tok.row,
-                    col: self.tok.col,
-                };
-                self.bump();
-                return Ok(());
-            }
-            self.bump();
-            if self.current() == '=' {
-                self.tok = Token {
-                    token: TokenType::SUBEQ,
-                    value: None,
-                    row: self.tok.row,
-                    col: self.tok.col,
-                };
-                self.bump();
-                return Ok(());
-            }
-            self.tok = Token {
-                token: TokenType::SUB,
-                value: None,
-                row: self.tok.row,
-                col: self.tok.col,
-            };
-            return Ok(());
-        } else if self.current() == '*' {
-            self.bump();
-            if self.current() == '=' {
-                self.tok = Token {
-                    token: TokenType::MULEQ,
-                    value: None,
-                    row: self.tok.row,
-                    col: self.tok.col,
-                };
-                self.bump();
-                return Ok(());
-            }
-            self.tok = Token {
-                token: TokenType::MUL,
-                value: None,
-                row: self.tok.row,
-                col: self.tok.col,
-            };
-            return Ok(());
-        } else if self.current() == '/' {
-            self.bump();
-            if self.current() == '=' {
-                self.tok = Token {
-                    token: TokenType::DIVEQ,
-                    value: None,
-                    row: self.tok.row,
-                    col: self.tok.col,
-                };
-                self.bump();
-                return Ok(());
-            }
-            self.tok = Token {
-                token: TokenType::DIV,
-                value: None,
-                row: self.tok.row,
-                col: self.tok.col,
-            };
-            return Ok(());
-        } else if self.current() == '(' {
-            self.tok = Token {
-                token: TokenType::LPAREN,
-                value: None,
-                row: self.tok.row,
-                col: self.tok.col,
-            };
-            self.bump();
-            return Ok(());
-        } else if self.current() == ')' {
-            self.tok = Token {
-                token: TokenType::RPAREN,
-                value: None,
-                row: self.tok.row,
-                col: self.tok.col,
-            };
-            self.bump();
-            return Ok(());
-        } else if self.current() == '{' {
-            self.tok = Token {
-                token: TokenType::LBRACE,
-                value: None,
-                row: self.tok.row,
-                col: self.tok.col,
-            };
-            self.bump();
-            return Ok(());
-        } else if self.current() == '}' {
-            self.tok = Token {
-                token: TokenType::RBRACE,
-                value: None,
-                row: self.tok.row,
-                col: self.tok.col,
-            };
-            self.bump();
-            return Ok(());
-        } else if self.current() == '=' {
-            self.bump();
-            if self.current() == '=' {
-                self.tok = Token {
-                    token: TokenType::COMPEQ,
-                    value: None,
-                    row: self.tok.row,
-                    col: self.tok.col,
-                };
-                self.bump();
-                return Ok(());
-            }
-            self.tok = Token {
-                token: TokenType::EQ,
-                value: None,
-                row: self.tok.row,
-                col: self.tok.col,
-            };
-            return Ok(());
-        } else if self.current() == '!' {
-            self.bump();
-            if self.current() == '=' {
-                self.tok = Token {
-                    token: TokenType::COMPNE,
-                    value: None,
-                    row: self.tok.row,
-                    col: self.tok.col,
-                };
-                self.bump();
-                return Ok(());
-            }
-            self.tok = Token {
-                token: TokenType::LOGNOT,
-                value: None,
-                row: self.tok.row,
-                col: self.tok.col,
-            };
-            return Ok(());
-        } else if self.current() == '>' {
-            self.bump();
-            if self.current() == '=' {
-                self.tok = Token {
-                    token: TokenType::COMPGE,
-                    value: None,
-                    row: self.tok.row,
-                    col: self.tok.col,
-                };
-                self.bump();
-                return Ok(());
-            }
-            self.tok = Token {
-                token: TokenType::COMPGT,
-                value: None,
-                row: self.tok.row,
-                col: self.tok.col,
-            };
-            return Ok(());
-        } else if self.current() == '<' {
-            self.bump();
-            if self.current() == '=' {
-                self.tok = Token {
-                    token: TokenType::COMPLE,
-                    value: None,
-                    row: self.tok.row,
-                    col: self.tok.col,
-                };
-                self.bump();
-                return Ok(());
-            }
-            self.tok = Token {
-                token: TokenType::COMPLT,
-                value: None,
-                row: self.tok.row,
-                col: self.tok.col,
-            };
-            return Ok(());
-        } else if self.current() == '&' {
-            self.bump();
-            if self.current() == '&' {
-                self.tok = Token {
-                    token: TokenType::COMPAND,
-                    value: None,
-                    row: self.tok.row,
-                    col: self.tok.col,
-                };
-                self.bump();
-                return Ok(());
-            }
-            self.tok = Token {
-                token: TokenType::LOGAND,
-                value: None,
-                row: self.tok.row,
-                col: self.tok.col,
-            };
-            return Ok(());
-        } else if self.current() == '|' {
-            self.bump();
-            if self.current() == '|' {
-                self.tok = Token {
-                    token: TokenType::COMPOR,
-                    value: None,
-                    row: self.tok.row,
-                    col: self.tok.col,
-                };
-                self.bump();
-                return Ok(());
-            }
-            self.tok = Token {
-                token: TokenType::LOGOR,
-                value: None,
-                row: self.tok.row,
-                col: self.tok.col,
-            };
-            return Ok(());
-        } else if self.current() == '^' {
-            self.tok = Token {
-                token: TokenType::LOGXOR,
-                value: None,
-                row: self.tok.row,
-                col: self.tok.col,
-            };
-            self.bump();
-            return Ok(());
-        } else if self.current() == ':' {
-            self.tok = Token {
-                token: TokenType::COLON,
-                value: None,
-                row: self.tok.row,
-                col: self.tok.col,
-            };
-            self.bump();
-            return Ok(());
-        } else if self.current() == '~' {
-            self.tok = Token {
-                token: TokenType::RANGE,
-                value: None,
-                row: self.tok.row,
-                col: self.tok.col,
-            };
-            self.bump();
-            return Ok(());
-        } else if self.current() == '[' {
-            self.tok = Token {
-                token: TokenType::LBRACKET,
-                value: None,
-                row: self.tok.row,
-                col: self.tok.col,
-            };
-            self.bump();
-            return Ok(());
-        } else if self.current() == ']' {
-            self.tok = Token {
-                token: TokenType::RBRACKET,
-                value: None,
-                row: self.tok.row,
-                col: self.tok.col,
-            };
-            self.bump();
-            return Ok(());
-        } else if self.current() == ',' {
-            self.tok = Token {
-                token: TokenType::COMMA,
-                value: None,
-                row: self.tok.row,
-                col: self.tok.col,
-            };
-            self.bump();
-            return Ok(());
-        } else if self.current() == '#' {
-            while self.current() != '\n' && self.current() != '\0' {
-                self.bump();
-            }
-            self.next_token()?;
-            return Ok(());
         } else {
             return Err(LexerError::UnexpectedChar {
                 expected: None,
-                found: self.current(),
-                row: self.tok.row,
-                col: self.tok.col,
+                found: self.current.unwrap(),
+                line: self.line,
+                col: self.col,
             });
         }
+
+        while let Some(c) = self.current
+            && (c.is_alphanumeric() || c == '_')
+        {
+            ident.push(c);
+            self.bump();
+        }
+
+        Ok(ident)
     }
 
-    pub fn curr_tok(&self) -> Token {
-        self.tok.clone()
-    }
+    fn next_token(&mut self) -> Result<Token, LexerError> {
+        self.sw();
+        let c = match self.current {
+            None => return Ok(Token::EOF),
+            Some(ch) => ch,
+        };
 
-    pub fn curr_ch(&mut self) -> char {
-        self.current()
+        let tok = match c {
+            '+' => {
+                self.bump();
+                Token::PLUS
+            }
+            '-' => {
+                self.bump();
+                Token::MINUS
+            }
+            '*' => {
+                self.bump();
+                Token::STAR
+            }
+            '/' => {
+                self.bump();
+                if self.current == Some('/') {
+                    while self.current == Some('\n') {
+                        self.bump();
+                    }
+                    return self.next_token();
+                }
+                Token::SLASH
+            }
+            '(' => {
+                self.bump();
+                Token::LPAREN
+            }
+            ')' => {
+                self.bump();
+                Token::RPAREN
+            }
+            '{' => {
+                self.bump();
+                Token::LBRACE
+            }
+            '}' => {
+                self.bump();
+                Token::RBRACE
+            }
+            '=' => {
+                self.bump();
+                if self.current == Some('=') {
+                    self.bump();
+                    Token::CEQ
+                } else {
+                    Token::EQ
+                }
+            }
+            '!' => {
+                self.bump();
+                if self.current == Some('=') {
+                    self.bump();
+                    Token::NE
+                } else {
+                    Token::NOT
+                }
+            }
+            '>' => {
+                self.bump();
+                if self.current == Some('=') {
+                    self.bump();
+                    Token::GE
+                } else {
+                    Token::GT
+                }
+            }
+            '<' => {
+                self.bump();
+                if self.current == Some('=') {
+                    self.bump();
+                    Token::LE
+                } else {
+                    Token::LT
+                }
+            }
+            '&' => {
+                self.bump();
+                if self.current == Some('&') {
+                    self.bump();
+                    Token::AND
+                } else {
+                    Token::LAND
+                }
+            }
+            '|' => {
+                self.bump();
+                if self.current == Some('|') {
+                    self.bump();
+                    Token::OR
+                } else {
+                    Token::LOR
+                }
+            }
+            '^' => {
+                self.bump();
+                Token::XOR
+            }
+            ':' => {
+                self.bump();
+                Token::COLON
+            }
+            ',' => {
+                self.bump();
+                Token::COMMA
+            }
+            _ if c.is_ascii_digit() => self.lex_int().map(Token::INT)?,
+            _ if c.is_ascii_alphabetic() => {
+                let ident = self.lex_ident()?;
+                match ident.as_str() {
+                    "let" => Token::LET,
+                    "fun" => Token::FUN,
+                    "int" => Token::Type(Type::Int),
+                    "bool" => Token::Type(Type::Bool),
+                    "void" => Token::Type(Type::Void),
+                    "true" => Token::BOOL(true),
+                    "false" => Token::BOOL(false),
+                    "nil" => Token::NIL,
+                    "return" => Token::RET,
+                    "if" => Token::IF,
+                    "else" => Token::ELSE,
+                    "while" => Token::WHILE,
+                    _ => Token::IDENT(ident),
+                }
+            }
+            _ => {
+                let err = LexerError::UnexpectedChar {
+                    expected: None,
+                    found: c,
+                    line: self.line,
+                    col: self.col,
+                };
+                self.bump();
+                return Err(err);
+            }
+        };
+
+        Ok(tok)
+    }
+}
+
+impl<'a> Iterator for Lexer<'a> {
+    type Item = Result<Token, LexerError>;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.sw();
+        match self.current {
+            None => None,
+            _ => Some(self.next_token()),
+        }
     }
 }

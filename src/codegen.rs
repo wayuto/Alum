@@ -1,962 +1,326 @@
-use ordered_float::OrderedFloat;
+use crate::ast::{Expr, Program, Type};
+use cranelift::{
+    codegen::{
+        Context,
+        ir::{self, BlockArg, Function, UserFuncName},
+        settings,
+    },
+    prelude::{
+        AbiParam, Configurable, FunctionBuilder, FunctionBuilderContext, InstBuilder, Signature,
+        Value, Variable,
+        isa::{self, CallConv},
+        types,
+    },
+};
+use cranelift_module::{FuncId, Linkage, Module};
+use cranelift_object::{ObjectBuilder, ObjectModule, ObjectProduct};
+use std::{collections::HashMap, error::Error, fmt::Display};
 
-use crate::ir::{IRConst, IRFunction, IRProgram, IRType, Instruction, Op, Operand};
-use std::{collections::HashMap, mem::take};
-
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum CodeGenError {
-    MissingOperand { message: String },
-    InvalidOperand { message: String },
-    UnsupportedOperation { message: String },
+    UnexpectedExpression { found: Expr },
+    UndefinedVariable { name: String },
+    UndefinedFunction { name: String },
+    ModuleError(String),
+}
+
+impl Display for CodeGenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CodeGenError::UnexpectedExpression { found } => {
+                write!(f, "Unexpected expression: '{:?}', expected FuncDecl", found)
+            }
+            CodeGenError::UndefinedVariable { name } => {
+                write!(f, "Undefined variable: '{:?}'", name)
+            }
+            CodeGenError::UndefinedFunction { name } => {
+                write!(f, "Undefined function: '{:?}'", name)
+            }
+            CodeGenError::ModuleError(msg) => {
+                write!(f, "Module error: '{}'", msg)
+            }
+        }
+    }
 }
 
 impl std::error::Error for CodeGenError {}
 
-impl std::fmt::Display for CodeGenError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CodeGenError::MissingOperand { message } => write!(f, "Missing operand: {}", message),
-            CodeGenError::InvalidOperand { message } => write!(f, "Invalid operand: {}", message),
-            CodeGenError::UnsupportedOperation { message } => {
-                write!(f, "Unsupported operation: {}", message)
-            }
-        }
-    }
-}
-
-macro_rules! assemble {
-    ($buf:expr, $fmt:literal $(, $arg:expr)* $(,)?) => {
-        $buf.push_str(&format!(concat!($fmt, "\n") $(, $arg)*))
-    };
-}
-
 pub struct CodeGen {
-    program: IRProgram,
-    text: String,
-    data: String,
-    vars: HashMap<String, usize>,
-    lbl_cnt: usize,
-    str_cache: HashMap<String, String>,
-    flt_cache: HashMap<OrderedFloat<f64>, String>,
-    stack_ptr: usize,
-    arg_reg: Vec<String>,
-    flt_arg_reg: Vec<String>,
-    ret_label: String,
-    regs: HashMap<String, Option<Operand>>,
-    curr_fn: String,
-    loop_label: String,
-    curr_flt_reg: usize,
+    ast: Program,
+    module: ObjectModule,
+    builder_context: FunctionBuilderContext,
+    ctx: Context,
+    func_signatures: HashMap<String, (FuncId, Signature)>,
 }
 
 impl CodeGen {
-    pub fn new(program: IRProgram) -> Self {
+    pub fn new(ast: Program) -> Self {
+        let flag_builder = settings::builder();
+        let flags = settings::Flags::new(flag_builder);
+        let isa_builder = isa::lookup_by_name("x86_64").unwrap();
+        let isa = isa_builder.finish(flags).unwrap();
+        let object_builder = ObjectBuilder::new(
+            isa,
+            "main".to_string(),
+            cranelift_module::default_libcall_names(),
+        )
+        .unwrap();
+        let module = ObjectModule::new(object_builder);
+        let ctx = module.make_context();
         Self {
-            program,
-            text: String::new(),
-            data: String::new(),
-            vars: HashMap::new(),
-            lbl_cnt: 0,
-            str_cache: HashMap::new(),
-            flt_cache: HashMap::new(),
-            stack_ptr: 0,
-            arg_reg: vec![
-                "rdi".to_string(),
-                "rsi".to_string(),
-                "rdx".to_string(),
-                "rcx".to_string(),
-                "r8".to_string(),
-                "r9".to_string(),
-            ],
-            flt_arg_reg: vec![
-                "xmm0".to_string(),
-                "xmm1".to_string(),
-                "xmm2".to_string(),
-                "xmm3".to_string(),
-                "xmm4".to_string(),
-                "xmm5".to_string(),
-                "xmm6".to_string(),
-                "xmm7".to_string(),
-                "xmm8".to_string(),
-                "xmm9".to_string(),
-                "xmm10".to_string(),
-                "xmm11".to_string(),
-                "xmm12".to_string(),
-                "xmm13".to_string(),
-                "xmm14".to_string(),
-                "xmm15".to_string(),
-            ],
-            ret_label: String::new(),
-            regs: HashMap::new(),
-            curr_fn: String::new(),
-            loop_label: String::new(),
-            curr_flt_reg: 0,
+            ast,
+            module,
+            builder_context: FunctionBuilderContext::new(),
+            ctx,
+            func_signatures: HashMap::new(),
         }
     }
 
-    pub fn compile(&mut self) -> Result<String, CodeGenError> {
-        assemble!(self.text, "section .text");
-        assemble!(self.data, "section .data");
-        assemble!(self.data, "align 16");
-        assemble!(self.data, "neg_mask: dq 0x8000000000000000, 0");
-        for func in take(&mut self.program.functions) {
-            self.compile_fn(func)?;
+    pub fn generate(mut self) -> Result<Vec<u8>, CodeGenError> {
+        for expr in self.ast.body.clone() {
+            match expr {
+                Expr::FuncDecl(name, params, ret_type, body) => {
+                    let mut sig = self.module.make_signature();
+                    for (_, t) in params {
+                        sig.params.push(AbiParam::new(get_type(t)));
+                    }
+                    sig.returns.push(AbiParam::new(get_type(ret_type)));
+                    let func_id = self
+                        .module
+                        .declare_function(name.as_str(), Linkage::Export, &sig)
+                        .unwrap();
+                    self.func_signatures.insert(name, (func_id, sig));
+                }
+                expr => return Err(CodeGenError::UnexpectedExpression { found: expr }),
+            }
         }
-        Ok(take(&mut self.data) + &self.optim(self.text.clone()))
+        for expr in self.ast.body.clone() {
+            match expr {
+                Expr::FuncDecl(name, params, ret_type, body) => {
+                    self.compile_func(name, params, ret_type, body)?;
+                }
+                expr => return Err(CodeGenError::UnexpectedExpression { found: expr }),
+            }
+        }
+
+        let product = self.module.finish();
+        let object_code = product
+            .emit()
+            .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+        Ok(object_code.to_vec())
     }
 
-    fn optim(&mut self, src: String) -> String {
-        let lines: Vec<String> = src.lines().map(|s| s.to_string()).collect();
-        let mut result = Vec::new();
-        let mut i = 0;
+    fn compile_func(
+        &mut self,
+        name: String,
+        params: Vec<(String, Type)>,
+        ret_type: Type,
+        body: Box<Expr>,
+    ) -> Result<(), CodeGenError> {
+        let (func_id, ref sig) = self.func_signatures[&name].clone();
 
-        while i < lines.len() {
-            let current = lines[i].trim();
+        let mut new_ctx = self.module.make_context();
+        new_ctx.func.signature = sig.clone();
 
-            if let Some(push_reg) = current.strip_prefix("push ") {
-                if i + 1 < lines.len() {
-                    let next = lines[i + 1].trim();
+        let param_types: Vec<ir::Type> = params.iter().map(|(_, ty)| get_type(*ty)).collect();
 
-                    if let Some(pop_reg) = next.strip_prefix("pop ") {
-                        let push_reg = push_reg.trim();
-                        let pop_reg = pop_reg.trim();
+        let mut builder = FunctionBuilder::new(&mut new_ctx.func, &mut self.builder_context);
+        let entry_block = builder.create_block();
+        builder.append_block_params_for_function_params(entry_block);
+        builder.switch_to_block(entry_block);
+        builder.seal_block(entry_block);
 
-                        if push_reg == pop_reg {
-                            i += 2;
-                            continue;
-                        } else {
-                            result.push(format!("mov {}, {}", pop_reg, push_reg));
-                            i += 2;
-                            continue;
-                        }
-                    }
-                }
-            }
+        let mut vars: HashMap<String, Variable> = HashMap::new();
+        let mut idx = 0;
 
-            result.push(lines[i].clone());
-            i += 1;
+        for (i, (param_name, _)) in params.iter().enumerate() {
+            let val = builder.block_params(entry_block)[i];
+            let var = Variable::from_u32(idx);
+            idx += 1;
+            builder.declare_var(param_types[i]);
+            builder.def_var(var, val);
+            vars.insert(param_name.clone(), var);
         }
 
-        let opt = result.join("\n");
+        Self::compile_expr(
+            &body,
+            &mut builder,
+            &mut vars,
+            &mut idx,
+            &self.func_signatures,
+            &mut self.module,
+        )?;
 
-        if opt == src { opt } else { self.optim(opt) }
-    }
+        builder.finalize();
+        self.module
+            .define_function(func_id, &mut new_ctx)
+            .map_err(|e| {
+                eprintln!("Verification error for function '{}':", name);
+                eprintln!("Function IR:\n{}", new_ctx.func.display());
+                CodeGenError::ModuleError(format!("{}: {}", name, e))
+            })?;
 
-    fn compile_code(&mut self, code: Instruction) -> Result<(), CodeGenError> {
-        match code.op {
-            Op::Move => {
-                let src = code
-                    .src1
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "Move operation requires src1".to_string(),
-                    })?;
-                let dst = code
-                    .dst
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "Move operation requires dst".to_string(),
-                    })?;
-
-                self.load(src, "rax")?;
-
-                if match src {
-                    Operand::Var(_) | Operand::Temp(_, _) => {
-                        self.get_offset(src)? != self.get_offset(dst)?
-                    }
-                    _ => true,
-                } {
-                    assemble!(self.text, "mov [rbp - {}], rax", self.get_offset(dst)?);
-                }
-
-                self.regs.insert("rax".to_string(), Some(dst.clone()));
-                Ok(())
-            }
-            Op::FMove => {
-                let src = code
-                    .src1
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "FMove operation requires src1".to_string(),
-                    })?;
-                let dst = code
-                    .dst
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "FMove operation requires dst".to_string(),
-                    })?;
-
-                self.load(src, "xmm0")?;
-
-                if match src {
-                    Operand::Var(_) | Operand::Temp(_, _) => {
-                        self.get_offset(src)? != self.get_offset(dst)?
-                    }
-                    _ => true,
-                } {
-                    assemble!(self.text, "movsd [rbp - {}], xmm0", self.get_offset(dst)?);
-                }
-
-                self.regs.insert("xmm0".to_string(), Some(dst.clone()));
-                Ok(())
-            }
-            Op::Load | Op::Store => {
-                let src = code
-                    .src1
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "Load/Store operation requires src1".to_string(),
-                    })?;
-                let dst = code
-                    .dst
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "Load/Store operation requires dst".to_string(),
-                    })?;
-                self.load(src, "rax")?;
-                assemble!(self.text, "mov [rbp - {}], rax", self.get_offset(dst)?);
-                self.regs.insert("rax".to_string(), Some(dst.clone()));
-                Ok(())
-            }
-
-            Op::FLoad | Op::FStore => {
-                let src = code
-                    .src1
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "FLoad/FStore operation requires src1".to_string(),
-                    })?;
-                let dst = code
-                    .dst
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "FLoad/FStore operation requires dst".to_string(),
-                    })?;
-                self.load(src, "xmm0")?;
-                assemble!(self.text, "movsd [rbp - {}], xmm0", self.get_offset(dst)?);
-                self.regs.insert("xmm0".to_string(), Some(dst.clone()));
-                Ok(())
-            }
-            Op::Add | Op::Sub | Op::Mul | Op::Div | Op::LAnd | Op::LOr | Op::Xor | Op::Not => {
-                let dst = code
-                    .dst
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "Binary operation requires dst".to_string(),
-                    })?;
-                let src1 = code
-                    .src1
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "Binary operation requires src1".to_string(),
-                    })?;
-                let src2 = code
-                    .src2
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "Binary operation requires src2".to_string(),
-                    })?;
-                let asm_op = self.get_asm_op(&code.op).to_string();
-                self.load(src1, "rax");
-
-                match src2 {
-                    Operand::ConstIdx(idx) => {
-                        if let IRConst::Int(v) = &self.program.constants[*idx] {
-                            assemble!(self.text, "{} rax, {}", asm_op, v);
-                        }
-                    }
-                    Operand::Const(IRConst::Int(v)) => {
-                        assemble!(self.text, "{} rax, {}", asm_op, v);
-                    }
-                    Operand::Var(_) | Operand::Temp(_, _) => {
-                        let off = self.get_offset(src2)?;
-                        if matches!(code.op, Op::Div) {
-                            self.load(src2, "rbx")?;
-                            assemble!(self.text, "cqo");
-                            assemble!(self.text, "idiv rbx");
-                        } else {
-                            assemble!(self.text, "{} rax, qword [rbp - {}]", asm_op, off);
-                        }
-                    }
-                    _ => {
-                        self.load(src2, "rbx");
-                        assemble!(self.text, "{} rax, rbx", asm_op);
-                    }
-                }
-
-                assemble!(self.text, "mov [rbp - {}], rax", self.get_offset(dst)?);
-
-                self.regs.remove("rax");
-                self.regs.remove("rdx");
-                if matches!(code.op, Op::Div) {
-                    self.regs.remove("rbx");
-                }
-
-                self.regs.insert("rax".to_string(), Some(dst.clone()));
-                Ok(())
-            }
-            Op::FAdd | Op::FSub | Op::FMul | Op::FDiv => {
-                let dst = code
-                    .dst
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "Float binary operation requires dst".to_string(),
-                    })?;
-                let src1 = code
-                    .src1
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "Float binary operation requires src1".to_string(),
-                    })?;
-                let src2 = code
-                    .src2
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "Float binary operation requires src2".to_string(),
-                    })?;
-
-                let fasm_op = self.get_fasm_op(&code.op).to_string();
-
-                self.load(src1, "xmm0");
-
-                match src2 {
-                    Operand::ConstIdx(idx) => {
-                        if let IRConst::Float(f) = &self.program.constants[*idx] {
-                            let lbl = self.alloc_flt(*f);
-                            assemble!(self.text, "{} xmm0, [rel {}]", fasm_op, lbl);
-                        }
-                    }
-
-                    Operand::Var(_) | Operand::Temp(_, _) => {
-                        let off = self.get_offset(src2)?;
-                        assemble!(self.text, "{} xmm0, qword [rbp - {}]", fasm_op, off);
-                    }
-                    _ => {
-                        self.load(src2, "xmm1")?;
-                        assemble!(self.text, "{} xmm0, xmm1", fasm_op);
-                    }
-                }
-
-                assemble!(self.text, "movsd [rbp - {}], xmm0", self.get_offset(dst)?);
-
-                self.regs.insert("xmm0".to_string(), Some(dst.clone()));
-                Ok(())
-            }
-            Op::Eq | Op::Ne | Op::Gt | Op::Ge | Op::Lt | Op::Le => {
-                let dst = code
-                    .dst
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "Comparison operation requires dst".to_string(),
-                    })?;
-                let src1 = code
-                    .src1
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "Comparison operation requires src1".to_string(),
-                    })?;
-                let src2 = code
-                    .src2
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "Comparison operation requires src2".to_string(),
-                    })?;
-                self.load(src1, "rax")?;
-                self.load(src2, "rbx")?;
-                assemble!(self.text, "cmp rax, rbx");
-                let set_op = match code.op {
-                    Op::Eq => "sete",
-                    Op::Ne => "setne",
-                    Op::Gt => "setg",
-                    Op::Ge => "setge",
-                    Op::Lt => "setl",
-                    Op::Le => "setle",
-                    Op::And => "setne",
-                    Op::Or => "setne",
-                    _ => unreachable!(),
-                };
-                assemble!(self.text, "{} al", set_op);
-                assemble!(self.text, "movzx eax, al");
-                assemble!(self.text, "mov [rbp - {}], rax", self.get_offset(dst)?);
-                self.regs.clear();
-                self.regs.insert("rax".to_string(), Some(dst.clone()));
-                Ok(())
-            }
-            Op::FEq | Op::FNe | Op::FGt | Op::FGe | Op::FLt | Op::FLe => {
-                let dst = code
-                    .dst
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "Float comparison operation requires dst".to_string(),
-                    })?;
-                let src1 = code
-                    .src1
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "Float comparison operation requires src1".to_string(),
-                    })?;
-                let src2 = code
-                    .src2
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "Float comparison operation requires src2".to_string(),
-                    })?;
-                self.load(src1, "xmm0")?;
-                self.load(src2, "xmm1")?;
-                assemble!(self.text, "ucomisd xmm0, xmm1");
-                let set_op = match code.op {
-                    Op::FEq => "sete",
-                    Op::FNe => "setne",
-                    Op::FGt => "setg",
-                    Op::FGe => "setge",
-                    Op::FLt => "setl",
-                    Op::FLe => "setle",
-                    _ => unreachable!(),
-                };
-                assemble!(self.text, "{} al", set_op);
-                assemble!(self.text, "movzx eax, al");
-                assemble!(self.text, "mov [rbp - {}], rax", self.get_offset(dst)?);
-                self.regs.clear();
-                self.regs.insert("rax".to_string(), Some(dst.clone()));
-                Ok(())
-            }
-            Op::SizeOf => {
-                let dst = code
-                    .dst
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "Unary operation requires dst".to_string(),
-                    })?;
-                let src1 = code
-                    .src1
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "Unary operation requires src1".to_string(),
-                    })?;
-                self.load(src1, "rax");
-                assemble!(self.text, "mov rax, [rax]");
-                assemble!(self.text, "mov [rbp - {}], rax", self.get_offset(dst)?);
-                self.regs.clear();
-                self.regs.insert("rax".to_string(), Some(dst.clone()));
-                Ok(())
-            }
-            Op::FNeg => {
-                let dst = code
-                    .dst
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "FNeg operation requires dst".to_string(),
-                    })?;
-                let src1 = code
-                    .src1
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "FNeg operation requires src1".to_string(),
-                    })?;
-                self.load(src1, "xmm0");
-                assemble!(self.text, "xorpd xmm0, oword [rel neg_mask]");
-                assemble!(self.text, "movsd [rbp - {}], xmm0", self.get_offset(dst)?);
-                self.regs.clear();
-                self.regs.insert("xmm0".to_string(), Some(dst.clone()));
-                Ok(())
-            }
-            Op::Range => {
-                let dst = code
-                    .dst
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "Range operation requires dst".to_string(),
-                    })?;
-                let src1 = code
-                    .src1
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "Range operation requires src1".to_string(),
-                    })?;
-                let src2 = code
-                    .src2
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "Range operation requires src2".to_string(),
-                    })?;
-                self.load(src1, "rdi");
-                self.load(src2, "rsi");
-                assemble!(self.text, "call range");
-                assemble!(self.text, "mov [rbp - {}], rax", self.get_offset(dst)?);
-                self.regs.clear();
-                self.regs.insert("rax".to_string(), Some(dst.clone()));
-                Ok(())
-            }
-            Op::Arg(n) => {
-                let op = code
-                    .src1
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "Arg operation requires src1".to_string(),
-                    })?;
-                if n < 6 {
-                    let reg = self.arg_reg[n].clone();
-                    self.load(op, &reg);
-                } else {
-                    self.load(op, "rax")?;
-                    assemble!(self.text, "push rax");
-                }
-                Ok(())
-            }
-            Op::FArg(n) => {
-                let op = code
-                    .src1
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "FArg operation requires src1".to_string(),
-                    })?;
-                if n < 8 {
-                    self.curr_flt_reg = n + 1;
-                    let reg = self.flt_arg_reg[n].clone();
-                    self.load(op, &reg);
-                } else {
-                    self.curr_flt_reg = 8;
-                    self.load(op, "xmm0")?;
-                    assemble!(self.text, "sub rsp, 8");
-                    assemble!(self.text, "movsd [rsp], xmm0");
-                }
-                Ok(())
-            }
-            Op::Call => {
-                let dst = code
-                    .dst
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "Call operation requires dst".to_string(),
-                    })?;
-                let src1 = code
-                    .src1
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "Call operation requires src1".to_string(),
-                    })?;
-                if let Operand::Function(name) = src1 {
-                    if self.curr_flt_reg > 0 {
-                        assemble!(self.text, "mov al, {}", self.curr_flt_reg);
-                    } else {
-                        assemble!(self.text, "xor al, al");
-                    }
-                    self.curr_flt_reg = 0;
-
-                    assemble!(self.text, "call {}", name);
-
-                    let caller_saved =
-                        ["rax", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11"];
-                    for reg in caller_saved {
-                        self.regs.remove(reg);
-                    }
-                    for i in 0..16 {
-                        self.regs.remove(&format!("xmm{}", i));
-                    }
-
-                    let is_float = match dst {
-                        Operand::Temp(_, IRType::Float) => true,
-                        _ => false,
-                    };
-
-                    if is_float {
-                        assemble!(self.text, "movsd [rbp - {}], xmm0", self.get_offset(dst)?);
-
-                        self.regs.insert("xmm0".to_string(), Some(dst.clone()));
-                    } else {
-                        assemble!(self.text, "mov [rbp - {}], rax", self.get_offset(dst)?);
-
-                        self.regs.insert("rax".to_string(), Some(dst.clone()));
-                    }
-                }
-                Ok(())
-            }
-            Op::Label(lbl) => {
-                assemble!(self.text, "{}:", lbl);
-                self.regs.clear();
-                Ok(())
-            }
-            Op::Jump => {
-                let src1 = code
-                    .src1
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "Jump operation requires src1".to_string(),
-                    })?;
-                if let Operand::Label(lbl) = src1 {
-                    assemble!(self.text, "jmp {}", lbl);
-                }
-                Ok(())
-            }
-            Op::JumpIfFalse => {
-                let src1 = code
-                    .src1
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "JumpIfFalse operation requires src1".to_string(),
-                    })?;
-                let src2 = code
-                    .src2
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "JumpIfFalse operation requires src2".to_string(),
-                    })?;
-                let lbl = match src2 {
-                    Operand::Label(s) => s,
-                    _ => {
-                        return Err(CodeGenError::InvalidOperand {
-                            message: "JumpIfFalse src2 must be a Label".to_string(),
-                        });
-                    }
-                };
-                self.load(src1, "rax");
-                assemble!(self.text, "cmp rax, 0");
-                assemble!(self.text, "je {}", lbl);
-                Ok(())
-            }
-            Op::ArrayAccess => {
-                let dst = code
-                    .dst
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "ArrayAccess operation requires dst".to_string(),
-                    })?;
-                let src1 = code
-                    .src1
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "ArrayAccess operation requires src1".to_string(),
-                    })?;
-                let src2 = code
-                    .src2
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "ArrayAccess operation requires src2".to_string(),
-                    })?;
-                self.load(src1, "r10")?;
-                self.load(src2, "rcx")?;
-                assemble!(self.text, "lea rax, [r10 + rcx * 8 + 8]");
-                assemble!(self.text, "mov rax, [rax]");
-                assemble!(self.text, "mov [rbp - {}], rax", self.get_offset(dst)?);
-                self.regs.clear();
-                self.regs.insert("rax".to_string(), Some(dst.clone()));
-                Ok(())
-            }
-            Op::ArrayAssign => {
-                let dst = code
-                    .dst
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "ArrayAssign operation requires dst".to_string(),
-                    })?;
-                let src1 = code
-                    .src1
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "ArrayAssign operation requires src1".to_string(),
-                    })?;
-                let src2 = code
-                    .src2
-                    .as_ref()
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: "ArrayAssign operation requires src2".to_string(),
-                    })?;
-                self.load(dst, "r10")?;
-                self.load(src1, "rcx")?;
-                self.load(src2, "rax")?;
-                assemble!(self.text, "lea rdx, [r10 + rcx * 8 + 8]");
-                assemble!(self.text, "mov [rdx], rax");
-                Ok(())
-            }
-            Op::Return(reg) => {
-                if let Some(ref val) = code.src1 {
-                    self.load(val, reg.as_str());
-                }
-                assemble!(self.text, "jmp {}", self.ret_label);
-                Ok(())
-            }
-            _ => Err(CodeGenError::UnsupportedOperation {
-                message: format!("unsupported operation {:?}", code.op),
-            }),
-        }
-    }
-
-    fn compile_fn(&mut self, func: IRFunction) -> Result<(), CodeGenError> {
-        if func.is_external {
-            assemble!(self.text, "extern {}", func.name);
-            return Ok(());
-        }
-
-        self.vars.clear();
-        self.regs.clear();
-        let mut offset = 0;
-
-        for (param, _) in &func.params {
-            if let Operand::Var(name) = param {
-                if !self.vars.contains_key(name) {
-                    offset += 8;
-                    self.vars.insert(name.clone(), offset);
-                }
-            }
-        }
-        for inst in &func.instructions {
-            let mut register_op = |op_opt: &Option<Operand>| {
-                if let Some(op) = op_opt {
-                    match op {
-                        Operand::Var(name) => {
-                            if !self.vars.contains_key(name) {
-                                offset += 8;
-                                self.vars.insert(name.clone(), offset);
-                            }
-                        }
-                        Operand::Temp(id, _) => {
-                            let temp_key = format!("_tmp_{}", id);
-                            if !self.vars.contains_key(&temp_key) {
-                                offset += 8;
-                                self.vars.insert(temp_key, offset);
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            };
-            register_op(&inst.dst);
-            register_op(&inst.src1);
-            register_op(&inst.src2);
-        }
-
-        let stack_size = (offset + 15) & !15;
-        if func.is_pub {
-            assemble!(self.text, "global {}", func.name);
-        }
-        assemble!(self.text, "{}:", func.name);
-        assemble!(self.text, "push rbp");
-        assemble!(self.text, "mov rbp, rsp");
-        if stack_size > 0 {
-            assemble!(self.text, "sub rsp, {}", stack_size);
-        }
-
-        let loop_label = format!(".L_{}_loop", func.name);
-        assemble!(self.text, "{}:", loop_label);
-        self.curr_fn = func.name.clone();
-        self.ret_label = format!(".L_{}_exit", func.name);
-
-        let mut int_idx = 0;
-        let mut flt_idx = 0;
-        for (param, ty) in &func.params {
-            let off = self.get_offset(param)?;
-            if matches!(ty, IRType::Float) {
-                if flt_idx < 8 {
-                    let reg = format!("xmm{}", flt_idx);
-                    assemble!(self.text, "movsd [rbp - {}], {}", off, reg);
-                    self.regs.insert(reg, Some(param.clone()));
-
-                    flt_idx += 1;
-                }
-            } else {
-                if int_idx < 6 {
-                    let reg = self.arg_reg[int_idx].clone();
-                    assemble!(self.text, "mov [rbp - {}], {}", off, reg);
-                    self.regs.insert(reg, Some(param.clone()));
-
-                    int_idx += 1;
-                }
-            }
-        }
-
-        let insts = &func.instructions;
-        for (i, code) in insts.iter().enumerate() {
-            match &code.op {
-                Op::Return(reg_name) => {
-                    if let Some(ref val) = code.src1 {
-                        self.load(val, reg_name)?;
-                    }
-                    assemble!(self.text, "jmp {}", self.ret_label);
-                }
-                Op::Label(name) => {
-                    assemble!(self.text, "{}:", name);
-                    self.regs.clear();
-                }
-                _ => {
-                    self.compile_code(code.clone())?;
-                }
-            }
-        }
-
-        assemble!(self.text, "{}:", self.ret_label);
-        assemble!(self.text, "leave");
-        assemble!(self.text, "ret");
         Ok(())
     }
 
-    fn load(&mut self, op: &Operand, reg: &str) -> Result<(), CodeGenError> {
-        if let Some(Some(cached_op)) = self.regs.get(reg) {
-            if cached_op == op {
-                return Ok(());
-            }
-        }
-
-        match op {
-            Operand::ConstIdx(idx) => {
-                let constant = &self.program.constants[*idx];
-                match constant {
-                    IRConst::Int(v) => assemble!(self.text, "mov {}, {}", reg, v),
-                    IRConst::Float(f) => {
-                        let lbl = self.alloc_flt(*f);
-                        if reg.starts_with("xmm") {
-                            assemble!(self.text, "movsd {}, [rel {}]", reg, lbl);
-                        } else {
-                            assemble!(self.text, "mov {}, [rel {}]", reg, lbl);
-                        }
+    fn compile_expr(
+        expr: &Expr,
+        builder: &mut FunctionBuilder,
+        vars: &mut HashMap<String, Variable>,
+        idx: &mut u32,
+        func_signatures: &HashMap<String, (FuncId, Signature)>,
+        module: &mut ObjectModule,
+    ) -> Result<Value, CodeGenError> {
+        match expr {
+            Expr::Stmt(body) => {
+                if body.len() > 1 {
+                    let (last, body) = body.split_last().unwrap();
+                    for expr in body {
+                        Self::compile_expr(expr, builder, vars, idx, func_signatures, module)?;
                     }
-                    IRConst::Str(s) => {
-                        let lbl = self.alloc_str(s.clone());
-                        assemble!(self.text, "lea {}, [rel {}]", reg, lbl);
-                    }
-                    IRConst::Array(len, arr) => {
-                        self.alloc_arr(*len, arr.clone(), reg)?;
-                    }
-                    _ => {}
-                }
-            }
-
-            Operand::Const(c) => match c {
-                IRConst::Int(v) => assemble!(self.text, "mov {}, {}", reg, v),
-                IRConst::Float(f) => {
-                    let lbl = self.alloc_flt(*f);
-                    if reg.starts_with("xmm") {
-                        assemble!(self.text, "movsd {}, [rel {}]", reg, lbl);
-                    } else {
-                        assemble!(self.text, "mov {}, [rel {}]", reg, lbl);
-                    }
-                }
-                IRConst::Str(s) => {
-                    let lbl = self.alloc_str(s.clone());
-                    assemble!(self.text, "lea {}, [rel {}]", reg, lbl);
-                }
-                IRConst::Array(len, arr) => {
-                    self.alloc_arr(*len, arr.clone(), reg)?;
-                }
-                _ => {}
-            },
-
-            Operand::Var(_) | Operand::Temp(_, _) => {
-                let off = self.get_offset(op)?;
-                if reg.starts_with("xmm") {
-                    assemble!(self.text, "movsd {}, qword [rbp - {}]", reg, off);
+                    Self::compile_expr(last, builder, vars, idx, func_signatures, module)
                 } else {
-                    assemble!(self.text, "mov {}, [rbp - {}]", reg, off);
+                    Self::compile_expr(
+                        body.last().unwrap(),
+                        builder,
+                        vars,
+                        idx,
+                        func_signatures,
+                        module,
+                    )
                 }
             }
-
-            Operand::Function(name) => {
-                assemble!(self.text, "lea {}, [rel {}]", reg, name);
+            Expr::Int(i) => Ok(builder.ins().iconst(types::I64, *i as i64)),
+            Expr::Bool(b) => Ok(builder.ins().iconst(types::I8, *b as i64)),
+            Expr::Add(lhs, rhs)
+            | Expr::Sub(lhs, rhs)
+            | Expr::Mul(lhs, rhs)
+            | Expr::Div(lhs, rhs) => {
+                let lhs = Self::compile_expr(lhs, builder, vars, idx, func_signatures, module)?;
+                let rhs = Self::compile_expr(rhs, builder, vars, idx, func_signatures, module)?;
+                match expr {
+                    Expr::Add(_, _) => Ok(builder.ins().iadd(lhs, rhs)),
+                    Expr::Sub(_, _) => Ok(builder.ins().isub(lhs, rhs)),
+                    Expr::Mul(_, _) => Ok(builder.ins().imul(lhs, rhs)),
+                    Expr::Div(_, _) => Ok(builder.ins().sdiv(lhs, rhs)),
+                    _ => unreachable!(),
+                }
             }
-
-            _ => {}
-        }
-
-        self.regs.insert(reg.to_string(), Some(op.clone()));
-        Ok(())
-    }
-
-    fn alloc_str(&mut self, s: String) -> String {
-        if let Some(lbl) = self.str_cache.get(&s) {
-            return lbl.clone();
-        } else {
-            let lbl = format!("L.S.{}", self.lbl_cnt);
-            self.str_cache.insert(s.clone(), lbl.clone());
-            self.lbl_cnt += 1;
-            let bytes = s.as_bytes();
-            let len = bytes.len();
-            if s.is_empty() {
-                assemble!(self.data, "{} db 0", lbl,);
-                return lbl;
+            Expr::VarDecl(name, ty, value) => {
+                let val =
+                    Self::compile_expr(&**value, builder, vars, idx, func_signatures, module)?;
+                let var = Variable::from_u32(*idx);
+                *idx += 1;
+                builder.declare_var(get_type(*ty));
+                builder.def_var(var, val);
+                vars.insert(name.clone(), var);
+                Ok(Value::from_u32(0))
             }
-            assemble!(
-                self.data,
-                "{} db {}, 0",
-                lbl,
-                bytes
+            Expr::Var(name) => {
+                let var = match vars.get(name) {
+                    Some(v) => v,
+                    None => return Err(CodeGenError::UndefinedVariable { name: name.clone() }),
+                };
+                Ok(builder.use_var(*var))
+            }
+            Expr::FuncCall(name, args) => {
+                let (func_id, _) = match func_signatures.get(name) {
+                    Some(sig) => sig,
+                    None => return Err(CodeGenError::UndefinedFunction { name: name.clone() }),
+                };
+
+                let func_ref = module.declare_func_in_func(*func_id, builder.func);
+
+                let arg_values: Result<Vec<Value>, CodeGenError> = args
                     .iter()
-                    .map(|b| b.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            );
-            lbl
-        }
-    }
+                    .map(|a| Self::compile_expr(a, builder, vars, idx, func_signatures, module))
+                    .collect();
 
-    fn alloc_flt(&mut self, f: OrderedFloat<f64>) -> String {
-        if let Some(lbl) = self.flt_cache.get(&f) {
-            return lbl.clone();
-        } else {
-            let lbl = format!("L.F.{}", self.lbl_cnt);
-            self.flt_cache.insert(f, lbl.clone());
-            self.lbl_cnt += 1;
-            assemble!(self.data, "{} dq 0x{:x}", lbl, f.into_inner().to_bits());
-            lbl
-        }
-    }
-
-    fn get_offset(&self, op: &Operand) -> Result<usize, CodeGenError> {
-        match op {
-            Operand::Var(name) => self
-                .vars
-                .get(name)
-                .ok_or_else(|| CodeGenError::MissingOperand {
-                    message: format!("variable '{}' not found in stack frame", name),
-                })
-                .map(|v| *v),
-            Operand::Temp(id, _) => {
-                let key = format!("_tmp_{}", id);
-                self.vars
-                    .get(&key)
-                    .ok_or_else(|| CodeGenError::MissingOperand {
-                        message: format!("temporary '{}' not found in stack frame", key),
-                    })
-                    .map(|v| *v)
+                let arg_values = arg_values?;
+                let call = builder.ins().call(func_ref, &arg_values);
+                Ok(builder.inst_results(call)[0])
             }
-            _ => Err(CodeGenError::InvalidOperand {
-                message: "Not a stack operand".to_string(),
+            Expr::Return(value) => {
+                let val =
+                    Self::compile_expr(&**value, builder, vars, idx, func_signatures, module)?;
+                builder.ins().return_(&[val]);
+                Ok(Value::from_u32(0))
+            }
+            Expr::If(cond, then_branch, else_branch) => {
+                let cond_val =
+                    Self::compile_expr(cond, builder, vars, idx, func_signatures, module)?;
+
+                let then_block = builder.create_block();
+                let else_block = builder.create_block();
+                let merge_block = builder.create_block();
+
+                let cond_i64 = builder.ins().uextend(types::I64, cond_val);
+                builder
+                    .ins()
+                    .brif(cond_i64, then_block, &[], else_block, &[]);
+
+                builder.switch_to_block(then_block);
+                let then_val =
+                    Self::compile_expr(then_branch, builder, vars, idx, func_signatures, module)?;
+                builder
+                    .ins()
+                    .jump(merge_block, &[BlockArg::Value(then_val)]);
+                builder.seal_block(then_block);
+
+                builder.switch_to_block(else_block);
+                let else_val = if let Some(else_expr) = else_branch {
+                    Self::compile_expr(else_expr, builder, vars, idx, func_signatures, module)?
+                } else {
+                    builder.ins().iconst(types::I64, 0)
+                };
+                builder
+                    .ins()
+                    .jump(merge_block, &[BlockArg::Value(else_val)]);
+                builder.seal_block(else_block);
+
+                builder.switch_to_block(merge_block);
+
+                let merge_param = builder.append_block_param(merge_block, types::I64);
+                builder.seal_block(merge_block);
+
+                Ok(merge_param)
+            }
+            Expr::While(cond, body) => {
+                let loop_header = builder.create_block();
+                let loop_body = builder.create_block();
+                let loop_exit = builder.create_block();
+
+                builder.ins().jump(loop_header, &[]);
+
+                builder.switch_to_block(loop_header);
+                let cond_val =
+                    Self::compile_expr(cond, builder, vars, idx, func_signatures, module)?;
+                let cond_i64 = builder.ins().uextend(types::I64, cond_val);
+                builder.ins().brif(cond_i64, loop_body, &[], loop_exit, &[]);
+
+                builder.switch_to_block(loop_body);
+                Self::compile_expr(body, builder, vars, idx, func_signatures, module)?;
+                builder.ins().jump(loop_header, &[]);
+
+                builder.seal_block(loop_body);
+                builder.seal_block(loop_header);
+
+                builder.switch_to_block(loop_exit);
+                builder.seal_block(loop_exit);
+
+                Ok(builder.ins().iconst(types::I64, 0))
+            }
+            _ => Err(CodeGenError::UnexpectedExpression {
+                found: expr.clone(),
             }),
         }
     }
+}
 
-    fn alloc_arr(&mut self, len: usize, arr: Vec<Operand>, reg: &str) -> Result<(), CodeGenError> {
-        let size = (len * 8 + 8 + 15) & !15;
-        assemble!(self.text, "sub rsp, {}", size);
-        assemble!(self.text, "mov r10, rsp");
-        assemble!(self.text, "mov rax, {}", len);
-        assemble!(self.text, "mov [r10], rax");
-        for (i, op) in arr.iter().enumerate() {
-            self.load(op, "rax")?;
-            assemble!(self.text, "mov [r10 + {}], rax", 8 + i * 8);
-        }
-        assemble!(self.text, "mov {}, r10", reg);
-        self.regs.clear();
-        Ok(())
-    }
-
-    fn get_asm_op(&self, op: &Op) -> &str {
-        match op {
-            Op::Add => "add",
-            Op::Sub => "sub",
-            Op::Mul => "imul",
-            Op::LAnd | Op::Add => "and",
-            Op::LOr | Op::Or => "or",
-            Op::Xor => "xor",
-            Op::Not => "not",
-            _ => "",
-        }
-    }
-
-    fn get_fasm_op(&self, op: &Op) -> &str {
-        match op {
-            Op::FAdd => "addsd",
-            Op::FSub => "subsd",
-            Op::FMul => "mulsd",
-            Op::FDiv => "divsd",
-            _ => "",
-        }
-    }
+fn get_type(t: Type) -> ir::Type {
+    return match t {
+        Type::Int => types::I64,
+        Type::Bool => types::I8,
+        Type::Void => types::INVALID,
+    };
 }

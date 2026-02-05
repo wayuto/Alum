@@ -1,970 +1,408 @@
-use std::collections::HashMap;
+use std::{fmt::Display, iter::Peekable};
+
+use cranelift_object::object::macho::N_EXT;
 
 use crate::{
-    ast::{
-        ArrayAccess, ArrayAssign, BinOp, Expr, Extern, For, FuncCall, FuncDecl, Goto, If, Label,
-        Program, Return, Stmt, UnaryOp, Val, Var, VarDecl, VarMod, While,
-    },
-    lexer::{Lexer, LexerError},
-    token::{Literal, Token, TokenType, VarType},
+    ast::{Expr, Program, Type},
+    lexer::{Lexer, LexerError, Token},
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum ParserError {
+    UnexpectedToken {
+        expected: Option<Token>,
+        found: Token,
+    },
     LexerError(LexerError),
-    SyntaxError {
-        message: String,
-        row: usize,
-        col: usize,
-    },
-    UnexpectedChar {
-        expected: Option<String>,
-        found: char,
-        row: usize,
-        col: usize,
-    },
-    UnknownType {
-        row: usize,
-        col: usize,
-    },
-    TypeError {
-        message: String,
-        row: usize,
-        col: usize,
-    },
 }
 
-impl From<LexerError> for ParserError {
-    fn from(err: LexerError) -> Self {
-        ParserError::LexerError(err)
+impl Display for ParserError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ParserError::UnexpectedToken { expected, found } => {
+                if let Some(exp) = expected {
+                    write!(f, "Expected '{:?}', found '{:?}'", exp, found)
+                } else {
+                    write!(f, "Unexpected token: '{:?}'", found)
+                }
+            }
+            ParserError::LexerError(le) => write!(f, "{}", le),
+        }
     }
 }
 
 impl std::error::Error for ParserError {}
 
-impl std::fmt::Display for ParserError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ParserError::LexerError(e) => write!(f, "{}", e),
-            ParserError::SyntaxError { message, row, col } => {
-                write!(f, "Syntax error at {}:{}: {}", row, col, message)
-            }
-            ParserError::UnexpectedChar {
-                expected,
-                found,
-                row,
-                col,
-            } => {
-                if let Some(exp) = expected {
-                    write!(
-                        f,
-                        "Unexpected char at {}:{}: expected '{}', found '{}'",
-                        row, col, exp, found
-                    )
-                } else {
-                    write!(f, "Unexpected char at {}:{}: '{}'", row, col, found)
-                }
-            }
-            ParserError::UnknownType { row, col } => {
-                write!(f, "Unknown type at {}:{}", row, col)
-            }
-            ParserError::TypeError { message, row, col } => {
-                write!(f, "Type error at {}:{}: {}", row, col, message)
-            }
-        }
-    }
-}
-
-#[derive(Debug)]
 pub struct Parser<'a> {
-    lexer: Lexer<'a>,
-    functions: HashMap<String, VarType>,
+    lex: Peekable<Lexer<'a>>,
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(lexer: Lexer<'a>) -> Self {
+    pub fn new(lex: Lexer<'a>) -> Self {
         Self {
-            lexer,
-            functions: HashMap::new(),
+            lex: lex.peekable(),
         }
     }
 
     pub fn parse(&mut self) -> Result<Program, ParserError> {
-        self.lexer.next_token()?;
-        let mut exprs: Vec<Expr> = Vec::new();
-        while self.lexer.curr_tok().token != TokenType::EOF {
-            exprs.push(self.ctrl()?);
+        let mut body = Vec::new();
+        loop {
+            match self.peek() {
+                Some(Ok(Token::EOF)) | None => break,
+                _ => body.push(self.expr()?),
+            }
         }
-        Ok(Program { body: exprs })
+        Ok(Program { body })
     }
-    fn ctrl(&mut self) -> Result<Expr, ParserError> {
-        match self.lexer.curr_tok().token {
-            TokenType::IF => {
-                self.lexer.next_token()?;
-                let cond = self.expr()?;
-                let body = self.stmt()?;
-                if self.lexer.curr_tok().token == TokenType::ELSE {
-                    self.lexer.next_token()?;
-                    let else_body = self.stmt()?;
-                    match cond.clone() {
-                        Expr::Val(val) => match val.value {
-                            Literal::Bool(b) => {
-                                if b {
-                                    return Ok(body);
-                                } else {
-                                    return Ok(else_body);
+
+    fn expr(&mut self) -> Result<Expr, ParserError> {
+        if let Some(token) = self.peek() {
+            match token {
+                Ok(Token::LET) => {
+                    self.next()?;
+                    let name = match self.next()? {
+                        Token::IDENT(s) => s,
+                        token => {
+                            return Err(ParserError::UnexpectedToken {
+                                expected: Some(Token::IDENT("NAME".to_string())),
+                                found: token,
+                            });
+                        }
+                    };
+                    let token = self.next()?;
+                    if token != Token::COLON {
+                        return Err(ParserError::UnexpectedToken {
+                            expected: Some(Token::COLON),
+                            found: token,
+                        });
+                    }
+                    let token = self.next()?;
+                    let ty = match token {
+                        Token::Type(t) => t,
+                        token => {
+                            return Err(ParserError::UnexpectedToken {
+                                expected: Some(Token::Type(Type::Int)),
+                                found: token,
+                            });
+                        }
+                    };
+                    let token = self.next()?;
+                    if token != Token::EQ {
+                        return Err(ParserError::UnexpectedToken {
+                            expected: Some(Token::EQ),
+                            found: token,
+                        });
+                    }
+
+                    Ok(Expr::VarDecl(name, ty, Box::new(self.expr()?)))
+                }
+                Ok(Token::FUN) => {
+                    self.next()?;
+                    let name = match self.next()? {
+                        Token::IDENT(s) => s,
+                        token => {
+                            return Err(ParserError::UnexpectedToken {
+                                expected: Some(Token::IDENT("FUNC NAME".to_string())),
+                                found: token,
+                            });
+                        }
+                    };
+                    let token = self.next()?;
+                    if token != Token::LPAREN {
+                        return Err(ParserError::UnexpectedToken {
+                            expected: Some(Token::LPAREN),
+                            found: token,
+                        });
+                    }
+                    let mut params: Vec<(String, Type)> = Vec::new();
+                    loop {
+                        let peeked = self
+                            .peek()
+                            .ok_or(ParserError::UnexpectedToken {
+                                expected: Some(Token::IDENT("PARAM NAME".to_string())),
+                                found: Token::EOF,
+                            })?
+                            .clone();
+                        match peeked {
+                            Ok(Token::IDENT(s)) => {
+                                self.next()?; // consume IDENT token
+                                let token = self.next()?;
+                                if token != Token::COLON {
+                                    return Err(ParserError::UnexpectedToken {
+                                        expected: Some(Token::COLON),
+                                        found: token,
+                                    });
+                                }
+                                let ty = match self.next()? {
+                                    Token::Type(t) => t,
+                                    token => {
+                                        return Err(ParserError::UnexpectedToken {
+                                            expected: Some(Token::Type(Type::Void)),
+                                            found: token,
+                                        });
+                                    }
+                                };
+                                params.push((s.clone(), ty));
+
+                                let token = self.next()?;
+                                if token == Token::RPAREN {
+                                    break;
+                                } else if token != Token::COMMA {
+                                    return Err(ParserError::UnexpectedToken {
+                                        expected: Some(Token::COMMA),
+                                        found: token,
+                                    });
                                 }
                             }
-                            _ => {}
-                        },
-                        _ => {}
-                    }
-                    return Ok(Expr::If(If {
-                        condition: Box::new(cond),
-                        then_branch: Box::new(body),
-                        else_branch: Some(Box::new(else_body)),
-                    }));
-                }
-                match cond.clone() {
-                    Expr::Val(val) => match val.value {
-                        Literal::Bool(b) => {
-                            if b {
-                                return Ok(body);
-                            } else {
-                                return Ok(Expr::Stmt(Stmt { body: vec![] }));
-                            }
-                        }
-                        _ => {}
-                    },
-                    _ => {}
-                }
-                Ok(Expr::If(If {
-                    condition: Box::new(cond),
-                    then_branch: Box::new(body),
-                    else_branch: None,
-                }))
-            }
-            TokenType::WHILE => {
-                self.lexer.next_token()?;
-                let cond = self.expr()?;
-                let body = self.stmt()?;
-                match cond.clone() {
-                    Expr::Val(val) => match val.value {
-                        Literal::Bool(b) => {
-                            if b {
-                                let lbl = format!("loop{:p}", &body);
-                                return Ok(Expr::Stmt(Stmt {
-                                    body: vec![
-                                        Expr::Label(Label { name: lbl.clone() }),
-                                        body,
-                                        Expr::Goto(Goto { label: lbl }),
-                                    ],
-                                }));
-                            } else {
-                                return Ok(Expr::Stmt(Stmt { body: vec![] }));
-                            }
-                        }
-                        _ => {}
-                    },
-                    _ => {}
-                }
-                Ok(Expr::While(While {
-                    condition: Box::new(cond),
-                    body: Box::new(body),
-                }))
-            }
-            TokenType::FOR => {
-                self.lexer.next_token()?;
-                let init = self.get_ident()?;
-                self.lexer.next_token()?;
-                if self.lexer.curr_tok().token != TokenType::IN {
-                    return Err(ParserError::UnexpectedChar {
-                        expected: Some("in".to_string()),
-                        found: self.lexer.curr_ch(),
-                        row: self.lexer.curr_tok().row,
-                        col: self.lexer.curr_tok().col,
-                    });
-                }
-                self.lexer.next_token()?;
-                let iter = self.expr()?;
-                let body = self.stmt()?;
-                Ok(Expr::For(For {
-                    init,
-                    iter: Box::new(iter),
-                    body: Box::new(body),
-                }))
-            }
-            TokenType::PUB => {
-                self.lexer.next_token()?;
-                if self.lexer.curr_tok().token != TokenType::FUNCDECL {
-                    return Err(ParserError::UnexpectedChar {
-                        expected: Some("fun".to_string()),
-                        found: self.lexer.curr_ch(),
-                        row: self.lexer.curr_tok().row,
-                        col: self.lexer.curr_tok().col,
-                    });
-                }
-                self.func_decl(true)
-            }
-            TokenType::FUNCDECL => self.func_decl(false),
-            _ => self.stmt(),
-        }
-    }
-    fn stmt(&mut self) -> Result<Expr, ParserError> {
-        if self.lexer.curr_tok().token == TokenType::LBRACE {
-            let mut exprs: Vec<Expr> = Vec::new();
-            self.lexer.next_token()?;
-
-            while self.lexer.curr_tok().token != TokenType::RBRACE {
-                if self.lexer.curr_tok().token == TokenType::EOF {
-                    return Err(ParserError::UnexpectedChar {
-                        expected: Some("}".to_string()),
-                        found: self.lexer.curr_ch(),
-                        row: self.lexer.curr_tok().row,
-                        col: self.lexer.curr_tok().col,
-                    });
-                }
-                exprs.push(self.ctrl()?);
-            }
-
-            self.lexer.next_token()?;
-            return Ok(Expr::Stmt(Stmt { body: exprs }));
-        }
-        if self.lexer.curr_tok().token == TokenType::IF
-            || self.lexer.curr_tok().token == TokenType::WHILE
-            || self.lexer.curr_tok().token == TokenType::FUNCDECL
-        {
-            return self.ctrl();
-        }
-        self.expr()
-    }
-    fn expr(&mut self) -> Result<Expr, ParserError> {
-        match self.lexer.curr_tok().token {
-            TokenType::GOTO => {
-                self.lexer.next_token()?;
-                let name = self.get_ident()?;
-                self.lexer.next_token()?;
-                Ok(Expr::Goto(Goto { label: name }))
-            }
-            TokenType::VARDECL => {
-                self.lexer.next_token()?;
-                let name = self.get_ident()?;
-                self.lexer.next_token()?;
-                if self.lexer.curr_tok().token != TokenType::COLON {
-                    return Err(ParserError::UnexpectedChar {
-                        expected: Some(":".to_string()),
-                        found: self.lexer.curr_ch(),
-                        row: self.lexer.curr_tok().row,
-                        col: self.lexer.curr_tok().col,
-                    });
-                }
-                self.lexer.next_token()?;
-                let typ = match &self.lexer.curr_tok().token {
-                    TokenType::Type(VarType::Int) => VarType::Int,
-                    TokenType::Type(VarType::Float) => VarType::Float,
-                    TokenType::Type(VarType::Bool) => VarType::Bool,
-                    TokenType::Type(VarType::Str) => VarType::Str,
-                    TokenType::Type(VarType::Array(n)) => VarType::Array(*n),
-                    _ => {
-                        return Err(ParserError::UnknownType {
-                            row: self.lexer.curr_tok().row,
-                            col: self.lexer.curr_tok().col,
-                        });
-                    }
-                };
-                self.lexer.next_token()?;
-                if self.lexer.curr_tok().token != TokenType::EQ {
-                    return Err(ParserError::UnexpectedChar {
-                        expected: Some("=".to_string()),
-                        found: self.lexer.curr_ch(),
-                        row: self.lexer.curr_tok().row,
-                        col: self.lexer.curr_tok().col,
-                    });
-                }
-                self.lexer.next_token()?;
-                let value = self.expr()?;
-                Ok(Expr::VarDecl(VarDecl {
-                    name,
-                    value: Box::new(value),
-                    typ,
-                }))
-            }
-            TokenType::RETURN => {
-                self.lexer.next_token()?;
-                let value = self.expr()?;
-                Ok(Expr::Return(Return {
-                    value: Some(Box::new(value)),
-                }))
-            }
-            TokenType::EXTERN => {
-                self.lexer.next_token()?;
-                let func = self.get_ident()?;
-                self.lexer.next_token()?;
-                if self.lexer.curr_tok().token != TokenType::LPAREN {
-                    return Err(ParserError::UnexpectedChar {
-                        expected: Some("(".to_string()),
-                        found: self.lexer.curr_ch(),
-                        row: self.lexer.curr_tok().row,
-                        col: self.lexer.curr_tok().col,
-                    });
-                }
-                self.lexer.next_token()?;
-                let mut params: Vec<VarType> = Vec::new();
-                while self.lexer.curr_tok().token != TokenType::RPAREN {
-                    match self.lexer.curr_tok().token {
-                        TokenType::Type(typ) => {
-                            params.push(typ);
-                            self.lexer.next_token()?;
-                            if self.lexer.curr_tok().token == TokenType::COMMA {
-                                self.lexer.next_token()?;
-                            } else if self.lexer.curr_tok().token == TokenType::RPAREN {
+                            Ok(Token::RPAREN) => {
+                                self.next()?;
                                 break;
-                            } else {
-                                Err(ParserError::UnexpectedChar {
-                                    expected: Some(") or ,".to_string()),
-                                    found: self.lexer.curr_ch(),
-                                    row: self.lexer.curr_tok().row,
-                                    col: self.lexer.curr_tok().col,
-                                })?;
                             }
-                        }
-                        _ => {
-                            return Err(ParserError::UnexpectedChar {
-                                expected: Some("TYPE".to_string()),
-                                found: self.lexer.curr_ch(),
-                                row: self.lexer.curr_tok().row,
-                                col: self.lexer.curr_tok().col,
-                            });
+                            Ok(token) => {
+                                return Err(ParserError::UnexpectedToken {
+                                    expected: Some(Token::IDENT("PARAM NAME".to_string())),
+                                    found: Token::EOF,
+                                });
+                            }
+                            Err(e) => return Err(ParserError::from(e.clone())),
                         }
                     }
-                }
-                self.lexer.next_token()?;
-                if self.lexer.curr_tok().token != TokenType::COLON {
-                    return Err(ParserError::UnexpectedChar {
-                        expected: Some(":".to_string()),
-                        found: self.lexer.curr_ch(),
-                        row: self.lexer.curr_tok().row,
-                        col: self.lexer.curr_tok().col,
-                    });
-                }
-                self.lexer.next_token()?;
-                let ret_type: VarType;
-                match self.lexer.curr_tok().token {
-                    TokenType::Type(typ) => ret_type = typ,
-                    _ => {
-                        return Err(ParserError::UnexpectedChar {
-                            expected: Some("TYPE".to_string()),
-                            found: self.lexer.curr_ch(),
-                            row: self.lexer.curr_tok().row,
-                            col: self.lexer.curr_tok().col,
+                    if let token = self.next()?
+                        && token != Token::COLON
+                    {
+                        return Err(ParserError::UnexpectedToken {
+                            expected: Some(Token::COLON),
+                            found: token,
                         });
                     }
+                    let ret_type = match self.next()? {
+                        Token::Type(t) => t,
+                        token => {
+                            return Err(ParserError::UnexpectedToken {
+                                expected: Some(Token::Type(Type::Void)),
+                                found: token,
+                            });
+                        }
+                    };
+                    Ok(Expr::FuncDecl(
+                        name,
+                        params,
+                        ret_type,
+                        Box::new(self.expr()?),
+                    ))
                 }
-                self.lexer.next_token()?;
-                self.functions.insert(func.clone(), ret_type.clone());
-                Ok(Expr::Extern(Extern {
-                    name: func,
-                    params,
-                    ret_type,
-                }))
-            }
-            TokenType::IF | TokenType::WHILE | TokenType::LBRACE => self.ctrl(),
-            _ => self.logical(),
-        }
-    }
-    fn logical(&mut self) -> Result<Expr, ParserError> {
-        let mut left = self.comparison()?;
-        while self.lexer.curr_tok().token == TokenType::LOGAND
-            || self.lexer.curr_tok().token == TokenType::LOGOR
-            || self.lexer.curr_tok().token == TokenType::LOGXOR
-        {
-            let op = self.lexer.curr_tok().token;
-            self.lexer.next_token()?;
-            let right = self.comparison()?;
-            match (left.clone(), right.clone()) {
-                (Expr::Val(l), Expr::Val(r)) => match (l.value, r.value) {
-                    (Literal::Int(n), Literal::Int(m)) => match op.clone() {
-                        TokenType::LOGAND => {
-                            left = Expr::Val(Val {
-                                value: Literal::Int(n & m),
-                                typ: VarType::Int,
-                            });
-                        }
-                        TokenType::LOGOR => {
-                            left = Expr::Val(Val {
-                                value: Literal::Int(n | m),
-                                typ: VarType::Int,
-                            });
-                        }
-                        TokenType::LOGXOR => {
-                            left = Expr::Val(Val {
-                                value: Literal::Int(n ^ m),
-                                typ: VarType::Int,
-                            });
-                        }
-                        _ => {}
-                    },
-                    (Literal::Bool(n), Literal::Bool(m)) => match op.clone() {
-                        TokenType::LOGAND => {
-                            left = Expr::Val(Val {
-                                value: Literal::Bool(n & m),
-                                typ: VarType::Bool,
-                            });
-                        }
-                        TokenType::LOGOR => {
-                            left = Expr::Val(Val {
-                                value: Literal::Bool(n | m),
-                                typ: VarType::Bool,
-                            });
-                        }
-                        TokenType::LOGXOR => {
-                            left = Expr::Val(Val {
-                                value: Literal::Bool(n ^ m),
-                                typ: VarType::Bool,
-                            });
-                        }
-                        _ => {}
-                    },
-                    (_, _) => {}
-                },
-                (_, _) => {}
-            }
-            left = Expr::BinOp(BinOp {
-                left: Box::new(left),
-                right: Box::new(right),
-                operator: op,
-            })
-        }
-        Ok(left)
-    }
-    fn comparison(&mut self) -> Result<Expr, ParserError> {
-        let mut left = self.additive()?;
-        while self.lexer.curr_tok().token == TokenType::COMPEQ
-            || self.lexer.curr_tok().token == TokenType::COMPNE
-            || self.lexer.curr_tok().token == TokenType::COMPLT
-            || self.lexer.curr_tok().token == TokenType::COMPLE
-            || self.lexer.curr_tok().token == TokenType::COMPGT
-            || self.lexer.curr_tok().token == TokenType::COMPGE
-            || self.lexer.curr_tok().token == TokenType::COMPAND
-            || self.lexer.curr_tok().token == TokenType::COMPOR
-            || self.lexer.curr_tok().token == TokenType::RANGE
-        {
-            let op = self.lexer.curr_tok().token;
-            self.lexer.next_token()?;
-            let right = self.additive()?;
-            match (left.clone(), right.clone()) {
-                (Expr::Val(l), Expr::Val(r)) => match (l.value, r.value) {
-                    (Literal::Int(n), Literal::Int(m)) => match op.clone() {
-                        TokenType::COMPEQ => {
-                            left = Expr::Val(Val {
-                                value: Literal::Bool(n == m),
-                                typ: VarType::Bool,
-                            });
-                        }
-                        TokenType::COMPNE => {
-                            left = Expr::Val(Val {
-                                value: Literal::Bool(n != m),
-                                typ: VarType::Bool,
-                            });
-                        }
-                        TokenType::COMPGT => {
-                            left = Expr::Val(Val {
-                                value: Literal::Bool(n > m),
-                                typ: VarType::Bool,
-                            });
-                        }
-                        TokenType::COMPGE => {
-                            left = Expr::Val(Val {
-                                value: Literal::Bool(n >= m),
-                                typ: VarType::Bool,
-                            });
-                        }
-                        TokenType::COMPLT => {
-                            left = Expr::Val(Val {
-                                value: Literal::Bool(n < m),
-                                typ: VarType::Bool,
-                            });
-                        }
-                        TokenType::COMPLE => {
-                            left = Expr::Val(Val {
-                                value: Literal::Bool(n <= m),
-                                typ: VarType::Bool,
-                            });
-                        }
-                        _ => {}
-                    },
-                    (Literal::Bool(n), Literal::Bool(m)) => match op.clone() {
-                        TokenType::COMPAND => {
-                            left = Expr::Val(Val {
-                                value: Literal::Bool(n && m),
-                                typ: VarType::Bool,
-                            });
-                        }
-                        TokenType::COMPOR => {
-                            left = Expr::Val(Val {
-                                value: Literal::Bool(n || m),
-                                typ: VarType::Bool,
-                            });
-                        }
-                        _ => {}
-                    },
-                    (_, _) => {}
-                },
-                (_, _) => {}
-            }
-            left = Expr::BinOp(BinOp {
-                left: Box::new(left),
-                right: Box::new(right),
-                operator: op,
-            });
-        }
-        Ok(left)
-    }
-    fn additive(&mut self) -> Result<Expr, ParserError> {
-        let mut left = self.term()?;
-        while self.lexer.curr_tok().token == TokenType::ADD
-            || self.lexer.curr_tok().token == TokenType::SUB
-        {
-            let op = self.lexer.curr_tok().token;
-            self.lexer.next_token()?;
-            let right = self.term()?;
-            match (left.clone(), right.clone()) {
-                (Expr::Val(l), Expr::Val(r)) => match (l.value, r.value) {
-                    (Literal::Int(n), Literal::Int(m)) => match op.clone() {
-                        TokenType::ADD => {
-                            left = Expr::Val(Val {
-                                value: Literal::Int(n + m),
-                                typ: VarType::Int,
-                            });
-                        }
-                        TokenType::SUB => {
-                            left = Expr::Val(Val {
-                                value: Literal::Int(n - m),
-                                typ: VarType::Int,
-                            });
-                        }
-                        _ => {}
-                    },
-                    (_, _) => {}
-                },
-                (_, _) => {}
-            }
-            left = Expr::BinOp(BinOp {
-                left: Box::new(left),
-                right: Box::new(right),
-                operator: op,
-            });
-        }
-        Ok(left)
-    }
-    fn term(&mut self) -> Result<Expr, ParserError> {
-        let mut left = self.factor()?;
-        while self.lexer.curr_tok().token == TokenType::MUL
-            || self.lexer.curr_tok().token == TokenType::DIV
-        {
-            let op = self.lexer.curr_tok().token;
-            self.lexer.next_token()?;
-            let right = self.factor()?;
-            match (left.clone(), right.clone()) {
-                (Expr::Val(l), Expr::Val(r)) => match (l.value, r.value) {
-                    (Literal::Int(n), Literal::Int(m)) => match op.clone() {
-                        TokenType::MUL => {
-                            left = Expr::Val(Val {
-                                value: Literal::Int(n * m),
-                                typ: VarType::Int,
-                            });
-                        }
-                        TokenType::DIV => {
-                            left = Expr::Val(Val {
-                                value: Literal::Int(n / m),
-                                typ: VarType::Int,
-                            });
-                        }
-                        _ => {}
-                    },
-                    (_, _) => {}
-                },
-                (_, _) => {}
-            }
-            left = Expr::BinOp(BinOp {
-                left: Box::new(left),
-                right: Box::new(right),
-                operator: op,
-            });
-        }
-        Ok(left)
-    }
-    fn factor(&mut self) -> Result<Expr, ParserError> {
-        match self.lexer.curr_tok().token {
-            TokenType::LITERAL(typ) => {
-                if let Some(val) = self.lexer.curr_tok().value.clone() {
-                    self.lexer.next_token()?;
-                    Ok(Expr::Val(Val {
-                        value: val,
-                        typ: typ,
-                    }))
-                } else {
-                    Err(ParserError::SyntaxError {
-                        message: "expected literal value".to_string(),
-                        row: self.lexer.curr_tok().row,
-                        col: self.lexer.curr_tok().col,
-                    })
+                Ok(Token::RET) => {
+                    self.next()?;
+                    Ok(Expr::Return(Box::new(self.expr()?)))
                 }
-            }
-            TokenType::LPAREN => {
-                self.lexer.next_token()?;
-                let expr = self.expr()?;
-                if self.lexer.curr_tok().token != TokenType::RPAREN {
-                    return Err(ParserError::UnexpectedChar {
-                        expected: Some(")".to_string()),
-                        found: self.lexer.curr_ch(),
-                        row: self.lexer.curr_tok().row,
-                        col: self.lexer.curr_tok().col,
-                    });
+                Ok(Token::BOOL(b)) => {
+                    let bool_val = *b;
+                    self.next()?;
+                    Ok(Expr::Bool(bool_val))
                 }
-                self.lexer.next_token()?;
-                Ok(expr)
-            }
-            TokenType::LBRACKET => {
-                self.lexer.next_token()?;
-                let mut array: Vec<Expr> = Vec::new();
-                while self.lexer.curr_tok().token != TokenType::RBRACKET {
-                    array.push(self.expr()?);
-                    if self.lexer.curr_tok().token == TokenType::COMMA {
-                        self.lexer.next_token()?;
-                    } else if self.lexer.curr_tok().token == TokenType::RBRACKET {
-                        break;
-                    } else {
-                        Err(ParserError::UnexpectedChar {
-                            expected: Some("] or ,".to_string()),
-                            found: self.lexer.curr_ch(),
-                            row: self.lexer.curr_tok().row,
-                            col: self.lexer.curr_tok().col,
-                        })?;
-                    }
-                }
-
-                self.lexer.next_token()?;
-                Ok(Expr::Val(Val {
-                    value: Literal::Array(array.len(), array.clone()),
-                    typ: VarType::Array(Some(array.len())),
-                }))
-            }
-            TokenType::NEG => {
-                self.lexer.next_token()?;
-                let argument = self.expr()?;
-                match argument.clone() {
-                    Expr::Val(val) => match val.value {
-                        Literal::Int(n) => {
-                            return Ok(Expr::Val(Val {
-                                value: Literal::Int(-n),
-                                typ: VarType::Int,
-                            }));
+                Ok(Token::IF) => {
+                    self.next()?;
+                    let cond = self.expr()?;
+                    let then_branch = self.expr()?;
+                    let else_branch = match self.peek() {
+                        Some(Ok(Token::ELSE)) => {
+                            self.next()?; // consume ELSE
+                            Some(Box::new(self.expr()?))
                         }
-                        _ => {}
-                    },
-                    _ => {}
+                        _ => None,
+                    };
+                    Ok(Expr::If(Box::new(cond), Box::new(then_branch), else_branch))
                 }
-                Ok(Expr::UnaryOp(UnaryOp {
-                    argument: Box::new(argument),
-                    operator: TokenType::NEG,
-                }))
-            }
-            TokenType::LOGNOT => {
-                self.lexer.next_token()?;
-                let argument = self.expr()?;
-                match argument.clone() {
-                    Expr::Val(val) => match val.value {
-                        Literal::Bool(n) => {
-                            return Ok(Expr::Val(Val {
-                                value: Literal::Bool(!n),
-                                typ: VarType::Bool,
-                            }));
-                        }
-                        _ => {}
-                    },
-                    _ => {}
+                Ok(Token::WHILE) => {
+                    self.next()?;
+                    let cond = self.expr()?;
+                    let body = self.expr()?;
+                    Ok(Expr::While(Box::new(cond), Box::new(body)))
                 }
-                Ok(Expr::UnaryOp(UnaryOp {
-                    argument: Box::new(argument),
-                    operator: TokenType::LOGNOT,
-                }))
-            }
-            TokenType::SIZEOF => {
-                self.lexer.next_token()?;
-                let argument = self.expr()?;
-                Ok(Expr::UnaryOp(UnaryOp {
-                    argument: Box::new(argument),
-                    operator: TokenType::SIZEOF,
-                }))
-            }
-            TokenType::IDENT => {
-                let name = self.get_ident()?;
-                self.lexer.next_token()?;
-                match self.lexer.curr_tok().token {
-                    TokenType::COLON => {
-                        self.lexer.next_token()?;
-                        Ok(Expr::Label(Label { name: name }))
-                    }
-                    TokenType::LPAREN => {
-                        self.lexer.next_token()?;
-                        let mut args: Vec<Expr> = Vec::new();
-                        let ret_type = self.find_func_ret_type(&name)?;
-                        while self.lexer.curr_tok().token != TokenType::RPAREN {
-                            args.push(self.expr()?);
-                            if self.lexer.curr_tok().token == TokenType::COMMA {
-                                self.lexer.next_token()?;
-                            } else if self.lexer.curr_tok().token == TokenType::RPAREN {
-                                break;
-                            } else {
-                                Err(ParserError::UnexpectedChar {
-                                    expected: Some(") or ,".to_string()),
-                                    found: self.lexer.curr_ch(),
-                                    row: self.lexer.curr_tok().row,
-                                    col: self.lexer.curr_tok().col,
-                                })?;
-                            }
-                        }
-                        self.lexer.next_token()?;
-                        Ok(Expr::FuncCall(FuncCall {
-                            name,
-                            args,
-                            ret_type,
-                        }))
-                    }
-                    TokenType::EQ => {
-                        self.lexer.next_token()?;
-                        let val = self.expr()?;
-                        Ok(Expr::VarMod(VarMod {
-                            name,
-                            value: Box::new(val),
-                        }))
-                    }
-                    TokenType::ADDEQ => {
-                        self.lexer.next_token()?;
-                        let val = self.expr()?;
-                        Ok(Expr::VarMod(VarMod {
-                            name: name.clone(),
-                            value: Box::new(Expr::BinOp(BinOp {
-                                left: Box::new(Expr::Var(Var { name })),
-                                right: Box::new(val),
-                                operator: TokenType::ADD,
-                            })),
-                        }))
-                    }
-                    TokenType::SUBEQ => {
-                        self.lexer.next_token()?;
-                        let val = self.expr()?;
-                        Ok(Expr::VarMod(VarMod {
-                            name: name.clone(),
-                            value: Box::new(Expr::BinOp(BinOp {
-                                left: Box::new(Expr::Var(Var { name })),
-                                right: Box::new(val),
-                                operator: TokenType::SUB,
-                            })),
-                        }))
-                    }
-                    TokenType::MULEQ => {
-                        self.lexer.next_token()?;
-                        let val = self.expr()?;
-                        Ok(Expr::VarMod(VarMod {
-                            name: name.clone(),
-                            value: Box::new(Expr::BinOp(BinOp {
-                                left: Box::new(Expr::Var(Var { name })),
-                                right: Box::new(val),
-                                operator: TokenType::MUL,
-                            })),
-                        }))
-                    }
-                    TokenType::DIVEQ => {
-                        self.lexer.next_token()?;
-                        let val = self.expr()?;
-                        Ok(Expr::VarMod(VarMod {
-                            name: name.clone(),
-                            value: Box::new(Expr::BinOp(BinOp {
-                                left: Box::new(Expr::Var(Var { name })),
-                                right: Box::new(val),
-                                operator: TokenType::DIV,
-                            })),
-                        }))
-                    }
-                    TokenType::LBRACKET => {
-                        self.lexer.next_token()?;
-                        let offset = self.expr()?;
-                        if self.lexer.curr_tok().token != TokenType::RBRACKET {
-                            return Err(ParserError::UnexpectedChar {
-                                expected: Some("]".to_string()),
-                                found: self.lexer.curr_ch(),
-                                row: self.lexer.curr_tok().row,
-                                col: self.lexer.curr_tok().col,
-                            });
-                        }
-                        self.lexer.next_token()?;
-                        if self.lexer.curr_tok().token == TokenType::EQ {
-                            self.lexer.next_token()?;
-                            let value = self.expr()?;
-                            Ok(Expr::ArrayAssign(ArrayAssign {
-                                array: name,
-                                offset: Box::new(offset),
-                                value: Box::new(value),
-                            }))
-                        } else {
-                            Ok(Expr::ArrayAccess(ArrayAccess {
-                                array: name,
-                                offset: Box::new(offset),
-                            }))
-                        }
-                    }
-                    _ => Ok(Expr::Var(Var { name })),
-                }
-            }
-            _ => Err(ParserError::SyntaxError {
-                message: format!("unexpected token: {:?}", self.lexer.curr_tok().token),
-                row: self.lexer.curr_tok().row,
-                col: self.lexer.curr_tok().col,
-            }),
-        }
-    }
-
-    fn get_ident(&mut self) -> Result<String, ParserError> {
-        match self.lexer.curr_tok().value.as_ref() {
-            Some(Literal::Str(s)) => Ok(s.clone()),
-            Some(lit) => Err(ParserError::SyntaxError {
-                message: format!("invalid name: {:?}", lit),
-                row: self.lexer.curr_tok().row,
-                col: self.lexer.curr_tok().col,
-            }),
-            None => Err(ParserError::SyntaxError {
-                message: "expected identifier".to_string(),
-                row: self.lexer.curr_tok().row,
-                col: self.lexer.curr_tok().col,
-            }),
-        }
-    }
-
-    fn func_decl(&mut self, is_pub: bool) -> Result<Expr, ParserError> {
-        self.lexer.next_token()?;
-        let name = self.get_ident()?;
-        let mut params: Vec<(String, VarType)> = Vec::new();
-        self.lexer.next_token()?;
-        if self.lexer.curr_tok().token != TokenType::LPAREN {
-            return Err(ParserError::UnexpectedChar {
-                expected: Some("(".to_string()),
-                found: self.lexer.curr_ch(),
-                row: self.lexer.curr_tok().row,
-                col: self.lexer.curr_tok().col,
-            });
-        }
-        self.lexer.next_token()?;
-        while self.lexer.curr_tok().token != TokenType::RPAREN {
-            if self.lexer.curr_tok().token == TokenType::EOF
-                || self.lexer.curr_tok().token == TokenType::LBRACE
-            {
-                return Err(ParserError::UnexpectedChar {
-                    expected: Some(")".to_string()),
-                    found: self.lexer.curr_ch(),
-                    row: self.lexer.curr_tok().row,
-                    col: self.lexer.curr_tok().col,
-                });
-            }
-            let name: String;
-            let typ: VarType;
-            if self.lexer.curr_tok().token == TokenType::IDENT {
-                name = self.get_ident()?;
-            } else if self.lexer.curr_tok().token == TokenType::RPAREN {
-                break;
-            } else {
-                return Err(ParserError::UnexpectedChar {
-                    expected: Some("IDENT".to_string()),
-                    found: self.lexer.curr_ch(),
-                    row: self.lexer.curr_tok().row,
-                    col: self.lexer.curr_tok().col,
-                });
-            }
-            self.lexer.next_token()?;
-            if self.lexer.curr_tok().token == TokenType::COLON {
-                self.lexer.next_token()?;
-                match self.lexer.curr_tok().token {
-                    TokenType::Type(vt) => {
-                        typ = vt;
-                    }
-                    _ => {
-                        return Err(ParserError::UnexpectedChar {
-                            expected: Some("TYPE".to_string()),
-                            found: self.lexer.curr_ch(),
-                            row: self.lexer.curr_tok().row,
-                            col: self.lexer.curr_tok().col,
-                        });
-                    }
-                }
-            } else {
-                return Err(ParserError::UnexpectedChar {
-                    expected: Some(":".to_string()),
-                    found: self.lexer.curr_ch(),
-                    row: self.lexer.curr_tok().row,
-                    col: self.lexer.curr_tok().col,
-                });
-            }
-            params.push((name, typ));
-            self.lexer.next_token()?;
-            if self.lexer.curr_tok().token == TokenType::COMMA {
-                self.lexer.next_token()?;
-            } else if self.lexer.curr_tok().token == TokenType::RPAREN {
-                break;
-            } else {
-                Err(ParserError::UnexpectedChar {
-                    expected: Some(") or ,".to_string()),
-                    found: self.lexer.curr_ch(),
-                    row: self.lexer.curr_tok().row,
-                    col: self.lexer.curr_tok().col,
-                })?;
-            }
-        }
-        self.lexer.next_token()?;
-        let ret_type: VarType;
-        if self.lexer.curr_tok().token == TokenType::COLON {
-            self.lexer.next_token()?;
-            match self.lexer.curr_tok().token {
-                TokenType::Type(vt) => {
-                    ret_type = vt;
-                }
-                _ => {
-                    return Err(ParserError::UnexpectedChar {
-                        expected: Some("TYPE".to_string()),
-                        found: self.lexer.curr_ch(),
-                        row: self.lexer.curr_tok().row,
-                        col: self.lexer.curr_tok().col,
-                    });
-                }
+                Ok(_) => self.additive(),
+                Err(e) => Err(ParserError::LexerError(e.to_owned())),
             }
         } else {
-            return Err(ParserError::UnexpectedChar {
-                expected: Some(":".to_string()),
-                found: self.lexer.curr_ch(),
-                row: self.lexer.curr_tok().row,
-                col: self.lexer.curr_tok().col,
-            });
+            unreachable!()
         }
-        self.functions.insert(name.clone(), ret_type.clone());
-        self.lexer.next_token()?;
-        let body = self.expr()?;
-        Ok(Expr::FuncDecl(FuncDecl {
-            name,
-            params,
-            body: Box::new(body),
-            ret_type,
-            is_pub,
-        }))
     }
 
-    fn find_func_ret_type(&self, name: &String) -> Result<VarType, ParserError> {
-        self.functions
-            .get(name)
-            .ok_or_else(|| ParserError::SyntaxError {
-                message: format!("undefined function: '{}'", name),
-                row: 0,
-                col: 0,
+    fn additive(&mut self) -> Result<Expr, ParserError> {
+        let mut left = self.term()?;
+        while let Some(Ok(op)) = self.peek().cloned() {
+            match op {
+                Token::PLUS | Token::MINUS => {
+                    self.next()?;
+                    let right = self.term()?;
+                    left = match op {
+                        Token::PLUS => Expr::Add(Box::new(left), Box::new(right)),
+                        Token::MINUS => Expr::Sub(Box::new(left), Box::new(right)),
+                        _ => unreachable!(),
+                    };
+                }
+                _ => break,
+            }
+        }
+        Ok(left)
+    }
+
+    fn term(&mut self) -> Result<Expr, ParserError> {
+        let mut left = self.factor()?;
+        while let Some(Ok(op)) = self.peek().cloned() {
+            match op {
+                Token::STAR | Token::SLASH => {
+                    self.next()?;
+                    let right = self.factor()?;
+                    left = match op {
+                        Token::STAR => Expr::Mul(Box::new(left), Box::new(right)),
+                        Token::SLASH => Expr::Div(Box::new(left), Box::new(right)),
+                        _ => unreachable!(),
+                    };
+                }
+                _ => break,
+            }
+        }
+        Ok(left)
+    }
+
+    fn factor(&mut self) -> Result<Expr, ParserError> {
+        if let Some(peeked) = self.peek().cloned() {
+            match peeked {
+                Ok(Token::INT(n)) => {
+                    self.next()?;
+                    return Ok(Expr::Int(n));
+                }
+                Ok(Token::BOOL(b)) => {
+                    self.next()?;
+                    return Ok(Expr::Bool(b));
+                }
+                Ok(Token::LPAREN) => {
+                    self.next()?;
+                    let expr = self.expr()?;
+                    match self.peek().cloned() {
+                        Some(Ok(Token::RPAREN)) => {
+                            self.next()?;
+                            return Ok(expr);
+                        }
+                        Some(Ok(token)) => {
+                            return Err(ParserError::UnexpectedToken {
+                                expected: Some(Token::RPAREN),
+                                found: token,
+                            });
+                        }
+                        Some(Err(e)) => return Err(e.into()),
+                        None => {
+                            return Err(ParserError::UnexpectedToken {
+                                expected: Some(Token::RPAREN),
+                                found: Token::EOF,
+                            });
+                        }
+                    }
+                }
+                Ok(Token::LBRACE) => {
+                    let mut exprs: Vec<Expr> = Vec::new();
+                    self.next()?;
+                    loop {
+                        match self.peek().ok_or(ParserError::UnexpectedToken {
+                            expected: Some(Token::RBRACE),
+                            found: Token::EOF,
+                        })? {
+                            Ok(Token::RBRACE) => {
+                                self.next()?;
+                                break;
+                            }
+                            Ok(Token::EOF) => {
+                                return Err(ParserError::UnexpectedToken {
+                                    expected: Some(Token::RBRACE),
+                                    found: Token::EOF,
+                                });
+                            }
+                            Err(e) => return Err(ParserError::LexerError(e.to_owned())),
+                            _ => {
+                                exprs.push(self.expr()?);
+                            }
+                        }
+                    }
+                    return Ok(Expr::Stmt(exprs));
+                }
+                Ok(Token::IDENT(s)) => {
+                    let name = s.clone();
+                    self.next()?;
+
+                    if let Some(Ok(Token::LPAREN)) = self.peek() {
+                        self.next()?;
+                        let mut args: Vec<Expr> = Vec::new();
+                        loop {
+                            let peeked = self
+                                .peek()
+                                .ok_or(ParserError::UnexpectedToken {
+                                    expected: Some(Token::IDENT("PARAM NAME".to_string())),
+                                    found: Token::EOF,
+                                })?
+                                .clone();
+                            match peeked {
+                                Ok(Token::RPAREN) => {
+                                    self.next()?;
+                                    return Ok(Expr::FuncCall(name, args));
+                                }
+                                Ok(_) => {
+                                    args.push(self.expr()?);
+                                    let token = self.next()?;
+                                    match token {
+                                        Token::COMMA => {}
+                                        Token::RPAREN => {
+                                            return Ok(Expr::FuncCall(name, args));
+                                        }
+                                        token => {
+                                            return Err(ParserError::UnexpectedToken {
+                                                expected: Some(Token::COMMA),
+                                                found: token,
+                                            });
+                                        }
+                                    }
+                                }
+                                Err(e) => return Err(e.into()),
+                            }
+                        }
+                    }
+                    return Ok(Expr::Var(name));
+                }
+                Ok(token) => {
+                    return Err(ParserError::UnexpectedToken {
+                        expected: None,
+                        found: token,
+                    });
+                }
+                Err(e) => return Err(ParserError::LexerError(e.to_owned())),
+            }
+        }
+        Err(ParserError::UnexpectedToken {
+            expected: None,
+            found: Token::EOF,
+        })
+    }
+
+    fn peek(&mut self) -> Option<&Result<Token, LexerError>> {
+        self.lex.peek()
+    }
+
+    fn next(&mut self) -> Result<Token, ParserError> {
+        if let Some(token) = self.lex.next() {
+            match token {
+                Ok(token) => Ok(token),
+                Err(e) => Err(ParserError::LexerError(e)),
+            }
+        } else {
+            Err(ParserError::UnexpectedToken {
+                expected: None,
+                found: Token::EOF,
             })
-            .map(|t| t.to_owned())
+        }
+    }
+}
+
+impl From<LexerError> for ParserError {
+    fn from(value: LexerError) -> Self {
+        Self::LexerError(value)
     }
 }
