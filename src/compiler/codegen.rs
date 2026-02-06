@@ -1,9 +1,6 @@
 use crate::compiler::ast::{Expr, Program, Type};
 use cranelift::{
-    codegen::{
-        ir::{self, BlockArg},
-        settings,
-    },
+    codegen::{ir, settings},
     prelude::{
         AbiParam, FunctionBuilder, FunctionBuilderContext, InstBuilder, Signature, Value, Variable,
         isa::{self, CallConv},
