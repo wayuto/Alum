@@ -36,7 +36,7 @@
 			"patterns": [
 				{
 					"name": "comment.line.number-sign.alum",
-					"match": "#.*"
+					"match": "//.*"
 				}
 			]
 		},

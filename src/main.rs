@@ -19,16 +19,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut obj_files = Vec::new();
 
+    let all_obj_files = cli
+        .input
+        .iter()
+        .all(|input| input.ends_with(".o") || input.ends_with(".obj") || input.ends_with(".a"));
+
     for input in &cli.input {
-        if input.ends_with(".o") || input.ends_with(".obj") {
+        if input.ends_with(".o") || input.ends_with(".obj") || input.ends_with(".a") {
             obj_files.push(input.clone());
             continue;
         }
 
+        let obj_output = if cli.compile_only {
+            cli.output.clone()
+        } else {
+            None
+        };
+
         let obj_file = build::build(
             input.clone(),
             cli.ast,
-            None,
+            obj_output,
             cli.include_paths.clone(),
             cli.preprocess_only,
             cli.verbose,
@@ -37,6 +48,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if !obj_file.is_empty() {
             obj_files.push(obj_file);
         }
+    }
+
+    if all_obj_files && !cli.compile_only && !cli.ast && !cli.preprocess_only {
+        let exe_path = if let Some(output) = cli.output {
+            output
+        } else {
+            "a.out".to_string()
+        };
+
+        let std_lib_path = if cli.nostdlib {
+            String::new()
+        } else {
+            let has_stdlib = obj_files.iter().any(|f| f.contains("libalum_std.a"));
+            if has_stdlib {
+                String::new()
+            } else {
+                let path = "/usr/local/lib/libalum_std.a";
+                path.to_string()
+            }
+        };
+
+        if cli.verbose {
+            eprintln!("Linking {} to {}", obj_files.join(", "), exe_path);
+        }
+
+        link::link(obj_files, &std_lib_path, &exe_path, cli.verbose)?;
+        return Ok(());
     }
 
     if !cli.compile_only && !cli.ast && !cli.preprocess_only {

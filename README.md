@@ -7,9 +7,9 @@ Alum is a modern, systems programming language designed for simplicity and perfo
 - **Simple Syntax**: Clean, readable syntax inspired by modern languages
 - **Static Typing**: Type safety with explicit type annotations
 - **Native Compilation**: Compiles directly to machine code via Cranelift
-- **Standard Library**: Comprehensive standard library for I/O, math, strings, arrays, memory, and conversion
-- **Preprocessor**: Supports includes, defines, and conditional compilation
 - **Fast Compilation**: Efficient compilation pipeline
+- **FFI Support**: Interoperability with C for low-level operations
+- **Build Tool**: Integrated build system (almk) for project management
 
 ## Installation
 
@@ -33,6 +33,7 @@ This will:
 2. Build the standard library
 3. Install `libalum_std.a` to `/usr/local/lib/`
 4. Install standard library headers to `/usr/local/include/alum/`
+5. Install the build tool `almk`
 
 ## Quick Start
 
@@ -41,6 +42,8 @@ This will:
 Create a file `hello.al`:
 
 ```al
+$import "io.al"
+
 fun main(): int {
     println("Hello, World!");
     return 0;
@@ -118,36 +121,18 @@ Run immediately:
 alc -r program.al
 ```
 
-Preprocess only:
-```bash
-alc -E program.al
-```
-
 Include custom directories:
 ```bash
 alc program.al -I ./include
-```
-
-Verbose output:
-```bash
-alc -v program.al
 ```
 
 ## Language Syntax
 
 ### Type System
 
-Alum is a statically typed language with explicit type annotations. All variables and functions must have their types declared at compile time. This provides type safety and enables the compiler to generate efficient machine code.
+Alum is a statically typed language with explicit type annotations. All variables and functions must have their types declared at compile time.
 
-**Key characteristics:**
-- Static typing: Types are checked at compile time
-- Explicit annotations: Types must be declared using the `:` syntax
-- No type inference: You must specify the type for each variable and function parameter
-- Type safety: Prevents many common programming errors through compile-time checking
-
-### Types
-
-Alum supports the following primitive types:
+**Supported types:**
 - `int`: Signed integer (isize)
 - `float`: 64-bit floating point number (f64)
 - `bool`: Boolean value
@@ -162,7 +147,6 @@ let name: string = "Alum";
 let count: int = 42;
 let pi: float = 3.14159;
 let is_valid: bool = true;
-let nothing: int = nil;
 ```
 
 ### Functions
@@ -171,233 +155,79 @@ let nothing: int = nil;
 fun add(a: int, b: int): int {
     return a + b;
 }
-
-fun greet(name: string): void {
-    println("Hello, ");
-}
 ```
 
-### Extern Functions
+### Extern Functions (FFI)
 
-Declare external functions (typically from C):
+Declare external functions for C interoperability:
 
 ```al
-extern syscall(int, int, int, int): int
-extern exit(int): void
+extern c_add(int, int): int
+extern printf(string): int
 ```
 
 ### Control Flow
 
-#### If-Else
-
 ```al
+// If-Else
 if x > 0 {
     println("Positive");
-} else {
-    println("Non-positive");
 }
-```
 
-#### While Loop
-
-```al
-let i: int = 0;
+// While Loop
 while i < 10 {
-    println(itoa(i));
     i = i + 1;
 }
-```
 
-#### For Loop
-
-```al
+// For Loop
 for i in 0..10 {
     println(itoa(i));
 }
 ```
 
-### Operators
-
-**Arithmetic**: `+`, `-`, `*`, `/`
-
-**Comparison**: `==`, `!=`, `<`, `<=`, `>`, `>=`
-
-**Logical**: `&&`, `||`, `!`
-
-**Bitwise**: `&`, `|`, `^`
-
-**Range**: `..`
-
 ### Arrays
 
 ```al
-// Array literal
 let numbers: arr[int] = [1, 2, 3, 4, 5];
-
-// Array with fill syntax [type; size]
 let buffer: arr[int] = [int; 100];
-
-// Array access
 let first: int = numbers[0];
-numbers[1] = 10;
 ```
 
 ### Preprocessor Directives
 
 ```al
-// Define a constant
 $define PI 3.14159
-
-// Conditional compilation
 $ifndef ALUM_LIB
 $define ALUM_LIB 1
 $endif
-
-// Import a module
 $import "io.al"
-```
-
-## Standard Library
-
-The Alum standard library provides essential functionality organized into modules.
-
-### Importing Modules
-
-```al
-$import "io.al"
-$import "math.al"
-$import "string.al"
-$import "array.al"
-$import "memory.al"
-$import "convert.al"
-```
-
-### I/O Module (`io.al`)
-
-```al
-extern write(int, string, int): int    // Write to file descriptor
-extern read(int, string, int): int     // Read from file descriptor
-extern print(string): int              // Print string
-extern println(string): int            // Print string with newline
-extern input(string): string           // Read user input with prompt
-extern fopen(string, int, int): int    // Open file
-extern fclose(int): int                // Close file
-extern fread(int): string              // Read from file
-extern fwrite(int, string, int): int   // Write to file
-extern lseek(int, int, int): int       // Seek in file
-```
-
-### Math Module (`math.al`)
-
-```al
-extern abs(int): int        // Absolute value
-extern sqrt(int): int       // Square (note: returns x * x)
-extern max(int, int): int   // Maximum of two numbers
-extern min(int, int): int   // Minimum of two numbers
-extern pow(int, int): int   // Power function
-extern fact(int): int       // Factorial
-```
-
-### String Module (`string.al`)
-
-```al
-extern strlen(string): int              // String length
-extern strcpy(string, string): string   // String copy
-extern strcat(string, string): string   // String concatenation
-extern memcpy(string, string, int): string  // Memory copy
-extern memset(string, int, int): string    // Memory set
-extern bcmp(string, string, int): int      // Byte comparison
-extern memcmp(string, string, int): int    // Memory comparison
-```
-
-### Array Module (`array.al`)
-
-```al
-extern range(int, int): string  // Generate range (returns pointer to array)
-```
-
-### Memory Module (`memory.al`)
-
-```al
-extern malloc(int): string  // Allocate memory (returns pointer)
-```
-
-### Convert Module (`convert.al`)
-
-```al
-extern itoa(int): string    // Integer to string
-extern atoi(string): int    // String to integer
-extern atof(string): float  // String to float
-extern ftoa(float): string  // Float to string
-```
-
-### Main Library (`lib.al`)
-
-The main library module imports all standard library modules:
-
-```al
-$import "io.al"
-$import "string.al"
-$import "convert.al"
-$import "math.al"
-$import "array.al"
-$import "memory.al"
-
-extern syscall(int, int, int, int): int
-extern exit(int): void
 ```
 
 ## Compilation Pipeline
 
-The Alum compiler follows a standard compilation pipeline:
-
-1. **Preprocessing**: Handles `$import`, `$define`, `$ifdef`, `$ifndef`, `$endif` directives
-2. **Lexing**: Tokenizes source code into tokens
-3. **Parsing**: Builds an Abstract Syntax Tree (AST)
+1. **Preprocessing**: Handles `$import`, `$define`, `$ifdef`, `$ifndef`, `$endif`
+2. **Lexing**: Tokenizes source code
+3. **Parsing**: Builds Abstract Syntax Tree (AST)
 4. **Code Generation**: Compiles AST to machine code using Cranelift
-5. **Linking**: Links object files with standard library to create executable
+5. **Linking**: Links object files with standard library
 
 ## Project Structure
 
 ```
 Alum/
-├── src/
-│   ├── main.rs           # Compiler entry point
-│   ├── cli/              # CLI argument parsing and commands
-│   │   ├── args.rs       # Command-line argument definitions
-│   │   ├── build.rs      # Build command implementation
-│   │   ├── link.rs       # Linker implementation
-│   │   └── mod.rs        # CLI module exports
-│   └── compiler/         # Compiler components
-│       ├── lexer.rs      # Lexical analyzer
-│       ├── parser.rs     # Parser
-│       ├── ast.rs        # AST definitions
-│       ├── codegen.rs    # Code generation
-│       ├── preprocessor.rs  # Preprocessor
-│       └── mod.rs        # Compiler module exports
-├── alum-std/             # Standard library
-│   ├── alum/             # Standard library headers (.al files)
-│   │   ├── lib.al        # Main library module
-│   │   ├── io.al         # I/O functions
-│   │   ├── math.al       # Math functions
-│   │   ├── string.al     # String functions
-│   │   ├── array.al      # Array functions
-│   │   ├── memory.al     # Memory functions
-│   │   └── convert.al    # Type conversion functions
-│   └── src/              # Standard library implementation (Rust no_std)
-│       ├── lib.rs        # Library entry point with syscalls
-│       ├── io.rs         # I/O implementation
-│       ├── math.rs       # Math implementation
-│       ├── string.rs     # String implementation
-│       ├── array.rs      # Array implementation
-│       ├── memory.rs     # Memory implementation
-│       └── convert.rs    # Conversion implementation
-├── alum-vscode/          # VS Code extension
-│   ├── syntaxes/
-│   │   └── alum.tmLanguage.json  # Syntax highlighting
-│   └── language-configuration.json
-├── Cargo.toml            # Compiler dependencies
-└── install.sh            # Installation script
+├── src/                      # Compiler source code
+│   ├── main.rs               # Compiler entry point
+│   ├── cli/                  # CLI argument parsing and commands
+│   └── compiler/             # Compiler components
+├── alum-std/                 # Standard library
+│   ├── alum/                 # Standard library headers (.al files)
+│   └── src/                  # Standard library implementation (Rust no_std)
+├── alum-make/                # Build tool (almk)
+│   └── src/                  # Build tool source code
+├── alum-vscode/              # VS Code extension
+│   └── syntaxes/             # Syntax highlighting
+├── Cargo.toml                # Compiler dependencies
+└── install.sh                # Installation script
 ```
 
 ## Development
@@ -414,3 +244,12 @@ cargo build --release
 cd alum-std
 cargo build --release
 ```
+
+## Documentation
+
+- **[Standard Library](./alum-std/README.md)** - Comprehensive standard library documentation
+- **[Build Tool](./alum-make/README.md)** - almk build tool documentation
+
+## License
+
+See LICENSE file for details.

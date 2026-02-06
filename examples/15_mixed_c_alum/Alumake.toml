@@ -1,0 +1,13 @@
+[package]
+name = "mixed_c_alum"
+version = "0.1.0"
+author = ""
+license = "MIT"
+language = "mixed"
+
+[build]
+linker = "alc"
+cc = "cc"
+alc = "alc"
+cflags = "-Wall -O2 -nostdlib"
+includes = ["./include"]
