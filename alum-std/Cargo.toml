@@ -10,3 +10,6 @@ path = "src/lib.rs"
 
 [profile.release]
 panic = "abort"
+
+[profile.dev]
+panic = "abort"

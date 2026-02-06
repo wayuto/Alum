@@ -229,7 +229,7 @@
 				},
 				{
 					"name": "keyword.operator.range.alum",
-					"match": "~"
+					"match": ".."
 				}
 			]
 		}

@@ -1,118 +1,41 @@
-use object::{
-    BinaryFormat, Object, ObjectSection, ObjectSymbol, SectionKind, SymbolKind, SymbolScope,
-    read::File as ObjectFile, write,
-};
-use std::fs;
+use std::process::Command;
 
-pub fn link_objects(
+pub fn link(
     obj_files: Vec<String>,
     std_lib_path: &str,
     exe_path: &str,
+    verbose: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let obj_files_to_delete = obj_files.clone();
+    let mut cmd = Command::new("rust-lld");
 
-    let mut exe = write::Object::new(
-        BinaryFormat::Elf,
-        object::Architecture::X86_64,
-        object::Endianness::Little,
-    );
+    cmd.arg("-flavor").arg("gnu");
 
-    exe.add_symbol(write::Symbol {
-        name: "_start".into(),
-        value: 0,
-        size: 0,
-        kind: SymbolKind::Text,
-        scope: SymbolScope::Linkage,
-        weak: false,
-        section: write::SymbolSection::Undefined,
-        flags: object::SymbolFlags::None,
-    });
+    cmd.arg("-o").arg(exe_path);
 
-    for obj_path in &obj_files {
-        let obj_data = fs::read(obj_path)?;
-        let obj_file = ObjectFile::parse(&*obj_data)?;
-
-        for section in obj_file.sections() {
-            let name: &str = section.name()?;
-            if name == ".text" {
-                let section_id = exe.add_section(Vec::new(), b".text".to_vec(), SectionKind::Text);
-                let data = section.data()?;
-                exe.append_section_data(section_id, data, 1);
-            } else if name == ".data" || name == ".rodata" || name == ".bss" {
-                let section_id = exe.add_section(
-                    Vec::new(),
-                    name.as_bytes().to_vec(),
-                    if name == ".bss" {
-                        SectionKind::UninitializedData
-                    } else {
-                        SectionKind::Data
-                    },
-                );
-                let data = section.data()?;
-                exe.append_section_data(section_id, data, 1);
-            }
-        }
-
-        for symbol in obj_file.symbols() {
-            let name: &str = symbol.name()?;
-            if !name.is_empty() {
-                exe.add_symbol(write::Symbol {
-                    name: name.into(),
-                    value: symbol.address(),
-                    size: symbol.size(),
-                    kind: SymbolKind::Text,
-                    scope: SymbolScope::Dynamic,
-                    weak: false,
-                    section: write::SymbolSection::Undefined,
-                    flags: object::SymbolFlags::None,
-                });
-            }
-        }
+    for obj_file in obj_files {
+        cmd.arg(obj_file);
     }
 
-    let std_lib_data = fs::read(std_lib_path)?;
-    let std_lib_file = ObjectFile::parse(&*std_lib_data)?;
-
-    for section in std_lib_file.sections() {
-        let name: &str = section.name()?;
-        if name == ".text" || name == ".data" || name == ".rodata" || name == ".bss" {
-            let section_id = exe.add_section(
-                Vec::new(),
-                name.as_bytes().to_vec(),
-                if name == ".text" {
-                    SectionKind::Text
-                } else if name == ".bss" {
-                    SectionKind::UninitializedData
-                } else {
-                    SectionKind::Data
-                },
-            );
-            let data = section.data()?;
-            exe.append_section_data(section_id, data, 1);
-        }
+    if !std_lib_path.is_empty() {
+        cmd.arg(std_lib_path);
     }
 
-    for symbol in std_lib_file.symbols() {
-        let name: &str = symbol.name()?;
-        if !name.is_empty() {
-            exe.add_symbol(write::Symbol {
-                name: name.into(),
-                value: symbol.address(),
-                size: symbol.size(),
-                kind: SymbolKind::Text,
-                scope: SymbolScope::Dynamic,
-                weak: false,
-                section: write::SymbolSection::Undefined,
-                flags: object::SymbolFlags::None,
-            });
-        }
+    if verbose {
+        eprintln!("Linking command: {:?}", cmd);
     }
 
-    let exe_bytes = exe.write()?;
-    fs::write(exe_path, exe_bytes)?;
+    let output = match cmd.output() {
+        Ok(output) => output,
+        Err(e) => {
+            return Err(format!("rust-lld not found: {}. Please install rust-lld.", e).into());
+        }
+    };
 
-    for obj_file in &obj_files_to_delete {
-        fs::remove_file(obj_file)?;
+    if !output.status.success() {
+        eprintln!("Linker error:");
+        eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
+        eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+        return Err("Linking failed".into());
     }
 
     Ok(())

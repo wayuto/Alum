@@ -16,7 +16,6 @@ Alum is a modern, systems programming language designed for simplicity and perfo
 ### Prerequisites
 
 - Rust toolchain (2024 edition)
-- Linux x86_64 system
 
 ### Build from Source
 

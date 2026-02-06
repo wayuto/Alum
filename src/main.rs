@@ -1,93 +1,64 @@
 mod cli;
 mod compiler;
-
 use clap::Parser;
-use cli::{Cli, build, exec_run, link::link_objects};
-use std::path::Path;
+use cli::{Cli, build, exec_run, link};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     if cli.input.is_empty() {
-        eprintln!("No input files specified");
-        return Ok(());
+        eprintln!("Error: No input files specified");
+        std::process::exit(1);
     }
 
-    let first_input = &cli.input[0];
-    let extension = Path::new(first_input).extension().and_then(|e| e.to_str());
+    let mut obj_files = Vec::new();
 
-    let is_linking = extension == Some("o") || extension == Some("obj");
-
-    if is_linking {
-        let exe_name = cli.output.unwrap_or_else(|| "a.out".to_string());
-        
-        let std_lib_path = if cli.nostdlib {
-            String::new()
-        } else {
-            std::env::var("ALUM_STD_PATH").unwrap_or_else(|_| {
-                let project_root = std::env::var("CARGO_MANIFEST_DIR")
-                    .unwrap_or_else(|_| ".".to_string());
-                format!("{}/alum-std/target/release/libalum_std.a", project_root)
-            })
-        };
-
-        if cli.verbose {
-            eprintln!("Linking object files: {:?}", cli.input);
-            if !cli.nostdlib {
-                eprintln!("With standard library: {}", std_lib_path);
-            }
+    for input in &cli.input {
+        if input.ends_with(".o") || input.ends_with(".obj") {
+            obj_files.push(input.clone());
+            continue;
         }
 
-        link_objects(cli.input, &std_lib_path, &exe_name)?;
-        return Ok(());
-    }
-
-    if cli.run {
-        exec_run(first_input.clone(), cli.include_paths, cli.verbose)
-    } else {
-        let output = cli.output.clone();
-        let obj_path = build(
-            first_input.clone(),
-            output.clone(),
-            cli.compile_only,
+        let obj_file = build::build(
+            input.clone(),
             cli.ast,
             None,
-            cli.include_paths,
+            cli.include_paths.clone(),
             cli.preprocess_only,
             cli.verbose,
         )?;
 
-        if !cli.compile_only && !cli.preprocess_only {
-            if let Some(obj) = obj_path {
-                let exe_name = output.unwrap_or_else(|| {
-                    let path = std::path::PathBuf::from(first_input);
-                    path.file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("output")
-                        .to_string()
-                });
-                
-                let std_lib_path = if cli.nostdlib {
-                    String::new()
-                } else {
-                    std::env::var("ALUM_STD_PATH").unwrap_or_else(|_| {
-                        let project_root = std::env::var("CARGO_MANIFEST_DIR")
-                            .unwrap_or_else(|_| ".".to_string());
-                        format!("{}/alum-std/target/release/libalum_std.a", project_root)
-                    })
-                };
+        if !obj_file.is_empty() {
+            obj_files.push(obj_file);
+        }
+    }
 
-                if cli.verbose {
-                    eprintln!("Linking...");
-                    if !cli.nostdlib {
-                        eprintln!("With standard library: {}", std_lib_path);
-                    }
-                }
+    if cli.run {
+        let input = cli.input.first().unwrap().clone();
+        exec_run(input, cli.include_paths, cli.verbose)?;
+        return Ok(());
+    }
 
-                link_objects(vec![obj], &std_lib_path, &exe_name)?;
-            }
+    if !cli.compile_only && !cli.ast && !cli.preprocess_only {
+        let exe_path = if let Some(output) = cli.output {
+            output
+        } else {
+            cli.input.first().unwrap().replace(".al", "")
+        };
+
+        let std_lib_path = if cli.nostdlib {
+            String::new()
+        } else {
+            let path = "/usr/local/lib/libalum_std.a";
+            path.to_string()
+        };
+
+        if cli.verbose {
+            eprintln!("Linking {} to {}", obj_files.join(", "), exe_path);
         }
 
-        Ok(())
+        link::link(obj_files, &std_lib_path, &exe_path, cli.verbose)?;
     }
+
+    Ok(())
 }

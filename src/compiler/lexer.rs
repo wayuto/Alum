@@ -49,6 +49,8 @@ impl Display for LexerError {
     }
 }
 
+impl std::error::Error for LexerError {}
+
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Token {
     INT(isize),

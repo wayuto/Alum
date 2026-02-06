@@ -184,7 +184,7 @@ impl<'a> Parser<'a> {
                     ))
                 }
                 Ok(_) => self.call(),
-                Err(e) => Err(ParserError::LexerError(e.to_owned())),
+                Err(e) => Err(ParserError::LexerError(e.clone())),
             }
         } else {
             unreachable!()
@@ -339,6 +339,10 @@ impl<'a> Parser<'a> {
                                 self.next()?;
                                 break;
                             }
+                            Ok(Token::SEMICOLON) => {
+                                self.next()?;
+                                continue;
+                            }
                             Ok(Token::EOF) => {
                                 return Err(ParserError::UnexpectedToken {
                                     expected: Some(Token::RBRACE),
@@ -348,6 +352,9 @@ impl<'a> Parser<'a> {
                             Err(e) => return Err(ParserError::LexerError(e.to_owned())),
                             _ => {
                                 exprs.push(self.expr()?);
+                                if let Some(Ok(Token::SEMICOLON)) = self.peek() {
+                                    self.next()?;
+                                }
                             }
                         }
                     }
@@ -410,6 +417,11 @@ impl<'a> Parser<'a> {
                         return Ok(Expr::VarAssign(name, Box::new(val)));
                     }
                     return Ok(Expr::Var(name));
+                }
+                Ok(Token::MINUS) => {
+                    self.next()?;
+                    let operand = self.factor()?;
+                    return Ok(Expr::Sub(Box::new(Expr::Int(0)), Box::new(operand)));
                 }
                 Ok(token) => {
                     return Err(ParserError::UnexpectedToken {

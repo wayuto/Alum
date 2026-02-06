@@ -1,5 +1,5 @@
 mod args;
-mod build;
+pub mod build;
 pub mod link;
 
 pub use args::Cli;

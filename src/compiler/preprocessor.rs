@@ -54,10 +54,10 @@ pub struct Preprocessor<'a> {
 
 impl<'a> Preprocessor<'a> {
     pub fn new(src: &'a str, base_path: String, include_paths: Vec<String>) -> Self {
-        let mut default_paths = vec![
-            "/usr/local/include/alum".to_string(),
-            "/usr/local/alum".to_string(),
-        ];
+        let mut default_paths = Vec::new();
+
+        default_paths.push("/usr/local/include/alum".to_string());
+        default_paths.push("/usr/local/alum".to_string());
 
         default_paths.extend(include_paths);
 
