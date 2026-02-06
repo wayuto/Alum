@@ -1,6 +1,6 @@
 use std::{fmt::Display, str::Chars};
 
-use crate::ast::Type;
+use crate::compiler::ast::Type;
 
 #[derive(Debug, Clone)]
 pub enum LexerError {
@@ -11,6 +11,10 @@ pub enum LexerError {
     UnexpectedChar {
         expected: Option<String>,
         found: char,
+        line: usize,
+        col: usize,
+    },
+    UnclosedQuote {
         line: usize,
         col: usize,
     },
@@ -38,6 +42,9 @@ impl Display for LexerError {
             LexerError::InvalidNumber { line, col } => {
                 write!(f, "Invalid number at {}:{}", line, col)
             }
+            LexerError::UnclosedQuote { line, col } => {
+                write!(f, "Unclosed quote at {}:{}", line, col)
+            }
         }
     }
 }
@@ -45,12 +52,15 @@ impl Display for LexerError {
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Token {
     INT(isize),
+    FLOAT(f64),
     BOOL(bool),
+    STRING(String),
     NIL,
     PLUS,
     MINUS,
     STAR,
     SLASH,
+    DOTDOT,
     CEQ,
     NE,
     LT,
@@ -67,11 +77,17 @@ pub enum Token {
     RPAREN,
     LBRACE,
     RBRACE,
+    LBRACKET,
+    RBRACKET,
     EQ,
     COLON,
     COMMA,
+    SEMICOLON,
     LET,
     FUN,
+    FOR,
+    IN,
+    EXTERN,
     RET,
     IF,
     ELSE,
@@ -133,6 +149,53 @@ impl<'a> Lexer<'a> {
         })
     }
 
+    fn lex_float(&mut self) -> Result<f64, LexerError> {
+        let mut buf = String::new();
+
+        while let Some(c) = self.current
+            && c.is_ascii_digit()
+        {
+            buf.push(c);
+            self.bump();
+        }
+
+        if let Some('.') = self.current {
+            buf.push('.');
+            self.bump();
+        } else {
+            return Err(LexerError::InvalidNumber {
+                line: self.line,
+                col: self.col,
+            });
+        }
+
+        while let Some(c) = self.current
+            && c.is_ascii_digit()
+        {
+            buf.push(c);
+            self.bump();
+        }
+
+        if let Some('e' | 'E') = self.current {
+            buf.push(self.current.unwrap());
+            self.bump();
+            if let Some('+' | '-') = self.current {
+                buf.push(self.current.unwrap());
+                self.bump();
+            }
+            while let Some(c) = self.current
+                && c.is_ascii_digit()
+            {
+                buf.push(c);
+                self.bump();
+            }
+        }
+        buf.parse::<f64>().map_err(|_| LexerError::InvalidNumber {
+            line: self.line,
+            col: self.col,
+        })
+    }
+
     fn lex_ident(&mut self) -> Result<String, LexerError> {
         let mut ident = String::new();
 
@@ -158,6 +221,34 @@ impl<'a> Lexer<'a> {
         }
 
         Ok(ident)
+    }
+
+    fn lex_string(&mut self, quote: char) -> Result<String, LexerError> {
+        let mut s = String::new();
+        while self.current != Some(quote) {
+            if self.current == Some('\0') {
+                return Err(LexerError::UnclosedQuote {
+                    line: self.line,
+                    col: self.col,
+                });
+            }
+            if self.current == Some('\\') {
+                self.bump();
+                match self.current {
+                    Some('n') => s.push('\n'),
+                    Some('t') => s.push('\t'),
+                    Some('r') => s.push('\r'),
+                    Some(c) => s.push(c),
+                    None => {}
+                }
+                self.bump();
+                continue;
+            }
+            s.push(self.current.unwrap());
+            self.bump();
+        }
+        self.bump();
+        Ok(s)
     }
 
     fn next_token(&mut self) -> Result<Token, LexerError> {
@@ -190,6 +281,20 @@ impl<'a> Lexer<'a> {
                 }
                 Token::SLASH
             }
+            '.' => {
+                self.bump();
+                if self.current == Some('.') {
+                    self.bump();
+                    Token::DOTDOT
+                } else {
+                    return Err(LexerError::UnexpectedChar {
+                        expected: Some(".".to_string()),
+                        found: self.current.unwrap_or('\0'),
+                        line: self.line,
+                        col: self.col,
+                    });
+                }
+            }
             '(' => {
                 self.bump();
                 Token::LPAREN
@@ -205,6 +310,14 @@ impl<'a> Lexer<'a> {
             '}' => {
                 self.bump();
                 Token::RBRACE
+            }
+            '[' => {
+                self.bump();
+                Token::LBRACKET
+            }
+            ']' => {
+                self.bump();
+                Token::RBRACKET
             }
             '=' => {
                 self.bump();
@@ -272,14 +385,53 @@ impl<'a> Lexer<'a> {
                 self.bump();
                 Token::COMMA
             }
-            _ if c.is_ascii_digit() => self.lex_int().map(Token::INT)?,
+            ';' => {
+                self.bump();
+                Token::SEMICOLON
+            }
+            '\'' => {
+                self.bump();
+                Token::STRING(self.lex_string('\'')?)
+            }
+            '"' => {
+                self.bump();
+                Token::STRING(self.lex_string('"')?)
+            }
+            _ if c.is_ascii_digit() => {
+                let mut lookahead = self.chars.clone();
+                let mut is_float = false;
+
+                while let Some(ch) = lookahead.next() {
+                    if ch == '.' {
+                        if let Some(next_char) = lookahead.next() {
+                            if next_char.is_ascii_digit() {
+                                is_float = true;
+                            }
+                        }
+                        break;
+                    } else if !ch.is_ascii_digit() {
+                        break;
+                    }
+                }
+                if is_float {
+                    self.lex_float().map(Token::FLOAT)?
+                } else {
+                    self.lex_int().map(Token::INT)?
+                }
+            }
             _ if c.is_ascii_alphabetic() => {
                 let ident = self.lex_ident()?;
                 match ident.as_str() {
                     "let" => Token::LET,
                     "fun" => Token::FUN,
+                    "for" => Token::FOR,
+                    "in" => Token::IN,
+                    "extern" => Token::EXTERN,
                     "int" => Token::Type(Type::Int),
+                    "float" => Token::Type(Type::Float),
                     "bool" => Token::Type(Type::Bool),
+                    "string" => Token::Type(Type::String),
+                    "arr" => Token::IDENT(ident),
                     "void" => Token::Type(Type::Void),
                     "true" => Token::BOOL(true),
                     "false" => Token::BOOL(false),

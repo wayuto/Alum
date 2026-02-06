@@ -1,0 +1,12 @@
+[package]
+name = "alum-std"
+version = "0.7.0"
+edition = "2024"
+
+[lib]
+name = "alum_std"
+crate-type = ["staticlib"]
+path = "src/lib.rs"
+
+[profile.release]
+panic = "abort"

@@ -1,84 +1,93 @@
-#![allow(warnings)]
-use crate::{codegen::CodeGen, lexer::Lexer, parser::Parser};
+mod cli;
+mod compiler;
 
-mod ast;
-mod codegen;
-mod lexer;
-mod parser;
+use clap::Parser;
+use cli::{Cli, build, exec_run, link::link_objects};
+use std::path::Path;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let src = "
-    fun main(): int {
-        let a: int = if true {
-            2
+    let cli = Cli::parse();
+
+    if cli.input.is_empty() {
+        eprintln!("No input files specified");
+        return Ok(());
+    }
+
+    let first_input = &cli.input[0];
+    let extension = Path::new(first_input).extension().and_then(|e| e.to_str());
+
+    let is_linking = extension == Some("o") || extension == Some("obj");
+
+    if is_linking {
+        let exe_name = cli.output.unwrap_or_else(|| "a.out".to_string());
+        
+        let std_lib_path = if cli.nostdlib {
+            String::new()
         } else {
-            0
+            std::env::var("ALUM_STD_PATH").unwrap_or_else(|_| {
+                let project_root = std::env::var("CARGO_MANIFEST_DIR")
+                    .unwrap_or_else(|_| ".".to_string());
+                format!("{}/alum-std/target/release/libalum_std.a", project_root)
+            })
+        };
+
+        if cli.verbose {
+            eprintln!("Linking object files: {:?}", cli.input);
+            if !cli.nostdlib {
+                eprintln!("With standard library: {}", std_lib_path);
+            }
         }
-        return a
+
+        link_objects(cli.input, &std_lib_path, &exe_name)?;
+        return Ok(());
     }
-    ";
 
-    let lex = Lexer::new(src);
-    let ast = Parser::new(lex).parse()?;
-    println!("AST:\n{:#?}", ast.body);
+    if cli.run {
+        exec_run(first_input.clone(), cli.include_paths, cli.verbose)
+    } else {
+        let output = cli.output.clone();
+        let obj_path = build(
+            first_input.clone(),
+            output.clone(),
+            cli.compile_only,
+            cli.ast,
+            None,
+            cli.include_paths,
+            cli.preprocess_only,
+            cli.verbose,
+        )?;
 
-    let codegen = CodeGen::new(ast);
-    let object_code = codegen.generate()?;
+        if !cli.compile_only && !cli.preprocess_only {
+            if let Some(obj) = obj_path {
+                let exe_name = output.unwrap_or_else(|| {
+                    let path = std::path::PathBuf::from(first_input);
+                    path.file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("output")
+                        .to_string()
+                });
+                
+                let std_lib_path = if cli.nostdlib {
+                    String::new()
+                } else {
+                    std::env::var("ALUM_STD_PATH").unwrap_or_else(|_| {
+                        let project_root = std::env::var("CARGO_MANIFEST_DIR")
+                            .unwrap_or_else(|_| ".".to_string());
+                        format!("{}/alum-std/target/release/libalum_std.a", project_root)
+                    })
+                };
 
-    println!("\nCompiled successfully!");
-    println!("Object code size: {} bytes", object_code.len());
+                if cli.verbose {
+                    eprintln!("Linking...");
+                    if !cli.nostdlib {
+                        eprintln!("With standard library: {}", std_lib_path);
+                    }
+                }
 
-    println!(
-        "\nFirst {} bytes of object code:",
-        object_code.len().min(128)
-    );
-    for (i, chunk) in object_code.chunks(16).enumerate() {
-        print!("{:04x}: ", i * 16);
-        for byte in chunk {
-            print!("{:02x} ", byte);
+                link_objects(vec![obj], &std_lib_path, &exe_name)?;
+            }
         }
-        println!();
-        if i * 16 >= 128 {
-            break;
-        }
+
+        Ok(())
     }
-
-    let obj_path = "output.o";
-    std::fs::write(obj_path, object_code)?;
-    println!("\nObject code written to: {}", obj_path);
-
-    let exe_path = "output";
-    println!("Linking object file to executable...");
-
-    let output = std::process::Command::new("cc")
-        .arg(obj_path)
-        .arg("-o")
-        .arg(exe_path)
-        .output()?;
-
-    if !output.status.success() {
-        eprintln!("Linker failed:");
-        eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
-        eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
-        return Err("Linking failed".into());
-    }
-
-    println!("Executable created: {}", exe_path);
-
-    println!("\nRunning the executable:");
-    let run_output = std::process::Command::new(format!("./{}", exe_path))
-        .current_dir(".")
-        .output()?;
-
-    println!("Exit code: {}", run_output.status.code().unwrap_or(-1));
-    if !run_output.stdout.is_empty() {
-        println!("stdout: {}", String::from_utf8_lossy(&run_output.stdout));
-    }
-    if !run_output.stderr.is_empty() {
-        println!("stderr: {}", String::from_utf8_lossy(&run_output.stderr));
-    }
-
-    println!("\nYou can run the executable with: ./{}", exe_path);
-
-    Ok(())
 }

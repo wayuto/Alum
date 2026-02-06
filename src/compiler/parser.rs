@@ -1,11 +1,8 @@
-use std::{fmt::Display, iter::Peekable};
-
-use cranelift_object::object::macho::N_EXT;
-
-use crate::{
+use crate::compiler::{
     ast::{Expr, Program, Type},
     lexer::{Lexer, LexerError, Token},
 };
+use std::{fmt::Display, iter::Peekable};
 
 #[derive(Debug)]
 pub enum ParserError {
@@ -76,16 +73,7 @@ impl<'a> Parser<'a> {
                             found: token,
                         });
                     }
-                    let token = self.next()?;
-                    let ty = match token {
-                        Token::Type(t) => t,
-                        token => {
-                            return Err(ParserError::UnexpectedToken {
-                                expected: Some(Token::Type(Type::Int)),
-                                found: token,
-                            });
-                        }
-                    };
+                    let ty = self.parse_type()?;
                     let token = self.next()?;
                     if token != Token::EQ {
                         return Err(ParserError::UnexpectedToken {
@@ -107,89 +95,35 @@ impl<'a> Parser<'a> {
                             });
                         }
                     };
-                    let token = self.next()?;
-                    if token != Token::LPAREN {
-                        return Err(ParserError::UnexpectedToken {
-                            expected: Some(Token::LPAREN),
-                            found: token,
-                        });
-                    }
-                    let mut params: Vec<(String, Type)> = Vec::new();
-                    loop {
-                        let peeked = self
-                            .peek()
-                            .ok_or(ParserError::UnexpectedToken {
-                                expected: Some(Token::IDENT("PARAM NAME".to_string())),
-                                found: Token::EOF,
-                            })?
-                            .clone();
-                        match peeked {
-                            Ok(Token::IDENT(s)) => {
-                                self.next()?; // consume IDENT token
-                                let token = self.next()?;
-                                if token != Token::COLON {
-                                    return Err(ParserError::UnexpectedToken {
-                                        expected: Some(Token::COLON),
-                                        found: token,
-                                    });
-                                }
-                                let ty = match self.next()? {
-                                    Token::Type(t) => t,
-                                    token => {
-                                        return Err(ParserError::UnexpectedToken {
-                                            expected: Some(Token::Type(Type::Void)),
-                                            found: token,
-                                        });
-                                    }
-                                };
-                                params.push((s.clone(), ty));
-
-                                let token = self.next()?;
-                                if token == Token::RPAREN {
-                                    break;
-                                } else if token != Token::COMMA {
-                                    return Err(ParserError::UnexpectedToken {
-                                        expected: Some(Token::COMMA),
-                                        found: token,
-                                    });
-                                }
-                            }
-                            Ok(Token::RPAREN) => {
-                                self.next()?;
-                                break;
-                            }
-                            Ok(token) => {
-                                return Err(ParserError::UnexpectedToken {
-                                    expected: Some(Token::IDENT("PARAM NAME".to_string())),
-                                    found: Token::EOF,
-                                });
-                            }
-                            Err(e) => return Err(ParserError::from(e.clone())),
-                        }
-                    }
-                    if let token = self.next()?
-                        && token != Token::COLON
-                    {
-                        return Err(ParserError::UnexpectedToken {
-                            expected: Some(Token::COLON),
-                            found: token,
-                        });
-                    }
-                    let ret_type = match self.next()? {
-                        Token::Type(t) => t,
-                        token => {
-                            return Err(ParserError::UnexpectedToken {
-                                expected: Some(Token::Type(Type::Void)),
-                                found: token,
-                            });
-                        }
-                    };
+                    self.expect(Token::LPAREN)?;
+                    let params = self.get_params_list()?;
+                    self.expect(Token::RPAREN)?;
+                    self.expect(Token::COLON)?;
+                    let ret_type = self.parse_type()?;
                     Ok(Expr::FuncDecl(
                         name,
                         params,
                         ret_type,
                         Box::new(self.expr()?),
                     ))
+                }
+                Ok(Token::EXTERN) => {
+                    self.next()?;
+                    let name = match self.next()? {
+                        Token::IDENT(s) => s,
+                        token => {
+                            return Err(ParserError::UnexpectedToken {
+                                expected: Some(Token::IDENT("EXTERN NAME".to_string())),
+                                found: token,
+                            });
+                        }
+                    };
+                    self.expect(Token::LPAREN)?;
+                    let params = self.get_params_list()?;
+                    self.expect(Token::RPAREN)?;
+                    self.expect(Token::COLON)?;
+                    let ret_type = self.parse_type()?;
+                    Ok(Expr::Extern(name, params, ret_type))
                 }
                 Ok(Token::RET) => {
                     self.next()?;
@@ -206,7 +140,7 @@ impl<'a> Parser<'a> {
                     let then_branch = self.expr()?;
                     let else_branch = match self.peek() {
                         Some(Ok(Token::ELSE)) => {
-                            self.next()?; // consume ELSE
+                            self.next()?;
                             Some(Box::new(self.expr()?))
                         }
                         _ => None,
@@ -219,12 +153,94 @@ impl<'a> Parser<'a> {
                     let body = self.expr()?;
                     Ok(Expr::While(Box::new(cond), Box::new(body)))
                 }
-                Ok(_) => self.additive(),
+                Ok(Token::FOR) => {
+                    self.next()?;
+
+                    let var_name = match self.next()? {
+                        Token::IDENT(s) => s,
+                        token => {
+                            return Err(ParserError::UnexpectedToken {
+                                expected: Some(Token::IDENT("VAR_NAME".to_string())),
+                                found: token,
+                            });
+                        }
+                    };
+
+                    self.expect(Token::IN)?;
+
+                    let start = self.expr()?;
+
+                    self.expect(Token::DOTDOT)?;
+
+                    let end = self.expr()?;
+
+                    let body = self.expr()?;
+
+                    Ok(Expr::For(
+                        var_name,
+                        Box::new(start),
+                        Box::new(end),
+                        Box::new(body),
+                    ))
+                }
+                Ok(_) => self.call(),
                 Err(e) => Err(ParserError::LexerError(e.to_owned())),
             }
         } else {
             unreachable!()
         }
+    }
+
+    fn call(&mut self) -> Result<Expr, ParserError> {
+        let mut callee = self.additive()?;
+        while let Some(Ok(Token::LPAREN)) = self.peek() {
+            self.next()?;
+            let mut args = Vec::new();
+            loop {
+                match self.peek().cloned() {
+                    Some(Ok(Token::RPAREN)) => {
+                        self.next()?;
+                        break;
+                    }
+                    Some(Ok(_)) => {
+                        args.push(self.expr()?);
+                        match self.next()? {
+                            Token::COMMA => {}
+                            Token::RPAREN => break,
+                            token => {
+                                return Err(ParserError::UnexpectedToken {
+                                    expected: Some(Token::COMMA),
+                                    found: token,
+                                });
+                            }
+                        }
+                    }
+                    _ => {
+                        return Err(ParserError::UnexpectedToken {
+                            expected: Some(Token::RPAREN),
+                            found: Token::EOF,
+                        });
+                    }
+                }
+            }
+            callee = Expr::Call(Box::new(callee), args);
+        }
+
+        while let Some(Ok(Token::LBRACKET)) = self.peek() {
+            self.next()?;
+            let index = self.expr()?;
+            match self.next()? {
+                Token::RBRACKET => {}
+                token => {
+                    return Err(ParserError::UnexpectedToken {
+                        expected: Some(Token::RBRACKET),
+                        found: token,
+                    });
+                }
+            }
+            callee = Expr::Index(Box::new(callee), Box::new(index));
+        }
+        Ok(callee)
     }
 
     fn additive(&mut self) -> Result<Expr, ParserError> {
@@ -272,9 +288,21 @@ impl<'a> Parser<'a> {
                     self.next()?;
                     return Ok(Expr::Int(n));
                 }
+                Ok(Token::FLOAT(f)) => {
+                    self.next()?;
+                    return Ok(Expr::Float(f));
+                }
                 Ok(Token::BOOL(b)) => {
                     self.next()?;
                     return Ok(Expr::Bool(b));
+                }
+                Ok(Token::STRING(s)) => {
+                    self.next()?;
+                    return Ok(Expr::String(s));
+                }
+                Ok(Token::NIL) => {
+                    self.next()?;
+                    return Ok(Expr::Nil);
                 }
                 Ok(Token::LPAREN) => {
                     self.next()?;
@@ -325,34 +353,34 @@ impl<'a> Parser<'a> {
                     }
                     return Ok(Expr::Stmt(exprs));
                 }
-                Ok(Token::IDENT(s)) => {
-                    let name = s.clone();
+                Ok(Token::LBRACKET) => {
                     self.next()?;
 
-                    if let Some(Ok(Token::LPAREN)) = self.peek() {
-                        self.next()?;
-                        let mut args: Vec<Expr> = Vec::new();
+                    let is_fill_syntax = match self.peek() {
+                        Some(Ok(Token::Type(_))) => true,
+                        Some(Ok(Token::IDENT(s))) if s == "arr" => true,
+                        _ => false,
+                    };
+
+                    if is_fill_syntax {
+                        let elem_type = self.parse_type()?;
+                        self.expect(Token::SEMICOLON)?;
+                        let length = self.expr()?;
+                        self.expect(Token::RBRACKET)?;
+                        return Ok(Expr::ArrayFill(elem_type, Box::new(length)));
+                    } else {
+                        let mut elements = Vec::new();
                         loop {
-                            let peeked = self
-                                .peek()
-                                .ok_or(ParserError::UnexpectedToken {
-                                    expected: Some(Token::IDENT("PARAM NAME".to_string())),
-                                    found: Token::EOF,
-                                })?
-                                .clone();
-                            match peeked {
-                                Ok(Token::RPAREN) => {
+                            match self.peek().cloned() {
+                                Some(Ok(Token::RBRACKET)) => {
                                     self.next()?;
-                                    return Ok(Expr::FuncCall(name, args));
+                                    break;
                                 }
-                                Ok(_) => {
-                                    args.push(self.expr()?);
-                                    let token = self.next()?;
-                                    match token {
+                                Some(Ok(_)) => {
+                                    elements.push(self.expr()?);
+                                    match self.next()? {
                                         Token::COMMA => {}
-                                        Token::RPAREN => {
-                                            return Ok(Expr::FuncCall(name, args));
-                                        }
+                                        Token::RBRACKET => break,
                                         token => {
                                             return Err(ParserError::UnexpectedToken {
                                                 expected: Some(Token::COMMA),
@@ -361,9 +389,25 @@ impl<'a> Parser<'a> {
                                         }
                                     }
                                 }
-                                Err(e) => return Err(e.into()),
+                                _ => {
+                                    return Err(ParserError::UnexpectedToken {
+                                        expected: Some(Token::RBRACKET),
+                                        found: Token::EOF,
+                                    });
+                                }
                             }
                         }
+                        return Ok(Expr::ArrayLiteral(elements));
+                    }
+                }
+                Ok(Token::IDENT(s)) => {
+                    let name = s.clone();
+                    self.next()?;
+
+                    if let Some(Ok(Token::EQ)) = self.peek() {
+                        self.next()?;
+                        let val = self.expr()?;
+                        return Ok(Expr::VarAssign(name, Box::new(val)));
                     }
                     return Ok(Expr::Var(name));
                 }
@@ -382,8 +426,92 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn expect(&mut self, expected: Token) -> Result<(), ParserError> {
+        match self.next()? {
+            token if token == expected => Ok(()),
+            found => Err(ParserError::UnexpectedToken {
+                expected: Some(expected),
+                found,
+            }),
+        }
+    }
+
+    fn get_params_list(&mut self) -> Result<Vec<(String, Type)>, ParserError> {
+        let mut params = Vec::new();
+        loop {
+            match self.peek().cloned() {
+                Some(Ok(Token::IDENT(s))) => {
+                    self.next()?;
+                    self.expect(Token::COLON)?;
+                    let ty = self.parse_type()?;
+                    params.push((s, ty));
+
+                    match self.peek().cloned() {
+                        Some(Ok(Token::COMMA)) => {
+                            self.next()?;
+                        }
+                        Some(Ok(Token::RPAREN)) => {
+                            break;
+                        }
+                        _ => {
+                            return Err(ParserError::UnexpectedToken {
+                                expected: Some(Token::COMMA),
+                                found: Token::EOF,
+                            });
+                        }
+                    }
+                }
+                Some(Ok(Token::Type(t))) => {
+                    self.next()?;
+                    params.push(("_anon".to_string(), t));
+
+                    match self.peek().cloned() {
+                        Some(Ok(Token::COMMA)) => {
+                            self.next()?;
+                        }
+                        Some(Ok(Token::RPAREN)) => {
+                            break;
+                        }
+                        _ => {
+                            return Err(ParserError::UnexpectedToken {
+                                expected: Some(Token::COMMA),
+                                found: Token::EOF,
+                            });
+                        }
+                    }
+                }
+                Some(Ok(Token::RPAREN)) => {
+                    break;
+                }
+                _ => {
+                    return Err(ParserError::UnexpectedToken {
+                        expected: Some(Token::IDENT("PARAM NAME".to_string())),
+                        found: Token::EOF,
+                    });
+                }
+            }
+        }
+        Ok(params)
+    }
+
     fn peek(&mut self) -> Option<&Result<Token, LexerError>> {
         self.lex.peek()
+    }
+
+    fn parse_type(&mut self) -> Result<Type, ParserError> {
+        match self.next()? {
+            Token::Type(t) => Ok(t),
+            Token::IDENT(s) if s == "arr" => {
+                self.expect(Token::LBRACKET)?;
+                let inner_type = self.parse_type()?;
+                self.expect(Token::RBRACKET)?;
+                Ok(Type::Array(Box::new(inner_type)))
+            }
+            token => Err(ParserError::UnexpectedToken {
+                expected: Some(Token::Type(Type::Int)),
+                found: token,
+            }),
+        }
     }
 
     fn next(&mut self) -> Result<Token, ParserError> {
