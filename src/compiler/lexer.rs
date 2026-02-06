@@ -62,6 +62,7 @@ pub enum Token {
     MINUS,
     STAR,
     SLASH,
+    PERCENT,
     DOTDOT,
     CEQ,
     NE,
@@ -94,6 +95,8 @@ pub enum Token {
     IF,
     ELSE,
     WHILE,
+    BREAK,
+    CONTINUE,
     Type(Type),
     IDENT(String),
     EOF,
@@ -283,6 +286,10 @@ impl<'a> Lexer<'a> {
                 }
                 Token::SLASH
             }
+            '%' => {
+                self.bump();
+                Token::PERCENT
+            }
             '.' => {
                 self.bump();
                 if self.current == Some('.') {
@@ -442,6 +449,8 @@ impl<'a> Lexer<'a> {
                     "if" => Token::IF,
                     "else" => Token::ELSE,
                     "while" => Token::WHILE,
+                    "break" => Token::BREAK,
+                    "continue" => Token::CONTINUE,
                     _ => Token::IDENT(ident),
                 }
             }

@@ -52,7 +52,11 @@ pub fn build(
     let output_file = if let Some(obj_file) = object {
         obj_file
     } else {
-        input.replace(".al", ".o")
+        if input.ends_with(".al") {
+            input.replace(".al", ".o")
+        } else {
+            format!("{}.o", input)
+        }
     };
 
     if verbose {
@@ -70,16 +74,32 @@ pub fn exec_run(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let obj_file = build(input.clone(), false, None, include_paths, false, verbose)?;
 
-    let exe_file = input.replace(".al", "");
+    let exe_file = if input.ends_with(".al") {
+        input.replace(".al", "")
+    } else {
+        input.clone()
+    };
+
+    let exe_path = std::path::Path::new(&exe_file);
 
     let std_lib_path = "/usr/local/lib/libalum_std.a";
 
-    super::link::link(vec![obj_file], std_lib_path, &exe_file, verbose)?;
+    super::link::link(
+        vec![obj_file],
+        std_lib_path,
+        exe_path.to_str().unwrap(),
+        verbose,
+    )?;
+
+    let exe_file_abs = exe_path.canonicalize()?;
 
     if verbose {
-        eprintln!("Running: {}", exe_file);
+        eprintln!("Running: {}", exe_file_abs.display());
     }
-    std::process::Command::new(&exe_file).status()?;
+
+    std::process::Command::new(&exe_file_abs).status()?;
+
+    std::fs::remove_file(&exe_file_abs)?;
 
     Ok(())
 }

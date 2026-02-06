@@ -12,7 +12,7 @@ pub fn link(
 
     cmd.arg("-o").arg(exe_path);
 
-    for obj_file in obj_files {
+    for obj_file in &obj_files {
         cmd.arg(obj_file);
     }
 
@@ -36,6 +36,15 @@ pub fn link(
         eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
         eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
         return Err("Linking failed".into());
+    }
+
+    for obj_file in obj_files {
+        if obj_file.ends_with(".o") || obj_file.ends_with(".obj") {
+            if verbose {
+                eprintln!("Removing object file: {}", obj_file);
+            }
+            let _ = std::fs::remove_file(&obj_file);
+        }
     }
 
     Ok(())

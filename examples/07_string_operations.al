@@ -1,36 +1,29 @@
 $import "io.al"
+$import "convert.al"
 $import "string.al"
+$import "memory.al"
 
 // String Operations Example
 // Demonstrates string manipulation
 
 fun main(): int {
-    let hello: string = "Hello"
-    let world: string = "World"
-    let target: string = ""
-    
-    // String concatenation using strcat
-    target = strcat(hello, ", ")
-    target = strcat(target, world)
-    target = strcat(target, "!")
-    
-    print("Concatenated: ")
-    println(target)
-    
     // String length
-    let len: int = strlen(target)
-    print("Length: ")
+    let hello: string = "Hello, World!"
+    let len: int = strlen(hello)
+    print("Length of '")
+    print(hello)
+    print("': ")
     println(itoa(len))
     
     // String copy
-    let copy: string = ""
-    copy = strcpy(copy, target)
+    let copy: string = malloc(100)
+    copy = strcpy(copy, hello)
     
     print("Copy: ")
     println(copy)
     
-    // String comparison
-    let result: int = strcmp(target, copy)
+    // String comparison using memcmp
+    let result: int = memcmp(hello, copy, len + 1)
     if result == 0 {
         println("Strings are equal")
     } else {
@@ -39,7 +32,7 @@ fun main(): int {
     
     // Different string
     let other: string = "Goodbye"
-    let diff: int = strcmp(target, other)
+    let diff: int = memcmp(hello, other, len + 1)
     if diff == 0 {
         println("Strings are equal")
     } else {
@@ -47,16 +40,4 @@ fun main(): int {
     }
     
     return 0
-}
-
-// Simple string comparison function
-fun strcmp(s1: string, s2: string): int {
-    let i: int = 0
-    while s1[i] != '\0' && s2[i] != '\0' {
-        if s1[i] != s2[i] {
-            return s1[i] - s2[i]
-        }
-        i = i + 1
-    }
-    return s1[i] - s2[i]
 }

@@ -129,11 +129,6 @@ impl<'a> Parser<'a> {
                     self.next()?;
                     Ok(Expr::Return(Box::new(self.expr()?)))
                 }
-                Ok(Token::BOOL(b)) => {
-                    let bool_val = *b;
-                    self.next()?;
-                    Ok(Expr::Bool(bool_val))
-                }
                 Ok(Token::IF) => {
                     self.next()?;
                     let cond = self.expr()?;
@@ -152,6 +147,14 @@ impl<'a> Parser<'a> {
                     let cond = self.expr()?;
                     let body = self.expr()?;
                     Ok(Expr::While(Box::new(cond), Box::new(body)))
+                }
+                Ok(Token::BREAK) => {
+                    self.next()?;
+                    Ok(Expr::Break)
+                }
+                Ok(Token::CONTINUE) => {
+                    self.next()?;
+                    Ok(Expr::Continue)
                 }
                 Ok(Token::FOR) => {
                     self.next()?;
@@ -183,7 +186,15 @@ impl<'a> Parser<'a> {
                         Box::new(body),
                     ))
                 }
-                Ok(_) => self.call(),
+                Ok(_) => {
+                    let expr = self.logical()?;
+                    if let Some(Ok(Token::EQ)) = self.peek() {
+                        self.next()?;
+                        let val = self.expr()?;
+                        return Ok(Expr::IndexAssign(Box::new(expr), Box::new(val)));
+                    }
+                    Ok(expr)
+                }
                 Err(e) => Err(ParserError::LexerError(e.clone())),
             }
         } else {
@@ -191,8 +202,27 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn logical(&mut self) -> Result<Expr, ParserError> {
+        let mut left = self.comparison()?;
+        while let Some(Ok(op)) = self.peek().cloned() {
+            match op {
+                Token::AND | Token::OR => {
+                    self.next()?;
+                    let right = self.comparison()?;
+                    left = match op {
+                        Token::AND => Expr::And(Box::new(left), Box::new(right)),
+                        Token::OR => Expr::Or(Box::new(left), Box::new(right)),
+                        _ => unreachable!(),
+                    };
+                }
+                _ => break,
+            }
+        }
+        Ok(left)
+    }
+
     fn call(&mut self) -> Result<Expr, ParserError> {
-        let mut callee = self.additive()?;
+        let mut callee = self.factor()?;
         while let Some(Ok(Token::LPAREN)) = self.peek() {
             self.next()?;
             let mut args = Vec::new();
@@ -243,6 +273,29 @@ impl<'a> Parser<'a> {
         Ok(callee)
     }
 
+    fn comparison(&mut self) -> Result<Expr, ParserError> {
+        let mut left = self.additive()?;
+        while let Some(Ok(op)) = self.peek().cloned() {
+            match op {
+                Token::CEQ | Token::NE | Token::LT | Token::LE | Token::GT | Token::GE => {
+                    self.next()?;
+                    let right = self.additive()?;
+                    left = match op {
+                        Token::CEQ => Expr::Eq(Box::new(left), Box::new(right)),
+                        Token::NE => Expr::Ne(Box::new(left), Box::new(right)),
+                        Token::LT => Expr::Lt(Box::new(left), Box::new(right)),
+                        Token::LE => Expr::Le(Box::new(left), Box::new(right)),
+                        Token::GT => Expr::Gt(Box::new(left), Box::new(right)),
+                        Token::GE => Expr::Ge(Box::new(left), Box::new(right)),
+                        _ => unreachable!(),
+                    };
+                }
+                _ => break,
+            }
+        }
+        Ok(left)
+    }
+
     fn additive(&mut self) -> Result<Expr, ParserError> {
         let mut left = self.term()?;
         while let Some(Ok(op)) = self.peek().cloned() {
@@ -263,15 +316,16 @@ impl<'a> Parser<'a> {
     }
 
     fn term(&mut self) -> Result<Expr, ParserError> {
-        let mut left = self.factor()?;
+        let mut left = self.call()?;
         while let Some(Ok(op)) = self.peek().cloned() {
             match op {
-                Token::STAR | Token::SLASH => {
+                Token::STAR | Token::SLASH | Token::PERCENT => {
                     self.next()?;
-                    let right = self.factor()?;
+                    let right = self.call()?;
                     left = match op {
                         Token::STAR => Expr::Mul(Box::new(left), Box::new(right)),
                         Token::SLASH => Expr::Div(Box::new(left), Box::new(right)),
+                        Token::PERCENT => Expr::Mod(Box::new(left), Box::new(right)),
                         _ => unreachable!(),
                     };
                 }
@@ -306,7 +360,7 @@ impl<'a> Parser<'a> {
                 }
                 Ok(Token::LPAREN) => {
                     self.next()?;
-                    let expr = self.expr()?;
+                    let expr = self.logical()?;
                     match self.peek().cloned() {
                         Some(Ok(Token::RPAREN)) => {
                             self.next()?;
@@ -422,6 +476,11 @@ impl<'a> Parser<'a> {
                     self.next()?;
                     let operand = self.factor()?;
                     return Ok(Expr::Sub(Box::new(Expr::Int(0)), Box::new(operand)));
+                }
+                Ok(Token::NOT) => {
+                    self.next()?;
+                    let operand = self.factor()?;
+                    return Ok(Expr::Not(Box::new(operand)));
                 }
                 Ok(token) => {
                     return Err(ParserError::UnexpectedToken {

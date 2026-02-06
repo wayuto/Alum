@@ -11,6 +11,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(1);
     }
 
+    if cli.run {
+        let input = cli.input.first().unwrap().clone();
+        exec_run(input, cli.include_paths, cli.verbose)?;
+        return Ok(());
+    }
+
     let mut obj_files = Vec::new();
 
     for input in &cli.input {
@@ -33,17 +39,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    if cli.run {
-        let input = cli.input.first().unwrap().clone();
-        exec_run(input, cli.include_paths, cli.verbose)?;
-        return Ok(());
-    }
-
     if !cli.compile_only && !cli.ast && !cli.preprocess_only {
         let exe_path = if let Some(output) = cli.output {
             output
         } else {
-            cli.input.first().unwrap().replace(".al", "")
+            let first_input = cli.input.first().unwrap();
+            if first_input.ends_with(".al") {
+                first_input.replace(".al", "")
+            } else {
+                first_input.clone()
+            }
         };
 
         let std_lib_path = if cli.nostdlib {
