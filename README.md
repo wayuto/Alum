@@ -245,6 +245,13 @@ cd alum-std
 cargo build --release
 ```
 
+### Building the Alum Make Tool
+
+```bash
+cd alum-make
+cargo build --release
+```
+
 ## Documentation
 
 - **[Standard Library](./alum-std/README.md)** - Comprehensive standard library documentation
