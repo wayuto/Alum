@@ -2,7 +2,7 @@
 name = "mixed_c_alum"
 version = "0.1.0"
 author = ""
-license = "MIT"
+license = ""
 language = "mixed"
 
 [build]
