@@ -351,7 +351,7 @@ impl CodeGen {
                     .declare_data(
                         &format!("str_{}", str_idx),
                         cranelift_module::Linkage::Local,
-                        false,
+                        true,
                         false,
                     )
                     .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
@@ -942,7 +942,7 @@ impl CodeGen {
                     .declare_data(
                         &format!("array_{}", idx),
                         cranelift_module::Linkage::Local,
-                        false,
+                        true,
                         false,
                     )
                     .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
@@ -969,7 +969,7 @@ impl CodeGen {
                                 .declare_data(
                                     &format!("array_str_{}_{}", idx, str_idx),
                                     cranelift_module::Linkage::Local,
-                                    false,
+                                    true,
                                     false,
                                 )
                                 .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;

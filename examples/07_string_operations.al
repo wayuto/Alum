@@ -5,6 +5,7 @@ $import "memory.al"
 
 // String Operations Example
 // Demonstrates string manipulation
+// NOTE: String literals are now stored in RW (read-write) section (as per modification)
 
 fun main(): int {
     // String length
