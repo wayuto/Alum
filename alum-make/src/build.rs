@@ -98,7 +98,6 @@ fn compile_alum(
     compiler: String,
     flags: Option<String>,
     includes: Option<Vec<String>>,
-    output_name: &str,
 ) -> Result<(), Box<dyn Error>> {
     let source_files = get_files("./src", Target::ALSRC);
     let mut flags = if let Some(flags) = flags {
@@ -175,7 +174,6 @@ pub fn build(log: bool) -> Result<(), Box<dyn Error>> {
             alc.clone(),
             config.build.alflags.clone(),
             config.build.includes.clone(),
-            &name,
         )?;
     }
 

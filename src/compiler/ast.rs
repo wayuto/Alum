@@ -3,14 +3,10 @@ pub struct Program {
     pub body: Vec<Expr>,
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
-    Int,
-    Float,
-    Bool,
-    String,
+    Named(String),
     Array(Box<Type>),
-    Void,
 }
 
 #[derive(Debug, Clone)]
@@ -51,4 +47,5 @@ pub enum Expr {
     ArrayLiteral(Vec<Expr>),
     ArrayFill(Type, Box<Expr>),
     For(String, Box<Expr>, Box<Expr>, Box<Expr>),
+    TypeDef,
 }

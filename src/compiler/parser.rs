@@ -2,6 +2,7 @@ use crate::compiler::{
     ast::{Expr, Program, Type},
     lexer::{Lexer, LexerError, Token},
 };
+use std::collections::HashMap;
 use std::{fmt::Display, iter::Peekable};
 
 #[derive(Debug)]
@@ -32,12 +33,14 @@ impl std::error::Error for ParserError {}
 
 pub struct Parser<'a> {
     lex: Peekable<Lexer<'a>>,
+    typedefs: HashMap<String, Type>,
 }
 
 impl<'a> Parser<'a> {
     pub fn new(lex: Lexer<'a>) -> Self {
         Self {
             lex: lex.peekable(),
+            typedefs: HashMap::new(),
         }
     }
 
@@ -124,6 +127,24 @@ impl<'a> Parser<'a> {
                     self.expect(Token::COLON)?;
                     let ret_type = self.parse_type()?;
                     Ok(Expr::Extern(name, params, ret_type))
+                }
+                Ok(Token::TYPEDEF) => {
+                    self.next()?;
+                    let alias_name = match self.next()? {
+                        Token::IDENT(s) => s,
+                        token => {
+                            return Err(ParserError::UnexpectedToken {
+                                expected: Some(Token::IDENT("TYPEDEF NAME".to_string())),
+                                found: token,
+                            });
+                        }
+                    };
+                    self.expect(Token::EQ)?;
+                    let target_type = self.parse_type()?;
+
+                    self.typedefs
+                        .insert(alias_name.clone(), target_type.clone());
+                    Ok(Expr::TypeDef)
                 }
                 Ok(Token::RET) => {
                     self.next()?;
@@ -418,7 +439,7 @@ impl<'a> Parser<'a> {
                     self.next()?;
 
                     let is_fill_syntax = match self.peek() {
-                        Some(Ok(Token::Type(_))) => true,
+                        Some(Ok(Token::TYPE(_))) => true,
                         Some(Ok(Token::IDENT(s))) if s == "arr" => true,
                         _ => false,
                     };
@@ -532,9 +553,9 @@ impl<'a> Parser<'a> {
                         }
                     }
                 }
-                Some(Ok(Token::Type(t))) => {
+                Some(Ok(Token::TYPE(t))) => {
                     self.next()?;
-                    params.push(("_anon".to_string(), t));
+                    params.push(("_anon".to_string(), Type::Named(t)));
 
                     match self.peek().cloned() {
                         Some(Ok(Token::COMMA)) => {
@@ -571,15 +592,22 @@ impl<'a> Parser<'a> {
 
     fn parse_type(&mut self) -> Result<Type, ParserError> {
         match self.next()? {
-            Token::Type(t) => Ok(t),
+            Token::TYPE(t) => Ok(Type::Named(t)),
             Token::IDENT(s) if s == "arr" => {
                 self.expect(Token::LBRACKET)?;
                 let inner_type = self.parse_type()?;
                 self.expect(Token::RBRACKET)?;
                 Ok(Type::Array(Box::new(inner_type)))
             }
+            Token::IDENT(s) => {
+                if let Some(ty) = self.typedefs.get(&s) {
+                    Ok(ty.clone())
+                } else {
+                    Ok(Type::Named(s))
+                }
+            }
             token => Err(ParserError::UnexpectedToken {
-                expected: Some(Token::Type(Type::Int)),
+                expected: Some(Token::TYPE("int".to_string())),
                 found: token,
             }),
         }

@@ -53,6 +53,7 @@ pub struct CodeGen {
     builder_context: FunctionBuilderContext,
     func_signatures: HashMap<String, (FuncId, Signature)>,
     loop_stack: Vec<LoopContext>,
+    type_map: HashMap<String, ir::Type>,
 }
 
 impl CodeGen {
@@ -72,11 +73,11 @@ impl CodeGen {
 
     fn infer_expr_type_with_vars(expr: &Expr, type_stack: &Vec<HashMap<String, Type>>) -> Type {
         match expr {
-            Expr::Int(_) => Type::Int,
-            Expr::Float(_) => Type::Float,
-            Expr::Bool(_) => Type::Bool,
-            Expr::String(_) => Type::String,
-            Expr::Nil => Type::Void,
+            Expr::Int(_) => Type::Named("int".to_string()),
+            Expr::Float(_) => Type::Named("float".to_string()),
+            Expr::Bool(_) => Type::Named("bool".to_string()),
+            Expr::String(_) => Type::Named("string".to_string()),
+            Expr::Nil => Type::Named("void".to_string()),
             Expr::Add(lhs, rhs)
             | Expr::Sub(lhs, rhs)
             | Expr::Mul(lhs, rhs)
@@ -91,10 +92,12 @@ impl CodeGen {
                 let lhs_type = Self::infer_expr_type_with_vars(lhs, type_stack);
                 let rhs_type = Self::infer_expr_type_with_vars(rhs, type_stack);
 
-                if matches!(lhs_type, Type::Float) || matches!(rhs_type, Type::Float) {
-                    Type::Float
+                if matches!(lhs_type, Type::Named(ref n) if n == "float")
+                    || matches!(rhs_type, Type::Named(ref n) if n == "float")
+                {
+                    Type::Named("float".to_string())
                 } else {
-                    Type::Int
+                    Type::Named("int".to_string())
                 }
             }
             Expr::Var(name) => {
@@ -103,9 +106,9 @@ impl CodeGen {
                         return ty.clone();
                     }
                 }
-                Type::Int
+                Type::Named("int".to_string())
             }
-            _ => Type::Int,
+            _ => Type::Named("int".to_string()),
         }
     }
 
@@ -121,12 +124,19 @@ impl CodeGen {
         )
         .unwrap();
         let module = ObjectModule::new(object_builder);
+        let mut type_map = HashMap::new();
+        type_map.insert("int".to_string(), types::I64);
+        type_map.insert("float".to_string(), types::F64);
+        type_map.insert("bool".to_string(), types::I8);
+        type_map.insert("string".to_string(), types::I64);
+        type_map.insert("void".to_string(), types::INVALID);
         Self {
             ast,
             module,
             builder_context: FunctionBuilderContext::new(),
             func_signatures: HashMap::new(),
             loop_stack: Vec::new(),
+            type_map,
         }
     }
 
@@ -137,11 +147,12 @@ impl CodeGen {
                     let mut sig = self.module.make_signature();
                     sig.call_conv = CallConv::SystemV;
                     for (_, t) in params {
-                        sig.params.push(AbiParam::new(get_type(t)));
+                        sig.params.push(AbiParam::new(get_type(&t, &self.type_map)));
                     }
 
-                    if !matches!(ret_type, Type::Void) {
-                        sig.returns.push(AbiParam::new(get_type(ret_type)));
+                    if !matches!(ret_type, Type::Named(ref n) if n == "void") {
+                        sig.returns
+                            .push(AbiParam::new(get_type(&ret_type, &self.type_map)));
                     }
                     let func_id = self
                         .module
@@ -153,11 +164,12 @@ impl CodeGen {
                     let mut sig = self.module.make_signature();
                     sig.call_conv = CallConv::SystemV;
                     for (_, t) in params {
-                        sig.params.push(AbiParam::new(get_type(t)));
+                        sig.params.push(AbiParam::new(get_type(&t, &self.type_map)));
                     }
 
-                    if !matches!(ret_type, Type::Void) {
-                        sig.returns.push(AbiParam::new(get_type(ret_type)));
+                    if !matches!(ret_type, Type::Named(ref n) if n == "void") {
+                        sig.returns
+                            .push(AbiParam::new(get_type(&ret_type, &self.type_map)));
                     }
                     let func_id = self
                         .module
@@ -165,6 +177,7 @@ impl CodeGen {
                         .unwrap();
                     self.func_signatures.insert(name, (func_id, sig));
                 }
+                Expr::TypeDef => {}
                 expr => return Err(CodeGenError::UnexpectedExpression { found: expr }),
             }
         }
@@ -175,6 +188,7 @@ impl CodeGen {
                     self.compile_func(name, params, ret_type, body, &mut str_idx)?;
                 }
                 Expr::Extern(_, _, _) => {}
+                Expr::TypeDef => {}
                 expr => return Err(CodeGenError::UnexpectedExpression { found: expr }),
             }
         }
@@ -199,8 +213,10 @@ impl CodeGen {
         let mut new_ctx = self.module.make_context();
         new_ctx.func.signature = sig.clone();
 
-        let param_types: Vec<ir::Type> =
-            params.iter().map(|(_, ty)| get_type(ty.clone())).collect();
+        let param_types: Vec<ir::Type> = params
+            .iter()
+            .map(|(_, ty)| get_type(ty, &self.type_map))
+            .collect();
 
         let mut builder = FunctionBuilder::new(&mut new_ctx.func, &mut self.builder_context);
         let entry_block = builder.create_block();
@@ -234,9 +250,10 @@ impl CodeGen {
             &mut self.module,
             str_idx,
             &mut self.loop_stack,
+            &self.type_map,
         )?;
 
-        if matches!(_ret_type, Type::Void) {
+        if matches!(_ret_type, Type::Named(ref n) if n == "void") {
             builder.ins().return_(&[]);
         }
 
@@ -274,6 +291,7 @@ impl CodeGen {
         module: &mut ObjectModule,
         str_idx: &mut u32,
         loop_stack: &mut Vec<LoopContext>,
+        type_map: &HashMap<String, ir::Type>,
     ) -> Result<Value, CodeGenError> {
         match expr {
             Expr::Stmt(body) => {
@@ -292,6 +310,7 @@ impl CodeGen {
                             module,
                             str_idx,
                             loop_stack,
+                            type_map,
                         )?;
                     }
                     Self::compile_expr(
@@ -304,6 +323,7 @@ impl CodeGen {
                         module,
                         str_idx,
                         loop_stack,
+                        type_map,
                     )
                 } else {
                     Self::compile_expr(
@@ -316,6 +336,7 @@ impl CodeGen {
                         module,
                         str_idx,
                         loop_stack,
+                        type_map,
                     )
                 };
                 scope_stack.pop();
@@ -365,6 +386,7 @@ impl CodeGen {
                     module,
                     str_idx,
                     loop_stack,
+                    type_map,
                 )?;
                 let rhs = Self::compile_expr(
                     rhs,
@@ -376,9 +398,10 @@ impl CodeGen {
                     module,
                     str_idx,
                     loop_stack,
+                    type_map,
                 )?;
 
-                if matches!(expr_type, Type::Float) {
+                if matches!(expr_type, Type::Named(ref n) if n == "float") {
                     match expr {
                         Expr::Add(_, _) => Ok(builder.ins().fadd(lhs, rhs)),
                         Expr::Sub(_, _) => Ok(builder.ins().fsub(lhs, rhs)),
@@ -414,6 +437,7 @@ impl CodeGen {
                     module,
                     str_idx,
                     loop_stack,
+                    type_map,
                 )?;
                 let rhs = Self::compile_expr(
                     rhs,
@@ -425,9 +449,10 @@ impl CodeGen {
                     module,
                     str_idx,
                     loop_stack,
+                    type_map,
                 )?;
 
-                if matches!(expr_type, Type::Float) {
+                if matches!(expr_type, Type::Named(ref n) if n == "float") {
                     match expr {
                         Expr::Eq(_, _) => {
                             Ok(builder.ins().fcmp(ir::condcodes::FloatCC::Equal, lhs, rhs))
@@ -502,6 +527,7 @@ impl CodeGen {
                     module,
                     str_idx,
                     loop_stack,
+                    type_map,
                 )?;
                 let rhs_val = Self::compile_expr(
                     rhs,
@@ -513,6 +539,7 @@ impl CodeGen {
                     module,
                     str_idx,
                     loop_stack,
+                    type_map,
                 )?;
                 Ok(builder.ins().band(lhs_val, rhs_val))
             }
@@ -527,6 +554,7 @@ impl CodeGen {
                     module,
                     str_idx,
                     loop_stack,
+                    type_map,
                 )?;
                 let rhs_val = Self::compile_expr(
                     rhs,
@@ -538,6 +566,7 @@ impl CodeGen {
                     module,
                     str_idx,
                     loop_stack,
+                    type_map,
                 )?;
                 Ok(builder.ins().bor(lhs_val, rhs_val))
             }
@@ -552,6 +581,7 @@ impl CodeGen {
                     module,
                     str_idx,
                     loop_stack,
+                    type_map,
                 )?;
                 let one = builder.ins().iconst(types::I8, 1);
                 Ok(builder.ins().bxor(val, one))
@@ -567,10 +597,11 @@ impl CodeGen {
                     module,
                     str_idx,
                     loop_stack,
+                    type_map,
                 )?;
                 let var = Variable::from_u32(*idx);
                 *idx += 1;
-                builder.declare_var(get_type(ty.clone()));
+                builder.declare_var(get_type(ty, type_map));
                 builder.def_var(var, val);
                 scope_stack.last_mut().unwrap().insert(name.clone(), var);
                 type_stack
@@ -591,6 +622,7 @@ impl CodeGen {
                     module,
                     str_idx,
                     loop_stack,
+                    type_map,
                 )?;
                 let var = Self::lookup_var(name, scope_stack)
                     .ok_or_else(|| CodeGenError::UndefinedVariable { name: name.clone() })?;
@@ -636,6 +668,7 @@ impl CodeGen {
                             module,
                             str_idx,
                             loop_stack,
+                            type_map,
                         )
                     })
                     .collect();
@@ -660,6 +693,7 @@ impl CodeGen {
                     module,
                     str_idx,
                     loop_stack,
+                    type_map,
                 )?;
                 builder.ins().return_(&[val]);
                 Ok(Value::from_u32(0))
@@ -675,6 +709,7 @@ impl CodeGen {
                     module,
                     str_idx,
                     loop_stack,
+                    type_map,
                 )?;
 
                 let then_has_return = Self::has_return(then_branch);
@@ -707,6 +742,7 @@ impl CodeGen {
                     module,
                     str_idx,
                     loop_stack,
+                    type_map,
                 )?;
                 scope_stack.pop();
                 type_stack.pop();
@@ -732,6 +768,7 @@ impl CodeGen {
                         module,
                         str_idx,
                         loop_stack,
+                        type_map,
                     )?;
                     scope_stack.pop();
                     type_stack.pop();
@@ -780,6 +817,7 @@ impl CodeGen {
                     module,
                     str_idx,
                     loop_stack,
+                    type_map,
                 )?;
                 let cond_i64 = builder.ins().uextend(types::I64, cond_val);
                 builder.ins().brif(cond_i64, loop_body, &[], loop_exit, &[]);
@@ -797,6 +835,7 @@ impl CodeGen {
                     module,
                     str_idx,
                     loop_stack,
+                    type_map,
                 )?;
                 scope_stack.pop();
                 type_stack.pop();
@@ -822,6 +861,7 @@ impl CodeGen {
                     module,
                     str_idx,
                     loop_stack,
+                    type_map,
                 )?;
                 let index_val = Self::compile_expr(
                     index,
@@ -833,6 +873,7 @@ impl CodeGen {
                     module,
                     str_idx,
                     loop_stack,
+                    type_map,
                 )?;
 
                 let offset = builder.ins().imul_imm(index_val, 8);
@@ -856,6 +897,7 @@ impl CodeGen {
                         module,
                         str_idx,
                         loop_stack,
+                        type_map,
                     )?;
                     let index_val = Self::compile_expr(
                         index,
@@ -867,6 +909,7 @@ impl CodeGen {
                         module,
                         str_idx,
                         loop_stack,
+                        type_map,
                     )?;
                     let value_val = Self::compile_expr(
                         value,
@@ -878,6 +921,7 @@ impl CodeGen {
                         module,
                         str_idx,
                         loop_stack,
+                        type_map,
                     )?;
 
                     let offset = builder.ins().imul_imm(index_val, 8);
@@ -970,13 +1014,15 @@ impl CodeGen {
                     module,
                     str_idx,
                     loop_stack,
+                    type_map,
                 )?;
 
-                let elem_size = match elem_type {
-                    Type::Int | Type::Float | Type::String => 8i64,
-                    Type::Bool => 1i64,
-                    Type::Void => 0i64,
+                let elem_size = match &elem_type {
+                    Type::Named(n) if matches!(n.as_str(), "int" | "float" | "string") => 8i64,
+                    Type::Named(n) if n == "bool" => 1i64,
+                    Type::Named(n) if n == "void" => 0i64,
                     Type::Array(_) => 8i64,
+                    _ => 8i64,
                 };
 
                 let total_size = builder.ins().imul_imm(length_val, elem_size);
@@ -1037,6 +1083,7 @@ impl CodeGen {
                     module,
                     str_idx,
                     loop_stack,
+                    type_map,
                 )?;
                 let end_val = Self::compile_expr(
                     end,
@@ -1048,6 +1095,7 @@ impl CodeGen {
                     module,
                     str_idx,
                     loop_stack,
+                    type_map,
                 )?;
 
                 let loop_var = Variable::from_u32(*idx);
@@ -1086,6 +1134,7 @@ impl CodeGen {
                     module,
                     str_idx,
                     loop_stack,
+                    type_map,
                 )?;
 
                 scope_stack.pop();
@@ -1138,6 +1187,7 @@ impl CodeGen {
                     ))
                 }
             }
+            Expr::TypeDef => Ok(Value::from_u32(0)),
             _ => Err(CodeGenError::UnexpectedExpression {
                 found: expr.clone(),
             }),
@@ -1145,13 +1195,9 @@ impl CodeGen {
     }
 }
 
-fn get_type(t: Type) -> ir::Type {
+fn get_type(t: &Type, type_map: &HashMap<String, ir::Type>) -> ir::Type {
     return match t {
-        Type::Int => types::I64,
-        Type::Float => types::F64,
-        Type::Bool => types::I8,
-        Type::String => types::I64,
-        Type::Void => types::INVALID,
+        Type::Named(name) => *type_map.get(name).unwrap_or(&types::I64),
         Type::Array(_) => types::I64,
     };
 }

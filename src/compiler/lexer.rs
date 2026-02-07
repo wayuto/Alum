@@ -1,7 +1,5 @@
 use std::{fmt::Display, str::Chars};
 
-use crate::compiler::ast::Type;
-
 #[derive(Debug, Clone)]
 pub enum LexerError {
     InvalidNumber {
@@ -97,7 +95,8 @@ pub enum Token {
     WHILE,
     BREAK,
     CONTINUE,
-    Type(Type),
+    TYPEDEF,
+    TYPE(String),
     IDENT(String),
     EOF,
 }
@@ -436,12 +435,12 @@ impl<'a> Lexer<'a> {
                     "for" => Token::FOR,
                     "in" => Token::IN,
                     "extern" => Token::EXTERN,
-                    "int" => Token::Type(Type::Int),
-                    "float" => Token::Type(Type::Float),
-                    "bool" => Token::Type(Type::Bool),
-                    "string" => Token::Type(Type::String),
+                    "int" => Token::TYPE(ident),
+                    "float" => Token::TYPE(ident),
+                    "bool" => Token::TYPE(ident),
+                    "string" => Token::TYPE(ident),
                     "arr" => Token::IDENT(ident),
-                    "void" => Token::Type(Type::Void),
+                    "void" => Token::TYPE(ident),
                     "true" => Token::BOOL(true),
                     "false" => Token::BOOL(false),
                     "nil" => Token::NIL,
@@ -451,6 +450,7 @@ impl<'a> Lexer<'a> {
                     "while" => Token::WHILE,
                     "break" => Token::BREAK,
                     "continue" => Token::CONTINUE,
+                    "typedef" => Token::TYPEDEF,
                     _ => Token::IDENT(ident),
                 }
             }
