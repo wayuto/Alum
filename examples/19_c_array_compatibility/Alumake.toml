@@ -1,0 +1,14 @@
+[package]
+name = "c_array_compatibility"
+version = "0.1.0"
+author = ""
+license = "No License"
+language = "mixed"
+
+[build]
+linker = "alc"
+cc = "cc"
+alc = "alc"
+cflags = "-Wall -O2"
+includes = ["./include"]
+nostdlib = true

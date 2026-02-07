@@ -534,9 +534,20 @@ impl<'a> Parser<'a> {
             match self.peek().cloned() {
                 Some(Ok(Token::IDENT(s))) => {
                     self.next()?;
-                    self.expect(Token::COLON)?;
-                    let ty = self.parse_type()?;
-                    params.push((s, ty));
+
+                    let next_is_colon = matches!(self.peek(), Some(Ok(Token::COLON)));
+                    if next_is_colon {
+                        self.expect(Token::COLON)?;
+                        let ty = self.parse_type()?;
+                        params.push((s, ty));
+                    } else if s == "arr" && matches!(self.peek(), Some(Ok(Token::LBRACKET))) {
+                        self.expect(Token::LBRACKET)?;
+                        let inner_type = self.parse_type()?;
+                        self.expect(Token::RBRACKET)?;
+                        params.push(("_anon".to_string(), Type::Array(Box::new(inner_type))));
+                    } else {
+                        params.push(("_anon".to_string(), Type::Named(s)));
+                    }
 
                     match self.peek().cloned() {
                         Some(Ok(Token::COMMA)) => {

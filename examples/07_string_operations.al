@@ -18,7 +18,7 @@ fun main(): int {
     
     // String copy
     let copy: string = malloc(100)
-    copy = strcpy(copy, hello)
+    strcpy(copy, hello)
     
     print("Copy: ")
     println(copy)
@@ -33,7 +33,7 @@ fun main(): int {
     
     // Different string
     let other: string = "Goodbye"
-    let diff: int = memcmp(hello, other, len + 1)
+    let diff: int = memcmp(hello, other, strlen(other) + 1)
     if diff == 0 {
         println("Strings are equal")
     } else {

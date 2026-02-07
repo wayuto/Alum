@@ -5,8 +5,8 @@ $import "convert.al"
 // Demonstrates reading user input
 
 fun main(): int {
-    let name: string = ""
-    let age_str: string = ""
+    let name: string = malloc(100)
+    let age_str: string = malloc(100)
     let age: int = 0
     
     // Get user's name

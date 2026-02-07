@@ -32,7 +32,7 @@ fun main(): int {
     // Iterate through array
     println("All elements:")
     for i in 0..5 {
-        println(numbers[i])
+        println(itoa(numbers[i]))
     }
     
     return 0

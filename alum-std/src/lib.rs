@@ -5,7 +5,6 @@
 use core::arch::asm;
 use core::panic::PanicInfo;
 
-pub mod array;
 pub mod convert;
 pub mod io;
 pub mod math;
