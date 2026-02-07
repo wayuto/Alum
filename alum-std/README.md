@@ -22,7 +22,6 @@ This installs:
 $import "io.al"
 $import "math.al"
 $import "string.al"
-$import "array.al"
 $import "memory.al"
 $import "convert.al"
 ```
@@ -69,14 +68,6 @@ extern memcpy(string, string, int): string  // Memory copy
 extern memset(string, int, int): string    // Memory set
 extern bcmp(string, string, int): int      // Byte comparison
 extern memcmp(string, string, int): int    // Memory comparison
-```
-
-### Array Module (`array.al`)
-
-Provides array utilities.
-
-```al
-extern range(int, int): string  // Generate range (returns pointer to array)
 ```
 
 ### Memory Module (`memory.al`)
