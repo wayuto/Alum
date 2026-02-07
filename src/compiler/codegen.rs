@@ -40,11 +40,19 @@ impl Display for CodeGenError {
 
 impl std::error::Error for CodeGenError {}
 
+#[derive(Clone)]
+struct LoopContext {
+    header_block: ir::Block,
+    exit_block: ir::Block,
+    increment_block: Option<ir::Block>,
+}
+
 pub struct CodeGen {
     ast: Program,
     module: ObjectModule,
     builder_context: FunctionBuilderContext,
     func_signatures: HashMap<String, (FuncId, Signature)>,
+    loop_stack: Vec<LoopContext>,
 }
 
 impl CodeGen {
@@ -118,6 +126,7 @@ impl CodeGen {
             module,
             builder_context: FunctionBuilderContext::new(),
             func_signatures: HashMap::new(),
+            loop_stack: Vec::new(),
         }
     }
 
@@ -224,6 +233,7 @@ impl CodeGen {
             &self.func_signatures,
             &mut self.module,
             str_idx,
+            &mut self.loop_stack,
         )?;
 
         if matches!(_ret_type, Type::Void) {
@@ -263,6 +273,7 @@ impl CodeGen {
         func_signatures: &HashMap<String, (FuncId, Signature)>,
         module: &mut ObjectModule,
         str_idx: &mut u32,
+        loop_stack: &mut Vec<LoopContext>,
     ) -> Result<Value, CodeGenError> {
         match expr {
             Expr::Stmt(body) => {
@@ -280,6 +291,7 @@ impl CodeGen {
                             func_signatures,
                             module,
                             str_idx,
+                            loop_stack,
                         )?;
                     }
                     Self::compile_expr(
@@ -291,6 +303,7 @@ impl CodeGen {
                         func_signatures,
                         module,
                         str_idx,
+                        loop_stack,
                     )
                 } else {
                     Self::compile_expr(
@@ -302,6 +315,7 @@ impl CodeGen {
                         func_signatures,
                         module,
                         str_idx,
+                        loop_stack,
                     )
                 };
                 scope_stack.pop();
@@ -350,6 +364,7 @@ impl CodeGen {
                     func_signatures,
                     module,
                     str_idx,
+                    loop_stack,
                 )?;
                 let rhs = Self::compile_expr(
                     rhs,
@@ -360,6 +375,7 @@ impl CodeGen {
                     func_signatures,
                     module,
                     str_idx,
+                    loop_stack,
                 )?;
 
                 if matches!(expr_type, Type::Float) {
@@ -397,6 +413,7 @@ impl CodeGen {
                     func_signatures,
                     module,
                     str_idx,
+                    loop_stack,
                 )?;
                 let rhs = Self::compile_expr(
                     rhs,
@@ -407,6 +424,7 @@ impl CodeGen {
                     func_signatures,
                     module,
                     str_idx,
+                    loop_stack,
                 )?;
 
                 if matches!(expr_type, Type::Float) {
@@ -483,6 +501,7 @@ impl CodeGen {
                     func_signatures,
                     module,
                     str_idx,
+                    loop_stack,
                 )?;
                 let rhs_val = Self::compile_expr(
                     rhs,
@@ -493,6 +512,7 @@ impl CodeGen {
                     func_signatures,
                     module,
                     str_idx,
+                    loop_stack,
                 )?;
                 Ok(builder.ins().band(lhs_val, rhs_val))
             }
@@ -506,6 +526,7 @@ impl CodeGen {
                     func_signatures,
                     module,
                     str_idx,
+                    loop_stack,
                 )?;
                 let rhs_val = Self::compile_expr(
                     rhs,
@@ -516,6 +537,7 @@ impl CodeGen {
                     func_signatures,
                     module,
                     str_idx,
+                    loop_stack,
                 )?;
                 Ok(builder.ins().bor(lhs_val, rhs_val))
             }
@@ -529,6 +551,7 @@ impl CodeGen {
                     func_signatures,
                     module,
                     str_idx,
+                    loop_stack,
                 )?;
                 let one = builder.ins().iconst(types::I8, 1);
                 Ok(builder.ins().bxor(val, one))
@@ -543,6 +566,7 @@ impl CodeGen {
                     func_signatures,
                     module,
                     str_idx,
+                    loop_stack,
                 )?;
                 let var = Variable::from_u32(*idx);
                 *idx += 1;
@@ -566,6 +590,7 @@ impl CodeGen {
                     func_signatures,
                     module,
                     str_idx,
+                    loop_stack,
                 )?;
                 let var = Self::lookup_var(name, scope_stack)
                     .ok_or_else(|| CodeGenError::UndefinedVariable { name: name.clone() })?;
@@ -610,6 +635,7 @@ impl CodeGen {
                             func_signatures,
                             module,
                             str_idx,
+                            loop_stack,
                         )
                     })
                     .collect();
@@ -633,6 +659,7 @@ impl CodeGen {
                     func_signatures,
                     module,
                     str_idx,
+                    loop_stack,
                 )?;
                 builder.ins().return_(&[val]);
                 Ok(Value::from_u32(0))
@@ -647,6 +674,7 @@ impl CodeGen {
                     func_signatures,
                     module,
                     str_idx,
+                    loop_stack,
                 )?;
 
                 let then_has_return = Self::has_return(then_branch);
@@ -678,6 +706,7 @@ impl CodeGen {
                     func_signatures,
                     module,
                     str_idx,
+                    loop_stack,
                 )?;
                 scope_stack.pop();
                 type_stack.pop();
@@ -702,6 +731,7 @@ impl CodeGen {
                         func_signatures,
                         module,
                         str_idx,
+                        loop_stack,
                     )?;
                     scope_stack.pop();
                     type_stack.pop();
@@ -731,6 +761,12 @@ impl CodeGen {
                 let loop_body = builder.create_block();
                 let loop_exit = builder.create_block();
 
+                loop_stack.push(LoopContext {
+                    header_block: loop_header,
+                    exit_block: loop_exit,
+                    increment_block: None,
+                });
+
                 builder.ins().jump(loop_header, &[]);
 
                 builder.switch_to_block(loop_header);
@@ -743,6 +779,7 @@ impl CodeGen {
                     func_signatures,
                     module,
                     str_idx,
+                    loop_stack,
                 )?;
                 let cond_i64 = builder.ins().uextend(types::I64, cond_val);
                 builder.ins().brif(cond_i64, loop_body, &[], loop_exit, &[]);
@@ -759,9 +796,11 @@ impl CodeGen {
                     func_signatures,
                     module,
                     str_idx,
+                    loop_stack,
                 )?;
                 scope_stack.pop();
                 type_stack.pop();
+                loop_stack.pop();
                 builder.ins().jump(loop_header, &[]);
 
                 builder.seal_block(loop_body);
@@ -782,6 +821,7 @@ impl CodeGen {
                     func_signatures,
                     module,
                     str_idx,
+                    loop_stack,
                 )?;
                 let index_val = Self::compile_expr(
                     index,
@@ -792,6 +832,7 @@ impl CodeGen {
                     func_signatures,
                     module,
                     str_idx,
+                    loop_stack,
                 )?;
 
                 let offset = builder.ins().imul_imm(index_val, 8);
@@ -814,6 +855,7 @@ impl CodeGen {
                         func_signatures,
                         module,
                         str_idx,
+                        loop_stack,
                     )?;
                     let index_val = Self::compile_expr(
                         index,
@@ -824,6 +866,7 @@ impl CodeGen {
                         func_signatures,
                         module,
                         str_idx,
+                        loop_stack,
                     )?;
                     let value_val = Self::compile_expr(
                         value,
@@ -834,6 +877,7 @@ impl CodeGen {
                         func_signatures,
                         module,
                         str_idx,
+                        loop_stack,
                     )?;
 
                     let offset = builder.ins().imul_imm(index_val, 8);
@@ -925,6 +969,7 @@ impl CodeGen {
                     func_signatures,
                     module,
                     str_idx,
+                    loop_stack,
                 )?;
 
                 let elem_size = match elem_type {
@@ -973,7 +1018,14 @@ impl CodeGen {
             Expr::For(var, start, end, body) => {
                 let loop_header = builder.create_block();
                 let loop_body = builder.create_block();
+                let loop_increment = builder.create_block();
                 let loop_exit = builder.create_block();
+
+                loop_stack.push(LoopContext {
+                    header_block: loop_header,
+                    exit_block: loop_exit,
+                    increment_block: Some(loop_increment),
+                });
 
                 let start_val = Self::compile_expr(
                     start,
@@ -984,6 +1036,7 @@ impl CodeGen {
                     func_signatures,
                     module,
                     str_idx,
+                    loop_stack,
                 )?;
                 let end_val = Self::compile_expr(
                     end,
@@ -994,6 +1047,7 @@ impl CodeGen {
                     func_signatures,
                     module,
                     str_idx,
+                    loop_stack,
                 )?;
 
                 let loop_var = Variable::from_u32(*idx);
@@ -1031,15 +1085,23 @@ impl CodeGen {
                     func_signatures,
                     module,
                     str_idx,
+                    loop_stack,
                 )?;
 
                 scope_stack.pop();
                 type_stack.pop();
 
-                let next_val = builder.ins().iadd_imm(current_val, 1);
+                builder.ins().jump(loop_increment, &[]);
+
+                builder.switch_to_block(loop_increment);
+                let current_val_inc = builder.use_var(loop_var);
+                let next_val = builder.ins().iadd_imm(current_val_inc, 1);
                 builder.def_var(loop_var, next_val);
                 builder.ins().jump(loop_header, &[]);
 
+                loop_stack.pop();
+
+                builder.seal_block(loop_increment);
                 builder.seal_block(loop_body);
                 builder.seal_block(loop_header);
 
@@ -1048,8 +1110,34 @@ impl CodeGen {
 
                 Ok(builder.ins().iconst(types::I64, 0))
             }
-            Expr::Break => Ok(builder.ins().iconst(types::I64, 0)),
-            Expr::Continue => Ok(builder.ins().iconst(types::I64, 0)),
+            Expr::Break => {
+                if let Some(loop_ctx) = loop_stack.last() {
+                    builder.ins().jump(loop_ctx.exit_block, &[]);
+                    let unreachable_block = builder.create_block();
+                    builder.switch_to_block(unreachable_block);
+                    Ok(Value::from_u32(0))
+                } else {
+                    Err(CodeGenError::ModuleError(
+                        "break statement outside of loop".to_string(),
+                    ))
+                }
+            }
+            Expr::Continue => {
+                if let Some(loop_ctx) = loop_stack.last() {
+                    if let Some(inc_block) = loop_ctx.increment_block {
+                        builder.ins().jump(inc_block, &[]);
+                    } else {
+                        builder.ins().jump(loop_ctx.header_block, &[]);
+                    }
+                    let unreachable_block = builder.create_block();
+                    builder.switch_to_block(unreachable_block);
+                    Ok(Value::from_u32(0))
+                } else {
+                    Err(CodeGenError::ModuleError(
+                        "continue statement outside of loop".to_string(),
+                    ))
+                }
+            }
             _ => Err(CodeGenError::UnexpectedExpression {
                 found: expr.clone(),
             }),

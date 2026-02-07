@@ -1,0 +1,28 @@
+$import "io.al"
+$import "convert.al"
+
+fun main(): int {
+    // continue in while loop
+    println("continue in while loop:");
+    let i: int = 0;
+    while i < 10 {
+        i = i + 1;
+        if i == 5 {
+            continue;
+        }
+        println(itoa(i));
+    }
+    println("Done!");
+
+    // continue in for loop
+    println("continue in for loop:");
+    for j in 0..10 {
+        if j == 5 {
+            continue;
+        }
+        println(itoa(j));
+    }
+    println("Done!");
+
+    return 0;
+}
