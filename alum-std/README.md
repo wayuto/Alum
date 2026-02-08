@@ -91,16 +91,9 @@ extern ftoa(float): string  // Float to string
 
 ### Main Library (`lib.al`)
 
-The main library module imports all standard library modules and provides system call access.
+The main library module provides system call access.
 
 ```al
-$import "io.al"
-$import "string.al"
-$import "convert.al"
-$import "math.al"
-$import "array.al"
-$import "memory.al"
-
 extern syscall(int, int, int, int): int
 extern exit(int): void
 ```

@@ -15,7 +15,7 @@ pub mod string;
 pub extern "C" fn rust_eh_personality() {}
 
 unsafe extern "C" {
-    fn main() -> isize;
+    fn main(argc: isize, argv: *const *const u8) -> isize;
 }
 
 #[panic_handler]
@@ -62,6 +62,17 @@ pub extern "C" fn exit(code: isize) {
 
 #[unsafe(no_mangle)]
 extern "C" fn _start() -> () {
-    let ret = unsafe { main() };
+    let argc: isize;
+    let argv: *const *const u8;
+    unsafe {
+        asm!(
+            "mov {argc}, [rsp + 8]",
+            "lea {argv}, [rsp + 16]",
+            argc = out(reg) argc,
+            argv = out(reg) argv,
+        );
+    }
+
+    let ret = unsafe { main(argc, argv) };
     exit(ret);
 }
