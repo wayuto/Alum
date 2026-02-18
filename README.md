@@ -45,8 +45,8 @@ Create a file `hello.al`:
 $import "io.al"
 
 fun main(): int {
-    println("Hello, World!");
-    return 0;
+    println("Hello, World!")
+    return 0
 }
 ```
 
@@ -69,12 +69,12 @@ alc -r hello.al
 $import "convert.al"
 
 fun main(): int {
-    let x: int = 10;
-    let y: int = 20;
-    let sum: int = x + y;
+    let x: int = 10
+    let y: int = 20
+    let sum: int = x + y
     
-    println(itoa(sum));
-    return 0;
+    println(itoa(sum))
+    return 0
 }
 ```
 
@@ -143,17 +143,17 @@ Alum is a statically typed language with explicit type annotations. All variable
 ### Variables
 
 ```al
-let name: string = "Alum";
-let count: int = 42;
-let pi: float = 3.14159;
-let is_valid: bool = true;
+let name: string = "Alum"
+let count: int = 42
+let pi: float = 3.14159
+let is_valid: bool = true
 ```
 
 ### Functions
 
 ```al
 fun add(a: int, b: int): int {
-    return a + b;
+    return a + b
 }
 ```
 
@@ -171,26 +171,51 @@ extern printf(string): int
 ```al
 // If-Else
 if x > 0 {
-    println("Positive");
+    println("Positive")
 }
 
 // While Loop
 while i < 10 {
-    i = i + 1;
+    i = i + 1
 }
 
 // For Loop
 for i in 0..10 {
-    println(itoa(i));
+    println(itoa(i))
 }
 ```
 
 ### Arrays
 
 ```al
-let numbers: arr[int] = [1, 2, 3, 4, 5];
-let buffer: arr[int] = [int; 100];
-let first: int = numbers[0];
+let numbers: arr[int] = [1, 2, 3, 4, 5]
+let buffer: arr[int] = [int; 100]
+let first: int = numbers[0]
+```
+
+### Structs
+
+Define custom data structures with the `struct` keyword:
+
+```al
+struct Point {
+    x: int,
+    y: int
+}
+
+fun main(): int {
+    let p: Point = Point {
+        x: 10,
+        y: 20
+    }
+    return 0
+}
+```
+
+Access struct fields using the dot operator:
+```al
+println(itoa(p.x))
+println(itoa(p.y))
 ```
 
 ### Preprocessor Directives
@@ -205,11 +230,54 @@ $import "io.al"
 
 ## Compilation Pipeline
 
-1. **Preprocessing**: Handles `$import`, `$define`, `$ifdef`, `$ifndef`, `$endif`
-2. **Lexing**: Tokenizes source code
-3. **Parsing**: Builds Abstract Syntax Tree (AST)
-4. **Code Generation**: Compiles AST to machine code using Cranelift
-5. **Linking**: Links object files with standard library
+```
+Source Code (.al)
+        │
+        ▼
+┌───────────────┐
+│ Preprocessor  │  →  Handles $import, $define, $ifdef, $ifndef, $endif
+└───────────────┘
+        │
+        ▼
+┌───────────────┐
+│    Lexer      │  →  Tokenizes source code into tokens
+└───────────────┘
+        │
+        ▼
+┌───────────────┐
+│    Parser     │  →  Builds Abstract Syntax Tree (AST)
+└───────────────┘
+        │
+        ▼
+┌───────────────┐
+│  Type Checker │  →  Validates type safety and semantic rules
+└───────────────┘
+        │
+        ▼
+┌───────────────┐
+│ Code Generator│  →  Compiles AST to machine code using Cranelift
+└───────────────┘
+        │
+        ▼
+  Object File (.o)
+        │
+        ▼
+┌───────────────┐
+│    Linker     │  →  Links object files with standard library
+└───────────────┘
+        │
+        ▼
+ Executable File
+```
+
+### Pipeline Stages
+
+1. **Preprocessing**: Handles `$import`, `$define`, `$ifdef`, `$ifndef`, `$endif` directives
+2. **Lexing**: Tokenizes source code into a stream of tokens
+3. **Parsing**: Builds Abstract Syntax Tree (AST) from tokens
+4. **Type Checking**: Validates type safety and semantic rules
+5. **Code Generation**: Compiles AST to machine code using Cranelift
+6. **Linking**: Links object files with standard library to produce executable
 
 ## Project Structure
 

@@ -76,7 +76,7 @@
 			"patterns": [
 				{
 					"name": "keyword.control.alum",
-					"match": "\\b(let|pub|extern|return|if|else|while|for|in|true|false|void)\\b"
+					"match": "\\b(let|extern|return|if|else|while|for|in|true|false|void)\\b"
 				},
 				{
 					"name": "keyword.declaration.function.alum",
@@ -88,11 +88,11 @@
 			"patterns": [
 				{
 					"name": "storage.type.alum",
-					"match": "\\b(int|flt|str|bool|arr)\\b"
+					"match": "\\b(int|float|string|bool|arr)\\b"
 				},
 				{
 					"name": "meta.type.array.alum",
-					"match": "arr\\s*<\\s*(\\d+|_)\\s*>",
+					"match": "arr\\s*[\\s*(\\w+|_)\\]",
 					"captures": {
 						"0": {
 							"name": "storage.type.alum"

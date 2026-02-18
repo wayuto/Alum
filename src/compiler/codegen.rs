@@ -47,6 +47,21 @@ struct LoopContext {
     increment_block: Option<ir::Block>,
 }
 
+#[derive(Clone, Debug)]
+struct StructField {
+    name: String,
+    ty: Type,
+    offset: i64,
+}
+
+#[derive(Clone, Debug)]
+struct StructDef {
+    fields: Vec<StructField>,
+    size: i64,
+    #[allow(dead_code)]
+    align: i64,
+}
+
 pub struct CodeGen {
     ast: Program,
     module: ObjectModule,
@@ -54,9 +69,80 @@ pub struct CodeGen {
     func_signatures: HashMap<String, (FuncId, Signature)>,
     loop_stack: Vec<LoopContext>,
     type_map: HashMap<String, ir::Type>,
+    structs: HashMap<String, StructDef>,
 }
 
 impl CodeGen {
+    fn get_type_size(
+        ty: &Type,
+        _type_map: &HashMap<String, ir::Type>,
+        structs: &HashMap<String, StructDef>,
+    ) -> i64 {
+        match ty {
+            Type::Named(name) => match name.as_str() {
+                "int" | "float" => 8,
+                "string" => 8,
+                "bool" => 1,
+                "void" => 0,
+                _ => {
+                    if let Some(struct_def) = structs.get(name) {
+                        struct_def.size
+                    } else {
+                        8
+                    }
+                }
+            },
+            Type::Array(_) => 8,
+        }
+    }
+
+    fn get_type_align(
+        ty: &Type,
+        type_map: &HashMap<String, ir::Type>,
+        structs: &HashMap<String, StructDef>,
+    ) -> i64 {
+        match ty {
+            Type::Named(name) => match name.as_str() {
+                "int" | "float" => 8,
+                "string" => 8,
+                "bool" => 1,
+                "void" => 1,
+                _ => {
+                    if let Some(struct_def) = structs.get(name) {
+                        struct_def
+                            .fields
+                            .iter()
+                            .map(|f| Self::get_type_align(&f.ty, type_map, structs))
+                            .max()
+                            .unwrap_or(1)
+                    } else {
+                        8
+                    }
+                }
+            },
+            Type::Array(_) => 8,
+        }
+    }
+
+    fn get_expr_type(expr: &Expr, type_stack: &Vec<HashMap<String, Type>>) -> Type {
+        match expr {
+            Expr::Int(_) => Type::Named("int".to_string()),
+            Expr::Float(_) => Type::Named("float".to_string()),
+            Expr::Bool(_) => Type::Named("bool".to_string()),
+            Expr::String(_) => Type::Named("string".to_string()),
+            Expr::Nil => Type::Named("void".to_string()),
+            Expr::Var(name) => {
+                for scope in type_stack.iter().rev() {
+                    if let Some(ty) = scope.get(name) {
+                        return ty.clone();
+                    }
+                }
+                Type::Named("int".to_string())
+            }
+            _ => Type::Named("int".to_string()),
+        }
+    }
+
     fn has_return(expr: &Expr) -> bool {
         match expr {
             Expr::Return(_) => true,
@@ -68,47 +154,6 @@ impl CodeGen {
             Expr::While(_, body) => Self::has_return(body),
             Expr::For(_, _, _, body) => Self::has_return(body),
             _ => false,
-        }
-    }
-
-    fn infer_expr_type_with_vars(expr: &Expr, type_stack: &Vec<HashMap<String, Type>>) -> Type {
-        match expr {
-            Expr::Int(_) => Type::Named("int".to_string()),
-            Expr::Float(_) => Type::Named("float".to_string()),
-            Expr::Bool(_) => Type::Named("bool".to_string()),
-            Expr::String(_) => Type::Named("string".to_string()),
-            Expr::Nil => Type::Named("void".to_string()),
-            Expr::Add(lhs, rhs)
-            | Expr::Sub(lhs, rhs)
-            | Expr::Mul(lhs, rhs)
-            | Expr::Div(lhs, rhs)
-            | Expr::Mod(lhs, rhs)
-            | Expr::Eq(lhs, rhs)
-            | Expr::Ne(lhs, rhs)
-            | Expr::Lt(lhs, rhs)
-            | Expr::Le(lhs, rhs)
-            | Expr::Gt(lhs, rhs)
-            | Expr::Ge(lhs, rhs) => {
-                let lhs_type = Self::infer_expr_type_with_vars(lhs, type_stack);
-                let rhs_type = Self::infer_expr_type_with_vars(rhs, type_stack);
-
-                if matches!(lhs_type, Type::Named(ref n) if n == "float")
-                    || matches!(rhs_type, Type::Named(ref n) if n == "float")
-                {
-                    Type::Named("float".to_string())
-                } else {
-                    Type::Named("int".to_string())
-                }
-            }
-            Expr::Var(name) => {
-                for scope in type_stack.iter().rev() {
-                    if let Some(ty) = scope.get(name) {
-                        return ty.clone();
-                    }
-                }
-                Type::Named("int".to_string())
-            }
-            _ => Type::Named("int".to_string()),
         }
     }
 
@@ -137,6 +182,7 @@ impl CodeGen {
             func_signatures: HashMap::new(),
             loop_stack: Vec::new(),
             type_map,
+            structs: HashMap::new(),
         }
     }
 
@@ -178,6 +224,46 @@ impl CodeGen {
                     self.func_signatures.insert(name, (func_id, sig));
                 }
                 Expr::TypeDef => {}
+                Expr::Struct(name, fields) => {
+                    let mut offset = 0i64;
+                    let mut max_align = 1i64;
+                    let mut struct_fields = Vec::new();
+
+                    for (field_name, field_ty) in fields {
+                        let field_align =
+                            Self::get_type_align(&field_ty, &self.type_map, &self.structs);
+                        let field_size =
+                            Self::get_type_size(&field_ty, &self.type_map, &self.structs);
+
+                        if offset % field_align != 0 {
+                            offset = ((offset / field_align) + 1) * field_align;
+                        }
+
+                        struct_fields.push(StructField {
+                            name: field_name,
+                            ty: field_ty,
+                            offset,
+                        });
+
+                        offset += field_size;
+                        max_align = max_align.max(field_align);
+                    }
+
+                    let size = if offset % max_align != 0 {
+                        ((offset / max_align) + 1) * max_align
+                    } else {
+                        offset
+                    };
+
+                    self.structs.insert(
+                        name,
+                        StructDef {
+                            fields: struct_fields,
+                            size,
+                            align: max_align,
+                        },
+                    );
+                }
                 expr => return Err(CodeGenError::UnexpectedExpression { found: expr }),
             }
         }
@@ -189,6 +275,7 @@ impl CodeGen {
                 }
                 Expr::Extern(_, _, _) => {}
                 Expr::TypeDef => {}
+                Expr::Struct(_, _) => {}
                 expr => return Err(CodeGenError::UnexpectedExpression { found: expr }),
             }
         }
@@ -251,6 +338,7 @@ impl CodeGen {
             str_idx,
             &mut self.loop_stack,
             &self.type_map,
+            &self.structs,
         )?;
 
         if matches!(_ret_type, Type::Named(ref n) if n == "void") {
@@ -292,6 +380,7 @@ impl CodeGen {
         str_idx: &mut u32,
         loop_stack: &mut Vec<LoopContext>,
         type_map: &HashMap<String, ir::Type>,
+        structs: &HashMap<String, StructDef>,
     ) -> Result<Value, CodeGenError> {
         match expr {
             Expr::Stmt(body) => {
@@ -311,6 +400,7 @@ impl CodeGen {
                             str_idx,
                             loop_stack,
                             type_map,
+                            structs,
                         )?;
                     }
                     Self::compile_expr(
@@ -324,6 +414,7 @@ impl CodeGen {
                         str_idx,
                         loop_stack,
                         type_map,
+                        structs,
                     )
                 } else {
                     Self::compile_expr(
@@ -337,6 +428,7 @@ impl CodeGen {
                         str_idx,
                         loop_stack,
                         type_map,
+                        structs,
                     )
                 };
                 scope_stack.pop();
@@ -370,63 +462,153 @@ impl CodeGen {
                 Ok(ptr)
             }
             Expr::Nil => Ok(builder.ins().iconst(types::I64, 0)),
-            Expr::Add(lhs, rhs)
-            | Expr::Sub(lhs, rhs)
-            | Expr::Mul(lhs, rhs)
-            | Expr::Div(lhs, rhs)
-            | Expr::Mod(lhs, rhs) => {
-                let expr_type = Self::infer_expr_type_with_vars(expr, type_stack);
-                let lhs = Self::compile_expr(
-                    lhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                )?;
-                let rhs = Self::compile_expr(
-                    rhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                )?;
 
-                if matches!(expr_type, Type::Named(ref n) if n == "float") {
-                    match expr {
-                        Expr::Add(_, _) => Ok(builder.ins().fadd(lhs, rhs)),
-                        Expr::Sub(_, _) => Ok(builder.ins().fsub(lhs, rhs)),
-                        Expr::Mul(_, _) => Ok(builder.ins().fmul(lhs, rhs)),
-                        Expr::Div(_, _) => Ok(builder.ins().fdiv(lhs, rhs)),
-                        _ => unreachable!(),
-                    }
+            Expr::Add(lhs, rhs) => {
+                let lhs_type = Self::get_expr_type(lhs, type_stack);
+                let rhs_type = Self::get_expr_type(rhs, type_stack);
+                let is_string = matches!(lhs_type, Type::Named(ref n) if n == "string")
+                    || matches!(rhs_type, Type::Named(ref n) if n == "string");
+
+                if is_string {
+                    let lhs_ptr = Self::compile_expr(
+                        lhs,
+                        builder,
+                        scope_stack,
+                        type_stack,
+                        idx,
+                        func_signatures,
+                        module,
+                        str_idx,
+                        loop_stack,
+                        type_map,
+                        structs,
+                    )?;
+                    let rhs_ptr = Self::compile_expr(
+                        rhs,
+                        builder,
+                        scope_stack,
+                        type_stack,
+                        idx,
+                        func_signatures,
+                        module,
+                        str_idx,
+                        loop_stack,
+                        type_map,
+                        structs,
+                    )?;
+
+                    let strlen_sig = {
+                        let mut sig = module.make_signature();
+                        sig.call_conv = CallConv::SystemV;
+                        sig.params.push(AbiParam::new(types::I64));
+                        sig.returns.push(AbiParam::new(types::I64));
+                        sig
+                    };
+                    let strlen_id = module
+                        .declare_function("strlen", Linkage::Import, &strlen_sig)
+                        .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                    let strlen_ref = module.declare_func_in_func(strlen_id, builder.func);
+
+                    let lhs_len = builder.ins().call(strlen_ref, &[lhs_ptr]);
+                    let lhs_len = builder.inst_results(lhs_len)[0];
+                    let rhs_len = builder.ins().call(strlen_ref, &[rhs_ptr]);
+                    let rhs_len = builder.inst_results(rhs_len)[0];
+
+                    let total_len = builder.ins().iadd(lhs_len, rhs_len);
+                    let alloc_size = builder.ins().iadd_imm(total_len, 1);
+
+                    let calloc_sig = {
+                        let mut sig = module.make_signature();
+                        sig.call_conv = CallConv::SystemV;
+                        sig.params.push(AbiParam::new(types::I64));
+                        sig.returns.push(AbiParam::new(types::I64));
+                        sig
+                    };
+                    let calloc_id = module
+                        .declare_function("malloc", Linkage::Import, &calloc_sig)
+                        .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                    let calloc_ref = module.declare_func_in_func(calloc_id, builder.func);
+                    let result_ptr = builder.ins().call(calloc_ref, &[alloc_size]);
+                    let result_ptr = builder.inst_results(result_ptr)[0];
+
+                    let memset_sig = {
+                        let mut sig = module.make_signature();
+                        sig.call_conv = CallConv::SystemV;
+                        sig.params.push(AbiParam::new(types::I64));
+                        sig.params.push(AbiParam::new(types::I32));
+                        sig.params.push(AbiParam::new(types::I64));
+                        sig.returns.push(AbiParam::new(types::I64));
+                        sig
+                    };
+                    let memset_id = module
+                        .declare_function("memset", Linkage::Import, &memset_sig)
+                        .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                    let memset_ref = module.declare_func_in_func(memset_id, builder.func);
+                    let zero_i32 = builder.ins().iconst(types::I32, 0);
+                    builder
+                        .ins()
+                        .call(memset_ref, &[result_ptr, zero_i32, alloc_size]);
+
+                    let strcpy_sig = {
+                        let mut sig = module.make_signature();
+                        sig.call_conv = CallConv::SystemV;
+                        sig.params.push(AbiParam::new(types::I64));
+                        sig.params.push(AbiParam::new(types::I64));
+                        sig.returns.push(AbiParam::new(types::I64));
+                        sig
+                    };
+                    let strcpy_id = module
+                        .declare_function("strcpy", Linkage::Import, &strcpy_sig)
+                        .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                    let strcpy_ref = module.declare_func_in_func(strcpy_id, builder.func);
+                    builder.ins().call(strcpy_ref, &[result_ptr, lhs_ptr]);
+
+                    let strcat_sig = {
+                        let mut sig = module.make_signature();
+                        sig.call_conv = CallConv::SystemV;
+                        sig.params.push(AbiParam::new(types::I64));
+                        sig.params.push(AbiParam::new(types::I64));
+                        sig.returns.push(AbiParam::new(types::I64));
+                        sig
+                    };
+                    let strcat_id = module
+                        .declare_function("strcat", Linkage::Import, &strcat_sig)
+                        .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                    let strcat_ref = module.declare_func_in_func(strcat_id, builder.func);
+                    builder.ins().call(strcat_ref, &[result_ptr, rhs_ptr]);
+
+                    Ok(result_ptr)
                 } else {
-                    match expr {
-                        Expr::Add(_, _) => Ok(builder.ins().iadd(lhs, rhs)),
-                        Expr::Sub(_, _) => Ok(builder.ins().isub(lhs, rhs)),
-                        Expr::Mul(_, _) => Ok(builder.ins().imul(lhs, rhs)),
-                        Expr::Div(_, _) => Ok(builder.ins().sdiv(lhs, rhs)),
-                        Expr::Mod(_, _) => Ok(builder.ins().srem(lhs, rhs)),
-                        _ => unreachable!(),
-                    }
+                    let lhs = Self::compile_expr(
+                        lhs,
+                        builder,
+                        scope_stack,
+                        type_stack,
+                        idx,
+                        func_signatures,
+                        module,
+                        str_idx,
+                        loop_stack,
+                        type_map,
+                        structs,
+                    )?;
+                    let rhs = Self::compile_expr(
+                        rhs,
+                        builder,
+                        scope_stack,
+                        type_stack,
+                        idx,
+                        func_signatures,
+                        module,
+                        str_idx,
+                        loop_stack,
+                        type_map,
+                        structs,
+                    )?;
+                    Ok(builder.ins().iadd(lhs, rhs))
                 }
             }
-            Expr::Eq(lhs, rhs)
-            | Expr::Ne(lhs, rhs)
-            | Expr::Lt(lhs, rhs)
-            | Expr::Le(lhs, rhs)
-            | Expr::Gt(lhs, rhs)
-            | Expr::Ge(lhs, rhs) => {
-                let expr_type = Self::infer_expr_type_with_vars(expr, type_stack);
+            Expr::Sub(lhs, rhs) => {
                 let lhs = Self::compile_expr(
                     lhs,
                     builder,
@@ -438,6 +620,7 @@ impl CodeGen {
                     str_idx,
                     loop_stack,
                     type_map,
+                    structs,
                 )?;
                 let rhs = Self::compile_expr(
                     rhs,
@@ -450,71 +633,692 @@ impl CodeGen {
                     str_idx,
                     loop_stack,
                     type_map,
+                    structs,
+                )?;
+                Ok(builder.ins().isub(lhs, rhs))
+            }
+            Expr::Mul(lhs, rhs) => {
+                let lhs = Self::compile_expr(
+                    lhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                let rhs = Self::compile_expr(
+                    rhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                Ok(builder.ins().imul(lhs, rhs))
+            }
+            Expr::Div(lhs, rhs) => {
+                let lhs = Self::compile_expr(
+                    lhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                let rhs = Self::compile_expr(
+                    rhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                Ok(builder.ins().sdiv(lhs, rhs))
+            }
+            Expr::Mod(lhs, rhs) => {
+                let lhs = Self::compile_expr(
+                    lhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                let rhs = Self::compile_expr(
+                    rhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                Ok(builder.ins().srem(lhs, rhs))
+            }
+
+            Expr::FAdd(lhs, rhs) => {
+                let lhs = Self::compile_expr(
+                    lhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                let rhs = Self::compile_expr(
+                    rhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                Ok(builder.ins().fadd(lhs, rhs))
+            }
+            Expr::FSub(lhs, rhs) => {
+                let lhs = Self::compile_expr(
+                    lhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                let rhs = Self::compile_expr(
+                    rhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                Ok(builder.ins().fsub(lhs, rhs))
+            }
+            Expr::FMul(lhs, rhs) => {
+                let lhs = Self::compile_expr(
+                    lhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                let rhs = Self::compile_expr(
+                    rhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                Ok(builder.ins().fmul(lhs, rhs))
+            }
+            Expr::FDiv(lhs, rhs) => {
+                let lhs = Self::compile_expr(
+                    lhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                let rhs = Self::compile_expr(
+                    rhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                Ok(builder.ins().fdiv(lhs, rhs))
+            }
+
+            Expr::Eq(lhs, rhs) => {
+                let lhs = Self::compile_expr(
+                    lhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                let rhs = Self::compile_expr(
+                    rhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                Ok(builder.ins().icmp(ir::condcodes::IntCC::Equal, lhs, rhs))
+            }
+            Expr::Ne(lhs, rhs) => {
+                let lhs = Self::compile_expr(
+                    lhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                let rhs = Self::compile_expr(
+                    rhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                Ok(builder.ins().icmp(ir::condcodes::IntCC::NotEqual, lhs, rhs))
+            }
+            Expr::Lt(lhs, rhs) => {
+                let lhs = Self::compile_expr(
+                    lhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                let rhs = Self::compile_expr(
+                    rhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                Ok(builder
+                    .ins()
+                    .icmp(ir::condcodes::IntCC::SignedLessThan, lhs, rhs))
+            }
+            Expr::Le(lhs, rhs) => {
+                let lhs = Self::compile_expr(
+                    lhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                let rhs = Self::compile_expr(
+                    rhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                Ok(builder
+                    .ins()
+                    .icmp(ir::condcodes::IntCC::SignedLessThanOrEqual, lhs, rhs))
+            }
+            Expr::Gt(lhs, rhs) => {
+                let lhs = Self::compile_expr(
+                    lhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                let rhs = Self::compile_expr(
+                    rhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                Ok(builder
+                    .ins()
+                    .icmp(ir::condcodes::IntCC::SignedGreaterThan, lhs, rhs))
+            }
+            Expr::Ge(lhs, rhs) => {
+                let lhs = Self::compile_expr(
+                    lhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                let rhs = Self::compile_expr(
+                    rhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                Ok(builder
+                    .ins()
+                    .icmp(ir::condcodes::IntCC::SignedGreaterThanOrEqual, lhs, rhs))
+            }
+
+            Expr::FEq(lhs, rhs) => {
+                let lhs = Self::compile_expr(
+                    lhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                let rhs = Self::compile_expr(
+                    rhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                Ok(builder.ins().fcmp(ir::condcodes::FloatCC::Equal, lhs, rhs))
+            }
+            Expr::FNe(lhs, rhs) => {
+                let lhs = Self::compile_expr(
+                    lhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                let rhs = Self::compile_expr(
+                    rhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                Ok(builder
+                    .ins()
+                    .fcmp(ir::condcodes::FloatCC::NotEqual, lhs, rhs))
+            }
+            Expr::FLt(lhs, rhs) => {
+                let lhs = Self::compile_expr(
+                    lhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                let rhs = Self::compile_expr(
+                    rhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                Ok(builder
+                    .ins()
+                    .fcmp(ir::condcodes::FloatCC::LessThan, lhs, rhs))
+            }
+            Expr::FLe(lhs, rhs) => {
+                let lhs = Self::compile_expr(
+                    lhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                let rhs = Self::compile_expr(
+                    rhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                Ok(builder
+                    .ins()
+                    .fcmp(ir::condcodes::FloatCC::LessThanOrEqual, lhs, rhs))
+            }
+            Expr::FGt(lhs, rhs) => {
+                let lhs = Self::compile_expr(
+                    lhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                let rhs = Self::compile_expr(
+                    rhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                Ok(builder
+                    .ins()
+                    .fcmp(ir::condcodes::FloatCC::GreaterThan, lhs, rhs))
+            }
+            Expr::FGe(lhs, rhs) => {
+                let lhs = Self::compile_expr(
+                    lhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                let rhs = Self::compile_expr(
+                    rhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                Ok(builder
+                    .ins()
+                    .fcmp(ir::condcodes::FloatCC::GreaterThanOrEqual, lhs, rhs))
+            }
+
+            Expr::StrConcat(lhs, rhs) => {
+                let lhs_ptr = Self::compile_expr(
+                    lhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                let rhs_ptr = Self::compile_expr(
+                    rhs,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
                 )?;
 
-                if matches!(expr_type, Type::Named(ref n) if n == "float") {
-                    match expr {
-                        Expr::Eq(_, _) => {
-                            Ok(builder.ins().fcmp(ir::condcodes::FloatCC::Equal, lhs, rhs))
-                        }
-                        Expr::Ne(_, _) => {
-                            Ok(builder
-                                .ins()
-                                .fcmp(ir::condcodes::FloatCC::NotEqual, lhs, rhs))
-                        }
-                        Expr::Lt(_, _) => {
-                            Ok(builder
-                                .ins()
-                                .fcmp(ir::condcodes::FloatCC::LessThan, lhs, rhs))
-                        }
-                        Expr::Le(_, _) => Ok(builder.ins().fcmp(
-                            ir::condcodes::FloatCC::LessThanOrEqual,
-                            lhs,
-                            rhs,
-                        )),
-                        Expr::Gt(_, _) => {
-                            Ok(builder
-                                .ins()
-                                .fcmp(ir::condcodes::FloatCC::GreaterThan, lhs, rhs))
-                        }
-                        Expr::Ge(_, _) => Ok(builder.ins().fcmp(
-                            ir::condcodes::FloatCC::GreaterThanOrEqual,
-                            lhs,
-                            rhs,
-                        )),
-                        _ => unreachable!(),
-                    }
-                } else {
-                    match expr {
-                        Expr::Eq(_, _) => {
-                            Ok(builder.ins().icmp(ir::condcodes::IntCC::Equal, lhs, rhs))
-                        }
-                        Expr::Ne(_, _) => {
-                            Ok(builder.ins().icmp(ir::condcodes::IntCC::NotEqual, lhs, rhs))
-                        }
-                        Expr::Lt(_, _) => {
-                            Ok(builder
-                                .ins()
-                                .icmp(ir::condcodes::IntCC::SignedLessThan, lhs, rhs))
-                        }
-                        Expr::Le(_, _) => Ok(builder.ins().icmp(
-                            ir::condcodes::IntCC::SignedLessThanOrEqual,
-                            lhs,
-                            rhs,
-                        )),
-                        Expr::Gt(_, _) => Ok(builder.ins().icmp(
-                            ir::condcodes::IntCC::SignedGreaterThan,
-                            lhs,
-                            rhs,
-                        )),
-                        Expr::Ge(_, _) => Ok(builder.ins().icmp(
-                            ir::condcodes::IntCC::SignedGreaterThanOrEqual,
-                            lhs,
-                            rhs,
-                        )),
-                        _ => unreachable!(),
-                    }
-                }
+                let strlen_sig = {
+                    let mut sig = module.make_signature();
+                    sig.call_conv = CallConv::SystemV;
+                    sig.params.push(AbiParam::new(types::I64));
+                    sig.returns.push(AbiParam::new(types::I64));
+                    sig
+                };
+                let strlen_id = module
+                    .declare_function("strlen", Linkage::Import, &strlen_sig)
+                    .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                let strlen_ref = module.declare_func_in_func(strlen_id, builder.func);
+
+                let lhs_len = builder.ins().call(strlen_ref, &[lhs_ptr]);
+                let lhs_len = builder.inst_results(lhs_len)[0];
+                let rhs_len = builder.ins().call(strlen_ref, &[rhs_ptr]);
+                let rhs_len = builder.inst_results(rhs_len)[0];
+
+                let total_len = builder.ins().iadd(lhs_len, rhs_len);
+                let alloc_size = builder.ins().iadd_imm(total_len, 1);
+
+                let malloc_sig = {
+                    let mut sig = module.make_signature();
+                    sig.call_conv = CallConv::SystemV;
+                    sig.params.push(AbiParam::new(types::I64));
+                    sig.returns.push(AbiParam::new(types::I64));
+                    sig
+                };
+                let malloc_id = module
+                    .declare_function("malloc", Linkage::Import, &malloc_sig)
+                    .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                let malloc_ref = module.declare_func_in_func(malloc_id, builder.func);
+                let result_ptr = builder.ins().call(malloc_ref, &[alloc_size]);
+                let result_ptr = builder.inst_results(result_ptr)[0];
+
+                let memset_sig = {
+                    let mut sig = module.make_signature();
+                    sig.call_conv = CallConv::SystemV;
+                    sig.params.push(AbiParam::new(types::I64));
+                    sig.params.push(AbiParam::new(types::I32));
+                    sig.params.push(AbiParam::new(types::I64));
+                    sig.returns.push(AbiParam::new(types::I64));
+                    sig
+                };
+                let memset_id = module
+                    .declare_function("memset", Linkage::Import, &memset_sig)
+                    .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                let memset_ref = module.declare_func_in_func(memset_id, builder.func);
+                let zero_i32 = builder.ins().iconst(types::I32, 0);
+                builder
+                    .ins()
+                    .call(memset_ref, &[result_ptr, zero_i32, alloc_size]);
+
+                let strcpy_sig = {
+                    let mut sig = module.make_signature();
+                    sig.call_conv = CallConv::SystemV;
+                    sig.params.push(AbiParam::new(types::I64));
+                    sig.params.push(AbiParam::new(types::I64));
+                    sig.returns.push(AbiParam::new(types::I64));
+                    sig
+                };
+                let strcpy_id = module
+                    .declare_function("strcpy", Linkage::Import, &strcpy_sig)
+                    .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                let strcpy_ref = module.declare_func_in_func(strcpy_id, builder.func);
+                builder.ins().call(strcpy_ref, &[result_ptr, lhs_ptr]);
+
+                let strcat_sig = {
+                    let mut sig = module.make_signature();
+                    sig.call_conv = CallConv::SystemV;
+                    sig.params.push(AbiParam::new(types::I64));
+                    sig.params.push(AbiParam::new(types::I64));
+                    sig.returns.push(AbiParam::new(types::I64));
+                    sig
+                };
+                let strcat_id = module
+                    .declare_function("strcat", Linkage::Import, &strcat_sig)
+                    .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                let strcat_ref = module.declare_func_in_func(strcat_id, builder.func);
+                builder.ins().call(strcat_ref, &[result_ptr, rhs_ptr]);
+
+                Ok(result_ptr)
             }
             Expr::And(lhs, rhs) => {
                 let lhs_val = Self::compile_expr(
@@ -528,6 +1332,7 @@ impl CodeGen {
                     str_idx,
                     loop_stack,
                     type_map,
+                    structs,
                 )?;
                 let rhs_val = Self::compile_expr(
                     rhs,
@@ -540,6 +1345,7 @@ impl CodeGen {
                     str_idx,
                     loop_stack,
                     type_map,
+                    structs,
                 )?;
                 Ok(builder.ins().band(lhs_val, rhs_val))
             }
@@ -555,6 +1361,7 @@ impl CodeGen {
                     str_idx,
                     loop_stack,
                     type_map,
+                    structs,
                 )?;
                 let rhs_val = Self::compile_expr(
                     rhs,
@@ -567,6 +1374,7 @@ impl CodeGen {
                     str_idx,
                     loop_stack,
                     type_map,
+                    structs,
                 )?;
                 Ok(builder.ins().bor(lhs_val, rhs_val))
             }
@@ -582,6 +1390,7 @@ impl CodeGen {
                     str_idx,
                     loop_stack,
                     type_map,
+                    structs,
                 )?;
                 let one = builder.ins().iconst(types::I8, 1);
                 Ok(builder.ins().bxor(val, one))
@@ -598,6 +1407,7 @@ impl CodeGen {
                     str_idx,
                     loop_stack,
                     type_map,
+                    structs,
                 )?;
                 let var = Variable::from_u32(*idx);
                 *idx += 1;
@@ -623,6 +1433,7 @@ impl CodeGen {
                     str_idx,
                     loop_stack,
                     type_map,
+                    structs,
                 )?;
                 let var = Self::lookup_var(name, scope_stack)
                     .ok_or_else(|| CodeGenError::UndefinedVariable { name: name.clone() })?;
@@ -669,6 +1480,7 @@ impl CodeGen {
                             str_idx,
                             loop_stack,
                             type_map,
+                            structs,
                         )
                     })
                     .collect();
@@ -694,6 +1506,7 @@ impl CodeGen {
                     str_idx,
                     loop_stack,
                     type_map,
+                    structs,
                 )?;
                 builder.ins().return_(&[val]);
                 Ok(Value::from_u32(0))
@@ -710,6 +1523,7 @@ impl CodeGen {
                     str_idx,
                     loop_stack,
                     type_map,
+                    structs,
                 )?;
 
                 let then_has_return = Self::has_return(then_branch);
@@ -743,6 +1557,7 @@ impl CodeGen {
                     str_idx,
                     loop_stack,
                     type_map,
+                    structs,
                 )?;
                 scope_stack.pop();
                 type_stack.pop();
@@ -769,6 +1584,7 @@ impl CodeGen {
                         str_idx,
                         loop_stack,
                         type_map,
+                        structs,
                     )?;
                     scope_stack.pop();
                     type_stack.pop();
@@ -818,6 +1634,7 @@ impl CodeGen {
                     str_idx,
                     loop_stack,
                     type_map,
+                    structs,
                 )?;
                 let cond_i64 = builder.ins().uextend(types::I64, cond_val);
                 builder.ins().brif(cond_i64, loop_body, &[], loop_exit, &[]);
@@ -836,6 +1653,7 @@ impl CodeGen {
                     str_idx,
                     loop_stack,
                     type_map,
+                    structs,
                 )?;
                 scope_stack.pop();
                 type_stack.pop();
@@ -862,6 +1680,7 @@ impl CodeGen {
                     str_idx,
                     loop_stack,
                     type_map,
+                    structs,
                 )?;
                 let index_val = Self::compile_expr(
                     index,
@@ -874,6 +1693,7 @@ impl CodeGen {
                     str_idx,
                     loop_stack,
                     type_map,
+                    structs,
                 )?;
 
                 let offset = builder.ins().imul_imm(index_val, 8);
@@ -898,6 +1718,7 @@ impl CodeGen {
                         str_idx,
                         loop_stack,
                         type_map,
+                        structs,
                     )?;
                     let index_val = Self::compile_expr(
                         index,
@@ -910,6 +1731,7 @@ impl CodeGen {
                         str_idx,
                         loop_stack,
                         type_map,
+                        structs,
                     )?;
                     let value_val = Self::compile_expr(
                         value,
@@ -922,6 +1744,7 @@ impl CodeGen {
                         str_idx,
                         loop_stack,
                         type_map,
+                        structs,
                     )?;
 
                     let offset = builder.ins().imul_imm(index_val, 8);
@@ -1015,6 +1838,7 @@ impl CodeGen {
                     str_idx,
                     loop_stack,
                     type_map,
+                    structs,
                 )?;
 
                 let elem_size = match &elem_type {
@@ -1084,6 +1908,7 @@ impl CodeGen {
                     str_idx,
                     loop_stack,
                     type_map,
+                    structs,
                 )?;
                 let end_val = Self::compile_expr(
                     end,
@@ -1096,6 +1921,7 @@ impl CodeGen {
                     str_idx,
                     loop_stack,
                     type_map,
+                    structs,
                 )?;
 
                 let loop_var = Variable::from_u32(*idx);
@@ -1135,6 +1961,7 @@ impl CodeGen {
                     str_idx,
                     loop_stack,
                     type_map,
+                    structs,
                 )?;
 
                 scope_stack.pop();
@@ -1188,6 +2015,125 @@ impl CodeGen {
                 }
             }
             Expr::TypeDef => Ok(Value::from_u32(0)),
+            Expr::Struct(name, fields) => {
+                let _ = (name, fields);
+                Ok(Value::from_u32(0))
+            }
+            Expr::StructLiteral(name, field_values) => {
+                let struct_def = structs.get(name).ok_or_else(|| {
+                    CodeGenError::ModuleError(format!("Undefined struct type: {}", name))
+                })?;
+
+                let struct_size = struct_def.size;
+
+                let malloc_sig = {
+                    let mut sig = module.make_signature();
+                    sig.call_conv = CallConv::SystemV;
+                    sig.params.push(AbiParam::new(types::I64));
+                    sig.returns.push(AbiParam::new(types::I64));
+                    sig
+                };
+                let malloc_id = module
+                    .declare_function("malloc", Linkage::Import, &malloc_sig)
+                    .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                let malloc_ref = module.declare_func_in_func(malloc_id, builder.func);
+                let size_val = builder.ins().iconst(types::I64, struct_size);
+                let mem_ptr = builder.ins().call(malloc_ref, &[size_val]);
+                let mem_ptr = builder.inst_results(mem_ptr)[0];
+
+                for (field_name, field_expr) in field_values {
+                    let field_info = struct_def.fields.iter().find(|f| &f.name == field_name);
+                    if let Some(field) = field_info {
+                        let field_val = Self::compile_expr(
+                            field_expr,
+                            builder,
+                            scope_stack,
+                            type_stack,
+                            idx,
+                            func_signatures,
+                            module,
+                            str_idx,
+                            loop_stack,
+                            type_map,
+                            structs,
+                        )?;
+
+                        let field_ptr = builder.ins().iadd_imm(mem_ptr, field.offset);
+
+                        let field_ir_type = get_type(&field.ty, type_map);
+                        if field_ir_type == types::I8 {
+                            builder
+                                .ins()
+                                .store(ir::MemFlags::trusted(), field_val, field_ptr, 0);
+                        } else {
+                            builder
+                                .ins()
+                                .store(ir::MemFlags::trusted(), field_val, field_ptr, 0);
+                        }
+                    }
+                }
+
+                Ok(mem_ptr)
+            }
+            Expr::MemberAccess(obj, field_name) => {
+                let obj_ptr = Self::compile_expr(
+                    obj,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+
+                let struct_name = match &**obj {
+                    Expr::Var(name) => {
+                        let mut found_type = None;
+                        for scope in type_stack.iter().rev() {
+                            if let Some(ty) = scope.get(name) {
+                                found_type = Some(ty.clone());
+                                break;
+                            }
+                        }
+                        match found_type {
+                            Some(Type::Named(name)) => name,
+                            _ => {
+                                return Err(CodeGenError::ModuleError(
+                                    "Member access on non-struct type".to_string(),
+                                ));
+                            }
+                        }
+                    }
+                    _ => {
+                        return Err(CodeGenError::ModuleError(
+                            "Member access only supported on variables".to_string(),
+                        ));
+                    }
+                };
+
+                let struct_def = structs.get(&struct_name).ok_or_else(|| {
+                    CodeGenError::ModuleError(format!("Undefined struct type: {}", struct_name))
+                })?;
+
+                let field_info = struct_def.fields.iter().find(|f| &f.name == field_name);
+                if let Some(field) = field_info {
+                    let field_ptr = builder.ins().iadd_imm(obj_ptr, field.offset);
+                    let field_val =
+                        builder
+                            .ins()
+                            .load(types::I64, ir::MemFlags::trusted(), field_ptr, 0);
+                    Ok(field_val)
+                } else {
+                    Err(CodeGenError::ModuleError(format!(
+                        "Struct {} has no field {}",
+                        struct_name, field_name
+                    )))
+                }
+            }
             _ => Err(CodeGenError::UnexpectedExpression {
                 found: expr.clone(),
             }),

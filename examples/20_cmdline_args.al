@@ -8,11 +8,6 @@ fun main(argc: int, argv: arr[string]): int {
     // arg[0] = Executable file path
     println(argv[0])
     
-    for i in 1..argc {
-        print("Arg")
-        print(itoa(i))
-        print(": ")
-        println(argv[i])
-    }
+    for i in 1..argc println("Arg" + "itoa(i)" + ": " + argv[i])
     return 0
 }

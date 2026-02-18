@@ -1,6 +1,6 @@
 [package]
 name = "alc"
-version = "0.7.0"
+version = "0.7.5"
 edition = "2024"
 
 [dependencies]

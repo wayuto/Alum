@@ -34,6 +34,7 @@ impl std::error::Error for ParserError {}
 pub struct Parser<'a> {
     lex: Peekable<Lexer<'a>>,
     typedefs: HashMap<String, Type>,
+    structs: HashMap<String, Vec<(String, Type)>>,
 }
 
 impl<'a> Parser<'a> {
@@ -41,6 +42,7 @@ impl<'a> Parser<'a> {
         Self {
             lex: lex.peekable(),
             typedefs: HashMap::new(),
+            structs: HashMap::new(),
         }
     }
 
@@ -207,6 +209,58 @@ impl<'a> Parser<'a> {
                         Box::new(body),
                     ))
                 }
+                Ok(Token::STRUCT) => {
+                    self.next()?;
+                    let name = match self.next()? {
+                        Token::IDENT(s) => s,
+                        token => {
+                            return Err(ParserError::UnexpectedToken {
+                                expected: Some(Token::IDENT("STRUCT NAME".to_string())),
+                                found: token,
+                            });
+                        }
+                    };
+                    self.expect(Token::LBRACE)?;
+                    let mut fields = Vec::new();
+                    loop {
+                        match self.peek().cloned() {
+                            Some(Ok(Token::RBRACE)) => {
+                                self.next()?;
+                                break;
+                            }
+                            Some(Ok(Token::IDENT(field_name))) => {
+                                self.next()?;
+                                self.expect(Token::COLON)?;
+                                let field_type = self.parse_type()?;
+                                fields.push((field_name, field_type));
+                                match self.peek().cloned() {
+                                    Some(Ok(Token::COMMA)) => {
+                                        self.next()?;
+                                    }
+                                    Some(Ok(Token::RBRACE)) => {
+                                        self.next()?;
+                                        break;
+                                    }
+                                    _ => {
+                                        return Err(ParserError::UnexpectedToken {
+                                            expected: Some(Token::COMMA),
+                                            found: Token::EOF,
+                                        });
+                                    }
+                                }
+                            }
+                            _ => {
+                                return Err(ParserError::UnexpectedToken {
+                                    expected: Some(Token::IDENT("FIELD NAME".to_string())),
+                                    found: Token::EOF,
+                                });
+                            }
+                        }
+                    }
+                    self.structs.insert(name.clone(), fields.clone());
+                    Ok(Expr::Struct(name, fields))
+                }
+
                 Ok(_) => {
                     let expr = self.logical()?;
                     if let Some(Ok(Token::EQ)) = self.peek() {
@@ -485,6 +539,49 @@ impl<'a> Parser<'a> {
                 Ok(Token::IDENT(s)) => {
                     let name = s.clone();
                     self.next()?;
+
+                    if let Some(Ok(Token::LBRACE)) = self.peek() {
+                        if self.structs.contains_key(&name) {
+                            self.next()?;
+                            let mut fields = Vec::new();
+                            loop {
+                                match self.peek().cloned() {
+                                    Some(Ok(Token::RBRACE)) => {
+                                        self.next()?;
+                                        break;
+                                    }
+                                    Some(Ok(Token::IDENT(field_name))) => {
+                                        self.next()?;
+                                        self.expect(Token::COLON)?;
+                                        let field_value = self.expr()?;
+                                        fields.push((field_name, field_value));
+                                        match self.peek().cloned() {
+                                            Some(Ok(Token::COMMA)) => {
+                                                self.next()?;
+                                            }
+                                            Some(Ok(Token::RBRACE)) => {
+                                                self.next()?;
+                                                break;
+                                            }
+                                            _ => {
+                                                return Err(ParserError::UnexpectedToken {
+                                                    expected: Some(Token::COMMA),
+                                                    found: Token::EOF,
+                                                });
+                                            }
+                                        }
+                                    }
+                                    _ => {
+                                        return Err(ParserError::UnexpectedToken {
+                                            expected: Some(Token::IDENT("FIELD NAME".to_string())),
+                                            found: Token::EOF,
+                                        });
+                                    }
+                                }
+                            }
+                            return Ok(Expr::StructLiteral(name, fields));
+                        }
+                    }
 
                     if let Some(Ok(Token::EQ)) = self.peek() {
                         self.next()?;

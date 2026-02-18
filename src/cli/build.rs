@@ -1,4 +1,4 @@
-use crate::compiler::{codegen::CodeGen, lexer::Lexer, parser::Parser, preprocessor::Preprocessor};
+use crate::compiler::{checker::TypeChecker, codegen::CodeGen, lexer::Lexer, parser::Parser, preprocessor::Preprocessor};
 use std::fs;
 
 pub fn build(
@@ -36,7 +36,13 @@ pub fn build(
     }
     let lexer = Lexer::new(&processed);
     let mut parser = Parser::new(lexer);
-    let ast = parser.parse()?;
+    let mut ast = parser.parse()?;
+
+    if verbose {
+        eprintln!("Type checking...");
+    }
+    let checker = TypeChecker::new();
+    checker.check(&mut ast)?;
 
     if print_ast {
         println!("{:#?}", ast);

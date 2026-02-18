@@ -61,6 +61,7 @@ pub enum Token {
     STAR,
     SLASH,
     PERCENT,
+    DOT,
     DOTDOT,
     CEQ,
     NE,
@@ -96,6 +97,7 @@ pub enum Token {
     BREAK,
     CONTINUE,
     TYPEDEF,
+    STRUCT,
     TYPE(String),
     IDENT(String),
     EOF,
@@ -295,12 +297,7 @@ impl<'a> Lexer<'a> {
                     self.bump();
                     Token::DOTDOT
                 } else {
-                    return Err(LexerError::UnexpectedChar {
-                        expected: Some(".".to_string()),
-                        found: self.current.unwrap_or('\0'),
-                        line: self.line,
-                        col: self.col,
-                    });
+                    Token::DOT
                 }
             }
             '(' => {
@@ -451,6 +448,7 @@ impl<'a> Lexer<'a> {
                     "break" => Token::BREAK,
                     "continue" => Token::CONTINUE,
                     "typedef" => Token::TYPEDEF,
+                    "struct" => Token::STRUCT,
                     _ => Token::IDENT(ident),
                 }
             }
