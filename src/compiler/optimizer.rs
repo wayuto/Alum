@@ -19,12 +19,12 @@ impl Optimizer {
         for expr in &mut program.body {
             self.propagate_constants(expr, &mut HashMap::new());
         }
-        
+
         // 常量折叠
         for expr in &mut program.body {
             self.optimize_expr(expr);
         }
-        
+
         // 死代码消除
         for expr in &mut program.body {
             self.dce(expr);
@@ -94,15 +94,30 @@ impl Optimizer {
             _ => {
                 // 递归处理子表达式
                 match expr {
-                    Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r)
-                    | Expr::Mod(l, r) | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r)
-                    | Expr::Le(l, r) | Expr::Gt(l, r) | Expr::Ge(l, r) => {
+                    Expr::Add(l, r)
+                    | Expr::Sub(l, r)
+                    | Expr::Mul(l, r)
+                    | Expr::Div(l, r)
+                    | Expr::Mod(l, r)
+                    | Expr::Eq(l, r)
+                    | Expr::Ne(l, r)
+                    | Expr::Lt(l, r)
+                    | Expr::Le(l, r)
+                    | Expr::Gt(l, r)
+                    | Expr::Ge(l, r) => {
                         self.propagate_constants(l, consts);
                         self.propagate_constants(r, consts);
                     }
-                    Expr::FAdd(l, r) | Expr::FSub(l, r) | Expr::FMul(l, r) | Expr::FDiv(l, r)
-                    | Expr::FEq(l, r) | Expr::FNe(l, r) | Expr::FLt(l, r) | Expr::FLe(l, r)
-                    | Expr::FGt(l, r) | Expr::FGe(l, r) => {
+                    Expr::FAdd(l, r)
+                    | Expr::FSub(l, r)
+                    | Expr::FMul(l, r)
+                    | Expr::FDiv(l, r)
+                    | Expr::FEq(l, r)
+                    | Expr::FNe(l, r)
+                    | Expr::FLt(l, r)
+                    | Expr::FLe(l, r)
+                    | Expr::FGt(l, r)
+                    | Expr::FGe(l, r) => {
                         self.propagate_constants(l, consts);
                         self.propagate_constants(r, consts);
                     }
@@ -145,14 +160,6 @@ impl Optimizer {
         }
     }
 
-    fn is_constant(&self, expr: &Expr) -> bool {
-        match expr {
-            Expr::Int(_) | Expr::Float(_) | Expr::Bool(_) | Expr::String(_) => true,
-            Expr::Nil => true,
-            _ => false,
-        }
-    }
-
     fn can_propagate(&self, expr: &Expr) -> bool {
         match expr {
             Expr::Int(_) | Expr::Float(_) | Expr::Bool(_) | Expr::String(_) => true,
@@ -160,8 +167,9 @@ impl Optimizer {
                 self.can_propagate(l) && self.can_propagate(r)
             }
             Expr::Div(l, r) => {
-                self.can_propagate(l) && self.can_propagate(r) && 
-                !matches!(r.as_ref(), Expr::Int(0) | Expr::Float(0.0))
+                self.can_propagate(l)
+                    && self.can_propagate(r)
+                    && !matches!(r.as_ref(), Expr::Int(0) | Expr::Float(0.0))
             }
             _ => false,
         }
