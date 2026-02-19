@@ -1,22 +1,20 @@
-# Alum 编程语言项目 - Agent 上下文文档
+# Alum 编程语言项目 - AI Agent 上下文
 
 ## 项目概述
 
-Alum 是一个现代化的系统级编程语言，设计简洁且高性能。它具有清晰的语法、强静态类型系统，并使用 Cranelift 代码生成器编译为本地机器代码。项目由三个主要组件组成：
+Alum 是一个现代系统级编程语言，专为简洁性和高性能而设计。它具有清晰的语法、强静态类型系统，并使用 Cranelift 代码生成器编译为原生机器代码。
 
-1. **alc (编译器)** - Alum 语言编译器，负责将 `.al` 源代码编译为可执行文件
-2. **alum-std (标准库)** - 用 Rust `no_std` 编写的标准库，提供 I/O、数学、字符串、数组、内存管理和类型转换功能
-3. **almk (构建工具)** - 项目管理工具，支持依赖管理、混合 C/Alum 项目和自动化构建
+### 核心特性
 
-### 核心技术栈
+- **简洁语法**：受现代语言启发的清晰、可读语法
+- **静态类型**：带有显式类型注解的类型安全
+- **原生编译**：通过 Cranelift 直接编译为机器代码
+- **快速编译**：高效的编译流水线
+- **FFI 支持**：与 C 的互操作性，用于底层操作
+- **构建工具**：集成构建系统 (almk) 用于项目管理
+- **优化器**：内置优化，包括常量折叠、死代码消除和未使用代码移除
 
-- **语言**: Rust (Edition 2024)
-- **代码生成**: Cranelift 0.127.2
-- **对象文件处理**: object crate
-- **CLI 解析**: clap 4.5.54
-- **系统调用**: 直接 Linux syscall
-
-### 项目架构
+### 项目结构
 
 ```
 Alum/
@@ -24,178 +22,238 @@ Alum/
 │   ├── main.rs               # 编译器入口点
 │   ├── cli/                  # CLI 参数解析和命令
 │   │   ├── args.rs           # 命令行参数定义
-│   │   ├── build.rs          # 编译命令实现
-│   │   ├── link.rs           # 链接命令实现
-│   │   └── mod.rs
-│   └── compiler/             # 编译器核心组件
-│       ├── lexer.rs          # 词法分析器
-│       ├── parser.rs         # 语法分析器
+│   │   ├── build.rs          # 构建逻辑
+│   │   ├── link.rs           # 链接逻辑
+│   │   └── mod.rs            # CLI 模块
+│   └── compiler/             # 编译器组件
 │       ├── ast.rs            # 抽象语法树定义
+│       ├── checker.rs        # 类型检查器
 │       ├── codegen.rs        # 代码生成器 (Cranelift)
+│       ├── lexer.rs          # 词法分析器
+│       ├── optimizer.rs      # 优化器
+│       ├── parser.rs         # 语法分析器
 │       ├── preprocessor.rs   # 预处理器
-│       └── mod.rs
-├── alum-std/                 # 标准库 (Rust no_std)
+│       └── mod.rs            # 编译器模块
+├── alum-std/                 # 标准库
 │   ├── alum/                 # 标准库头文件 (.al 文件)
-│   │   ├── io.al             # I/O 操作
-│   │   ├── math.al           # 数学运算
-│   │   ├── string.al         # 字符串操作
-│   │   ├── array.al          # 数组工具
-│   │   ├── memory.al         # 内存管理
 │   │   ├── convert.al        # 类型转换
-│   │   └── lib.al            # 主库文件
-│   └── src/                  # 标准库实现 (Rust)
-│       ├── lib.rs            # 库入口，包含 syscall 包装
-│       ├── io.rs             # I/O 实现
-│       ├── math.rs           # 数学函数实现
-│       ├── string.rs         # 字符串函数实现
-│       ├── array.rs          # 数组函数实现
-│       ├── memory.rs         # 内存函数实现
-│       └── convert.rs        # 类型转换实现
+│   │   ├── io.al             # 输入/输出
+│   │   ├── lib.al            # 主库 (系统调用)
+│   │   ├── math.al           # 数学运算
+│   │   ├── memory.al         # 内存管理
+│   │   └── string.al         # 字符串操作
+│   ├── src/                  # 标准库实现 (Rust no_std)
+│   │   ├── convert.rs
+│   │   ├── io.rs
+│   │   ├── lib.rs
+│   │   ├── math.rs
+│   │   ├── memory.rs
+│   │   └── string.rs
+│   └── Cargo.toml            # 标准库依赖
 ├── alum-make/                # 构建工具 (almk)
-│   └── src/
-│       ├── main.rs           # 工具入口
-│       ├── command.rs        # 命令处理
-│       ├── config.rs         # 配置解析 (Alumake.toml)
-│       ├── build.rs          # 构建逻辑
-│       ├── new.rs            # 项目创建
-│       ├── sync.rs           # 依赖同步
-│       └── dependencies.rs   # 依赖管理
+│   ├── src/                  # 构建工具源代码
+│   │   ├── main.rs           # 构建工具入口
+│   │   ├── command.rs        # 命令处理
+│   │   ├── config.rs         # 配置管理
+│   │   ├── dependencies.rs   # 依赖管理
+│   │   ├── new.rs            # 新项目创建
+│   │   ├── sync.rs           # 依赖同步
+│   │   └── build.rs          # 构建逻辑
+│   └── Cargo.toml            # 构建工具依赖
 ├── alum-vscode/              # VS Code 扩展
-│   ├── syntaxes/alum.tmLanguage.json
-│   └── language-configuration.json
-├── examples/                 # 示例代码
-└── Cargo.toml                # 编译器依赖
+│   ├── package.json          # 扩展配置
+│   ├── language-configuration.json
+│   └── syntaxes/             # 语法高亮
+│       └── alum.tmLanguage.json
+├── examples/                 # 示例程序
+│   ├── 01_hello.al           # Hello World
+│   ├── 02_variables.al       # 变量示例
+│   ├── 03_functions.al       # 函数示例
+│   ├── 04_control_flow.al    # 控制流
+│   ├── 05_arrays.al          # 数组操作
+│   ├── 06_math_operations.al # 数学运算
+│   ├── 07_string_operations.al # 字符串操作
+│   ├── 08_type_conversion.al # 类型转换
+│   ├── 09_user_input.al      # 用户输入
+│   ├── 10_loops_and_sum.al   # 循环和求和
+│   ├── 11_fibonacci.al       # 斐波那契数列
+│   ├── 12_array_search.al    # 数组搜索
+│   ├── 13_array_sort.al      # 数组排序
+│   ├── 14_factorial_comparison.al # 阶乘比较
+│   ├── 15_mixed_c_alum/      # C/Alum 混合编程示例
+│   │   ├── Alumake.toml      # 项目配置
+│   │   ├── src/
+│   │   │   ├── main.al       # Alum 主程序
+│   │   │   └── helper.c      # C 辅助函数
+│   │   └── include/
+│   │       ├── helper.al     # Alum 外部声明
+│   │       └── helper.h      # C 头文件
+│   ├── 19_c_array_compatibility/ # C 数组兼容性示例
+│   ├── 20_cmdline_args.al    # 命令行参数
+│   └── 21_struct.al          # 结构体
+├── Cargo.toml                # 编译器依赖
+├── Cargo.lock                # 依赖锁定文件
+├── install.sh                # 安装脚本
+└── README.md                 # 项目文档
 ```
 
-## 编译管线
+## 技术栈
 
-1. **预处理**: 处理 `$import`、`$define`、`$ifdef`、`$ifndef`、`$endif` 指令
-2. **词法分析**: 将源代码标记化为 tokens
-3. **语法分析**: 构建抽象语法树 (AST)
-4. **代码生成**: 使用 Cranelift 将 AST 编译为机器代码
-5. **链接**: 将目标文件与标准库链接
+### 编译器 (alc)
+- **语言**: Rust (edition 2024)
+- **关键依赖**:
+  - `clap` 4.5.54 - CLI 参数解析
+  - `cranelift` 0.127.2 - 代码生成后端
+  - `cranelift-module` 0.127.2 - Cranelift 模块接口
+  - `cranelift-object` 0.127.2 - 对象文件生成
+  - `object` 0.36 - 对象文件读写
 
-## Alum 语言特性
+### 标准库 (alum-std)
+- **语言**: Rust (edition 2024, no_std)
+- **构建类型**: 静态库 (staticlib)
+- **编译选项**:
+  - release: `panic = "abort"`, `opt-level = 3`
+  - dev: `panic = "abort"`
 
-### 类型系统
+### 构建工具 (almk)
+- **语言**: Rust (edition 2024)
+- **关键依赖**:
+  - `clap` 4.5.54 - CLI 参数解析
+  - `toml` 0.9.11 - 配置文件解析
+  - `serde` 1.0.228 - 序列化/反序列化
+  - `git2` 0.20.3 - Git 仓库操作
+  - `walkdir` 2.5.0 - 目录遍历
+  - `zip` 7.2.0 - ZIP 文件处理
+  - `ureq` 2.9.6 - HTTP 客户端
 
-Alum 是静态类型语言，所有变量和函数必须在编译时声明类型。
+## 编译流水线
 
-**支持的类型**:
-- `int`: 有符号整数 (isize)
-- `float`: 64位浮点数 (f64)
-- `bool`: 布尔值
-- `string`: 字符串类型
-- `void`: 无返回类型
-- `arr[T]`: 类型 T 的数组
-- `typedef`: 类型别名 (新增特性)
-
-### 语法示例
-
-```al
-// 导入模块
-$import "io.al"
-$import "convert.al"
-
-// 类型别名
-typedef MyInt = int
-typedef MyArray = arr[int]
-
-// 函数定义
-fun add(a: int, b: int): int {
-    return a + b;
-}
-
-// 外部函数 (FFI)
-extern c_add(int, int): int
-extern printf(string): int
-
-// 主函数
-fun main(): int {
-    let x: MyInt = 42;
-    let arr: MyArray = [1, 2, 3, 4, 5];
-    
-    if x > 0 {
-        println("Positive");
-    }
-    
-    for i in 0..10 {
-        println(itoa(i));
-    }
-    
-    return 0;
-}
 ```
-
-### 控制流
-
-- `if-else`: 条件语句
-- `while`: while 循环
-- `for`: 范围循环 (`for i in 0..10`)
-- `break`: 跳出循环
-- `continue`: 继续下一次迭代
+源代码 (.al)
+        │
+        ▼
+┌───────────────┐
+│  预处理器     │  →  处理 $import, $define, $ifdef, $ifndef, $endif
+└───────────────┘
+        │
+        ▼
+┌───────────────┐
+│  词法分析器   │  →  将源代码标记化为 token 流
+└───────────────┘
+        │
+        ▼
+┌───────────────┐
+│  语法分析器   │  →  从 token 构建 AST
+└───────────────┘
+        │
+        ▼
+┌───────────────┐
+│  类型检查器   │  →  验证类型安全和语义规则
+└───────────────┘
+        │
+        ▼
+┌───────────────┐
+│   优化器      │  →  常量折叠、死代码消除、未使用代码移除
+└───────────────┘
+        │
+        ▼
+┌───────────────┐
+│  代码生成器   │  →  使用 Cranelift 编译 AST 为机器代码
+└───────────────┘
+        │
+        ▼
+  目标文件 (.o)
+        │
+        ▼
+┌───────────────┐
+│   链接器      │  →  将目标文件与标准库链接
+└───────────────┘
+        │
+        ▼
+  可执行文件
+```
 
 ## 构建和运行
 
-### 安装整个项目
+### 构建编译器
 
 ```bash
-./install.sh
-```
-
-此脚本会：
-1. 构建并安装 `alc` 编译器
-2. 构建标准库
-3. 将 `libalum_std.a` 安装到 `/usr/local/lib/`
-4. 将标准库头文件安装到 `/usr/local/include/alum/`
-5. 安装构建工具 `almk`
-
-### 单独构建编译器
-
-```bash
+# 从源代码构建
 cargo build --release
+
+# 编译后的二进制文件位于: target/release/alc
 ```
 
-### 单独构建标准库
+### 构建标准库
 
 ```bash
 cd alum-std
 cargo build --release
+
+# 编译后的库文件位于: target/release/libalum_std.a
 ```
 
-### 单独构建构建工具
+### 构建构建工具
 
 ```bash
 cd alum-make
 cargo build --release
+
+# 编译后的二进制文件位于: target/release/almk
 ```
 
-### 编译和运行 Alum 程序
+### 安装
 
 ```bash
-# 编译为可执行文件
+# 使用安装脚本
+./install.sh
+
+# 这将:
+# 1. 构建并安装 alc 编译器
+# 2. 构建标准库
+# 3. 安装 libalum_std.a 到 /usr/local/lib/
+# 4. 安装标准库头文件到 /usr/local/include/alum/
+# 5. 安装构建工具 almk
+```
+
+### 编译 Alum 程序
+
+```bash
+# 基本编译
+alc program.al
+
+# 编译到可执行文件
 alc program.al -o program
 
-# 仅编译为目标文件
+# 仅编译 (不链接)
 alc program.al -c -o program.o
-
-# 链接目标文件
-alc program.o -o program
 
 # 编译并立即运行
 alc -r program.al
 
-# 预处理输出
-alc -E program.al
+# 添加包含目录
+alc program.al -I ./include
+
+# 库模式 (保留所有函数)
+alc lib.al -o lib.o --lib
+
+# 链接目标文件
+alc program.o -o program
+
+# 不使用标准库
+alc program.al --nostdlib
 
 # 输出 AST
 alc program.al --ast
 
-# 包含自定义目录
-alc program.al -I ./include
+# 仅预处理
+alc program.al -E
+
+# 详细输出
+alc program.al -v
 ```
 
-### 使用 almk 构建项目
+### 使用构建工具
 
 ```bash
 # 创建新项目
@@ -207,7 +265,7 @@ almk build
 # 运行项目
 almk run
 
-# 清理
+# 清理构建文件
 almk clean
 
 # 添加依赖
@@ -217,9 +275,160 @@ almk add util -u https://www.website.com/util.zip
 almk rm util
 ```
 
+## 语言特性
+
+### 支持的类型
+
+- `int`: 有符号整数 (isize)
+- `float`: 64 位浮点数 (f64)
+- `bool`: 布尔值
+- `string`: 字符串类型
+- `void`: 无返回类型
+- `arr[T]`: T 类型的数组
+
+### 基本语法
+
+```al
+// 导入模块
+$import "io.al"
+$import "convert.al"
+
+// 变量声明
+let name: string = "Alum"
+let count: int = 42
+let pi: float = 3.14159
+let is_valid: bool = true
+
+// 函数定义
+fun add(a: int, b: int): int {
+    return a + b
+}
+
+// 外部函数声明 (FFI)
+extern c_add(int, int): int
+extern printf(string): int
+
+// 控制流
+if x > 0 {
+    println("Positive")
+}
+
+while i < 10 {
+    i = i + 1
+}
+
+for i in 0..10 {
+    println(itoa(i))
+}
+
+// 数组
+let numbers: arr[int] = [1, 2, 3, 4, 5]
+let buffer: arr[int] = [int; 100]
+
+// 结构体
+struct Point {
+    x: int,
+    y: int
+}
+
+fun main(): int {
+    let p: Point = Point {
+        x: 10,
+        y: 20
+    }
+    return 0
+}
+
+// 预处理器指令
+$define PI 3.14159
+$ifndef ALUM_LIB
+$define ALUM_LIB 1
+$endif
+```
+
+### FFI (Foreign Function Interface)
+
+Alum 支持与 C 语言的互操作性：
+
+```al
+// 在 Alum 中声明外部 C 函数
+extern c_add(int, int): int
+extern printf(string): int
+
+fun main(): int {
+    let result: int = c_add(10, 20);
+    printf(itoa(result));
+    return 0;
+}
+```
+
+对于混合 C/Alum 项目，使用 almk 构建工具可以自动处理 C 和 Alum 文件的编译和链接。
+
+## 标准库模块
+
+### I/O 模块 (`io.al`)
+
+```al
+extern write(int, string, int): int
+extern read(int, string, int): int
+extern print(string): int
+extern println(string): int
+extern input(string): string
+extern fopen(string, int, int): int
+extern fclose(int): int
+extern fread(int): string
+extern fwrite(int, string, int): int
+extern lseek(int, int, int): int
+```
+
+### 数学模块 (`math.al`)
+
+```al
+extern abs(int): int
+extern sqrt(int): int
+extern max(int, int): int
+extern min(int, int): int
+extern pow(int, int): int
+extern fact(int): int
+```
+
+### 字符串模块 (`string.al`)
+
+```al
+extern strlen(string): int
+extern strcpy(string, string): string
+extern strcat(string, string): string
+extern memcpy(string, string, int): string
+extern memset(string, int, int): string
+extern bcmp(string, string, int): int
+extern memcmp(string, string, int): int
+```
+
+### 内存模块 (`memory.al`)
+
+```al
+extern malloc(int): string
+```
+
+### 转换模块 (`convert.al`)
+
+```al
+extern itoa(int): string
+extern atoi(string): int
+extern atof(string): float
+extern ftoa(float): string
+```
+
+### 主库 (`lib.al`)
+
+```al
+extern syscall(int, int, int, int): int
+extern exit(int): void
+```
+
 ## Alumake.toml 配置
 
-标准项目配置：
+### 基本项目配置
 
 ```toml
 [package]
@@ -234,12 +443,14 @@ linker = "alc"
 alc = "alc"
 ```
 
-混合 C/Alum 项目配置：
+### 混合 C/Alum 项目配置
 
 ```toml
 [package]
 name = "mixed_project"
 version = "0.1.0"
+author = "Your Name"
+license = "MIT"
 language = "mixed"
 
 [build]
@@ -247,171 +458,151 @@ linker = "alc"
 cc = "cc"
 alc = "alc"
 cflags = "-Wall -O2"
+alflags = ""
 includes = ["./include"]
 nostdlib = true
 ```
 
+### 依赖配置
+
+```toml
+# ZIP 依赖
+[dependencies.dep]
+url = "https://www.website.com/dep.zip"
+git = false
+
+# Git 依赖
+[dependencies.dep]
+url = "https://www.website.com/dep.git"
+git = true
+tag = "v1.0"
+
+# 本地依赖
+[dependencies.dep]
+local = "/path/to/dep"
+git = false
+```
+
 ## 开发约定
-
-### 编译器代码结构
-
-- **ast.rs**: 定义 AST 节点类型 (Program, Expr, Type)
-- **lexer.rs**: 词法分析器，将源代码转换为 Token 流
-- **parser.rs**: 语法分析器，将 Token 流转换为 AST
-- **codegen.rs**: 代码生成器，使用 Cranelift 生成机器码
-- **preprocessor.rs**: 预处理器，处理 import 和宏指令
-
-### 标准库实现约定
-
-- 使用 `#![no_std]` 和 `#![no_main]`
-- 直接使用 Linux syscall 实现系统调用
-- 所有外部函数通过 `extern "C"` 声明
-- 使用 `asm!` 宏进行内联汇编
-- Panic 处理器使用 `ud2` 指令
 
 ### 代码风格
 
-- 使用 Rust 2024 edition
-- 函数和变量使用 snake_case
-- 类型使用 PascalCase
-- Alum 语法遵循 C 风格但更简洁
+- **Rust 代码**: 遵循 Rust 官方代码风格 (使用 `rustfmt`)
+- **Alum 代码**: 
+  - 使用 4 空格缩进
+  - 函数和变量名使用蛇形命名法 (snake_case)
+  - 类型名使用帕斯卡命名法 (PascalCase)
+  - 使用显式类型注解
+
+### 提交信息
+
+从 git log 中观察到的提交信息风格：
+- 使用简短、描述性的提交信息
+- 常见前缀: `feat:`, `refact:`, `dev:`, `fix:`
+- 示例:
+  - `refact: dce`
+  - `feat: optimizer`
+  - `dev: optimizer: dce, unused code removal`
 
 ### 测试
 
-当前项目没有显式的测试目录。测试应通过：
-1. 编译器自举测试
-2. examples/ 目录中的示例程序
-3. 标准库的集成测试
+项目当前没有明确的测试框架配置。在添加测试时，应考虑：
+- 对于 Rust 代码: 使用 Rust 内置的测试框架
+- 对于 Alum 代码: 创建测试示例并验证编译和执行
 
-### 添加新功能
+### 编译器组件开发
 
-当添加新语言特性时，需要修改以下文件：
+当修改编译器组件时：
+1. 确保理解编译流水线的各个阶段
+2. 保持组件之间的接口稳定
+3. 在 `src/compiler/mod.rs` 中正确导出模块
+4. 验证更改不会破坏现有示例
 
-1. **AST 定义** (`src/compiler/ast.rs`): 添加新的 Expr 或 Type 变体
-2. **词法分析器** (`src/compiler/lexer.rs`): 如果需要新的 Token 类型
-3. **语法分析器** (`src/compiler/parser.rs`): 添加解析逻辑
-4. **代码生成器** (`src/compiler/codegen.rs`): 实现代码生成逻辑
-5. **CLI 参数** (`src/cli/args.rs`): 如果需要新的命令行选项
-6. **示例代码** (`examples/`): 添加示例展示新特性
+### 优化器开发
 
-### 标准库扩展
+优化器位于 `src/compiler/optimizer.rs`，当前支持：
+- 常量折叠 (Constant Folding)
+- 死代码消除 (Dead Code Elimination)
+- 未使用代码移除 (Unused Code Removal)
 
-添加新的标准库函数需要：
+添加新优化时：
+- 保持与现有优化流程的兼容性
+- 确保优化不改变程序语义
+- 测试优化对编译时间和生成代码质量的影响
 
-1. 在 `alum-std/alum/` 中添加 `.al` 头文件声明
-2. 在 `alum-std/src/` 中添加对应的 Rust 实现
-3. 在 `alum-std/src/lib.rs` 中添加模块声明
-4. 重新构建标准库并安装
+## CLI 参数参考
 
-## 常见任务
+```
+alc [OPTIONS] <INPUT>
 
-### 修复编译错误
+参数:
+  <INPUT>...    输入文件 (.al 源文件或 .o/.obj 目标文件)
 
-1. 识别错误发生的阶段（词法、语法、代码生成）
-2. 检查对应的源文件（lexer.rs、parser.rs、codegen.rs）
-3. 使用 `-v` 或 `--verbose` 标志获取详细输出
-4. 使用 `--ast` 检查 AST 是否正确
-
-### 添加新的运算符
-
-1. 在 `lexer.rs` 中添加 Token 定义
-2. 在 `parser.rs` 中添加解析优先级和规则
-3. 在 `ast.rs` 中添加对应的 Expr 变体
-4. 在 `codegen.rs` 中实现代码生成
-
-### 添加新的控制流语句
-
-1. 在 `ast.rs` 中添加新的 Expr 变体
-2. 在 `parser.rs` 中添加解析逻辑
-3. 在 `codegen.rs` 中实现基本的块和控制流生成
-
-### 调试代码生成问题
-
-- 使用 `alc --ast` 检查 AST 结构
-- 使用 `-v` 标志查看详细编译过程
-- 检查 Cranelift IR 输出（如果启用）
-- 验证类型推断是否正确
-
-## 依赖管理
-
-almk 支持三种依赖来源：
-
-1. **Git 仓库**:
-   ```toml
-   [dependencies.dep]
-   url = "https://www.website.com/dep.git"
-   git = true
-   tag = "v1.0"
-   ```
-
-2. **ZIP 文件**:
-   ```toml
-   [dependencies.dep]
-   url = "https://www.website.com/dep.zip"
-   git = false
-   ```
-
-3. **本地路径**:
-   ```toml
-   [dependencies.dep]
-   local = "/path/to/dep"
-   git = false
-   ```
+选项:
+  -o, --output <FILE>       输出文件名
+  -c, --compile-only        仅编译，不链接
+  -r, --run                 编译并立即运行
+  -E                        仅预处理；不编译、汇编或链接
+  --ast                     输出 AST 表示
+  -I <DIR>                  添加包含目录 (可多次使用)
+  --nostdlib                不链接标准库
+  --lib                     库模式 - 保留所有函数 (用于构建库)
+  -v, --verbose             详细输出
+  -h, --help                显示帮助
+  -V, --version             显示版本
+```
 
 ## 当前开发状态
 
-根据 git 历史，最近的工作包括：
-- 添加 `break` 和 `continue` 语句支持
-- 更新 Alumake.toml 配置
-- 添加 GPL-3.0 许可证
-- 修复 alum-make 从 gitlink 转换为常规目录
+根据 git log，最近的开发工作集中在：
+- 优化器的实现和完善
+- 死代码消除 (DCE) 功能
+- 未使用代码移除
+- 代码重构
 
-当前分支：`dev`
-最近提交：`39c35f6 feat: break && continue`
+## 常见任务
 
-## 重要提示
+### 添加新的语言特性
 
-1. **系统依赖**: 标准库直接使用 Linux syscall，仅支持 Linux 平台
-2. **标准库安装**: 需要 sudo 权限将库文件安装到 `/usr/local/lib/`
-3. **FFI 调用**: 外部函数需要使用 `extern` 关键字声明
-4. **数组访问**: 数组索引从 0 开始
-5. **类型注解**: 所有变量和函数必须显式声明类型
-6. **预处理器**: `$import` 指令用于导入标准库模块
-7. **内存管理**: 使用 `malloc` 和指针进行手动内存管理
+1. 在 `src/compiler/lexer.rs` 中添加词法规则
+2. 在 `src/compiler/parser.rs` 中添加语法规则
+3. 在 `src/compiler/ast.rs` 中更新 AST 定义
+4. 在 `src/compiler/checker.rs` 中添加类型检查
+5. 在 `src/compiler/codegen.rs` 中添加代码生成逻辑
+6. 更新文档和示例
 
-## 故障排除
+### 添加标准库函数
 
-### 编译器未找到
+1. 在 `alum-std/alum/` 中添加 `.al` 头文件声明
+2. 在 `alum-std/src/` 中添加 Rust 实现
+3. 重新构建标准库: `cd alum-std && cargo build --release`
+4. 安装更新后的标准库
 
-```bash
-# 确保编译器已安装
-which alc
+### 修复编译器 bug
 
-# 如果未找到，重新安装
-./install.sh
-```
+1. 识别 bug 发生的编译阶段
+2. 使用 `--ast` 或 `-E` 标志进行调试
+3. 使用 `-v` 标志获取详细输出
+4. 修复相应组件代码
+5. 验证所有示例程序仍能正常编译
 
-### 标准库链接错误
+## 依赖管理
 
-```bash
-# 检查标准库是否安装
-ls /usr/local/lib/libalum_std.a
+### 编译器依赖
 
-# 如果未找到，重新安装标准库
-cd alum-std
-cargo build --release
-sudo cp target/release/libalum_std.a /usr/local/lib/
-```
+- Rust 2024 edition
+- Cranelift 0.127.2
+- object 0.36
 
-### 链接器错误
+### 构建工具依赖
 
-- 检查是否使用了 `--nostdlib` 标志
-- 验证标准库路径是否正确
-- 对于混合项目，确保 `nostdlib = true` 在 Alumake.toml 中设置
+- Rust 2024 edition
+- clap, toml, serde 等常用 Rust 库
 
-## 参考资源
+### 外部依赖
 
-- 主 README: `/workspaces/Alum/README.md`
-- 标准库文档: `/workspaces/Alum/alum-std/README.md`
-- 构建工具文档: `/workspaces/Alum/alum-make/README.md`
-- 示例代码: `/workspaces/Alum/examples/`
+- 无运行时依赖（标准库在编译时静态链接）
+
+## 许可证
+
+见 LICENSE 文件获取详细信息。

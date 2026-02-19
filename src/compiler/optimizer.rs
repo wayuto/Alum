@@ -79,12 +79,8 @@ impl Optimizer {
                 let mut body_consts = consts.clone();
                 self.propagate_constants(body, &mut body_consts);
             }
-            Expr::FuncDecl(_, params, _, body) => {
+            Expr::FuncDecl(_, _params, _, body) => {
                 let mut func_consts = HashMap::new();
-
-                for (param_name, _) in params {
-                    func_consts.insert(param_name.clone(), Expr::Nil);
-                }
                 self.propagate_constants(body, &mut func_consts);
             }
             _ => match expr {
@@ -569,6 +565,9 @@ impl Optimizer {
                     used.insert(name.clone());
                 }
                 for arg in args {
+                    if let Expr::Var(func_name) = arg {
+                        used.insert(func_name.clone());
+                    }
                     self.collect_func_usage(arg, used);
                 }
             }
@@ -587,12 +586,17 @@ impl Optimizer {
                     self.collect_func_usage(e, used);
                 }
             }
-            Expr::VarDecl(_, _, v)
-            | Expr::VarAssign(_, v)
-            | Expr::Return(v)
-            | Expr::Not(v)
-            | Expr::ArrayFill(_, v) => {
+            Expr::VarDecl(_, _, v) => {
                 self.collect_func_usage(v, used);
+                if let Expr::Var(func_name) = v.as_ref() {
+                    used.insert(func_name.clone());
+                }
+            }
+            Expr::VarAssign(_, v) | Expr::Return(v) | Expr::Not(v) | Expr::ArrayFill(_, v) => {
+                self.collect_func_usage(v, used);
+                if let Expr::Var(func_name) = v.as_ref() {
+                    used.insert(func_name.clone());
+                }
             }
             Expr::Add(l, r)
             | Expr::Sub(l, r)

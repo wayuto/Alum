@@ -9,6 +9,7 @@ pub struct Program {
 pub enum Type {
     Named(String),
     Array(Box<Type>),
+    Function(Vec<Box<Type>>, Box<Type>),
 }
 
 impl fmt::Display for Type {
@@ -16,6 +17,10 @@ impl fmt::Display for Type {
         match self {
             Type::Named(name) => write!(f, "{}", name),
             Type::Array(inner) => write!(f, "arr[{}]", inner),
+            Type::Function(params, ret) => {
+                let param_str: Vec<String> = params.iter().map(|p| p.to_string()).collect();
+                write!(f, "{}({})", ret, param_str.join(", "))
+            }
         }
     }
 }

@@ -714,8 +714,46 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_type(&mut self) -> Result<Type, ParserError> {
-        match self.next()? {
-            Token::TYPE(t) => Ok(Type::Named(t)),
+        let first_token = self.next()?;
+
+        match first_token {
+            Token::TYPE(t) => {
+                if let Some(Ok(Token::LPAREN)) = self.peek() {
+                    let mut params = Vec::new();
+                    self.expect(Token::LPAREN)?;
+                    loop {
+                        match self.peek() {
+                            Some(Ok(Token::RPAREN)) => {
+                                self.next()?;
+                                break;
+                            }
+                            Some(Ok(_)) => {
+                                params.push(Box::new(self.parse_type()?));
+                                match self.peek() {
+                                    Some(Ok(Token::COMMA)) => {
+                                        self.next()?;
+                                    }
+                                    Some(Ok(Token::RPAREN)) => {
+                                        self.next()?;
+                                        break;
+                                    }
+                                    _ => {
+                                        return Err(ParserError::UnexpectedToken {
+                                            expected: Some(Token::COMMA),
+                                            found: Token::EOF,
+                                        });
+                                    }
+                                }
+                            }
+                            _ => break,
+                        }
+                    }
+
+                    return Ok(Type::Function(params, Box::new(Type::Named(t))));
+                }
+
+                Ok(Type::Named(t))
+            }
             Token::IDENT(s) if s == "arr" => {
                 self.expect(Token::LBRACKET)?;
                 let inner_type = self.parse_type()?;

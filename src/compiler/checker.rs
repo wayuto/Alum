@@ -9,6 +9,7 @@ pub enum CheckerError {
         context: String,
     },
     UndefinedVariable(String),
+    #[allow(dead_code)]
     UndefinedFunction(String),
     UndefinedStruct(String),
     UndefinedField {
@@ -164,6 +165,13 @@ impl TypeChecker {
                 }
             }
             Type::Array(inner) => Type::Array(Box::new(self.resolve_type(inner))),
+            Type::Function(params, ret) => Type::Function(
+                params
+                    .iter()
+                    .map(|p| Box::new(self.resolve_type(p)))
+                    .collect(),
+                Box::new(self.resolve_type(ret)),
+            ),
         }
     }
 
@@ -253,9 +261,20 @@ impl TypeChecker {
             Expr::String(_) => Ok(Type::Named("string".to_string())),
             Expr::Nil => Ok(Type::Named("void".to_string())),
 
-            Expr::Var(name) => self
-                .lookup_var(name)
-                .ok_or_else(|| CheckerError::UndefinedVariable(name.clone())),
+            Expr::Var(name) => {
+                if let Some(ty) = self.lookup_var(name) {
+                    return Ok(ty);
+                }
+
+                if let Some((params, ret_type)) = self.functions.get(name) {
+                    return Ok(Type::Function(
+                        params.iter().map(|t| Box::new(t.clone())).collect(),
+                        Box::new(ret_type.clone()),
+                    ));
+                }
+
+                Err(CheckerError::UndefinedVariable(name.clone()))
+            }
 
             Expr::VarDecl(name, ty, value) => {
                 let ty = self.resolve_type(ty);
@@ -448,37 +467,41 @@ impl TypeChecker {
             }
 
             Expr::Call(callee, args) => {
-                let func_name = match callee.as_ref() {
-                    Expr::Var(name) => name.clone(),
-                    _ => return Ok(Type::Named("int".to_string())),
-                };
+                let callee_type = self.check_expr(callee)?;
+                let arg_types: Result<Vec<Type>, CheckerError> =
+                    args.iter_mut().map(|arg| self.check_expr(arg)).collect();
+                let arg_types = arg_types?;
 
-                let func_info = self
-                    .functions
-                    .get(&func_name)
-                    .ok_or_else(|| CheckerError::UndefinedFunction(func_name.clone()))?
-                    .clone();
+                match &callee_type {
+                    Type::Function(params, ret_type) => {
+                        if args.len() != params.len() {
+                            return Err(CheckerError::ArgCountMismatch {
+                                expected: params.len(),
+                                found: args.len(),
+                                func: "function pointer".to_string(),
+                            });
+                        }
 
-                if args.len() != func_info.0.len() {
-                    return Err(CheckerError::ArgCountMismatch {
-                        expected: func_info.0.len(),
-                        found: args.len(),
-                        func: func_name,
-                    });
-                }
+                        for (i, (arg_type, expected_ty)) in
+                            arg_types.iter().zip(params.iter()).enumerate()
+                        {
+                            if !self.types_compatible(expected_ty, arg_type) {
+                                return Err(CheckerError::TypeMismatch {
+                                    expected: *expected_ty.clone(),
+                                    found: arg_type.clone(),
+                                    context: format!("argument {} of function pointer call", i + 1),
+                                });
+                            }
+                        }
 
-                for (i, (arg, expected_ty)) in args.iter_mut().zip(func_info.0.iter()).enumerate() {
-                    let arg_type = self.check_expr(arg)?;
-                    if !self.types_compatible(expected_ty, &arg_type) {
-                        return Err(CheckerError::TypeMismatch {
-                            expected: expected_ty.clone(),
-                            found: arg_type,
-                            context: format!("argument {} of function '{}'", i + 1, func_name),
-                        });
+                        Ok(*ret_type.clone())
                     }
+                    _ => Err(CheckerError::TypeMismatch {
+                        expected: Type::Function(vec![], Box::new(Type::Named("void".to_string()))),
+                        found: callee_type,
+                        context: "callee is not a function type".to_string(),
+                    }),
                 }
-
-                Ok(func_info.1)
             }
 
             Expr::Return(value) => self.check_expr(value),
@@ -747,6 +770,18 @@ impl TypeChecker {
             (_, Type::Named(n)) if n == "void" => true,
             (Type::Named(a), Type::Named(b)) => a == b,
             (Type::Array(a), Type::Array(b)) => self.types_compatible(a, b),
+            (Type::Function(exp_params, exp_ret), Type::Function(found_params, found_ret)) => {
+                if exp_params.len() != found_params.len() {
+                    return false;
+                }
+                for (exp_p, found_p) in exp_params.iter().zip(found_params.iter()) {
+                    if !self.types_compatible(exp_p, found_p) {
+                        return false;
+                    }
+                }
+
+                self.types_compatible(exp_ret, found_ret)
+            }
             _ => false,
         }
     }
@@ -755,6 +790,12 @@ impl TypeChecker {
         match ty {
             Type::Named(_) => Ok(()),
             Type::Array(inner) => self.validate_type(inner),
+            Type::Function(params, ret) => {
+                for param in params {
+                    self.validate_type(param)?;
+                }
+                self.validate_type(ret)
+            }
         }
     }
 }

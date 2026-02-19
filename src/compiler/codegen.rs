@@ -14,9 +14,16 @@ use std::{collections::HashMap, fmt::Display};
 
 #[derive(Debug)]
 pub enum CodeGenError {
-    UnexpectedExpression { found: Expr },
-    UndefinedVariable { name: String },
-    UndefinedFunction { name: String },
+    UnexpectedExpression {
+        found: Expr,
+    },
+    UndefinedVariable {
+        name: String,
+    },
+    #[allow(dead_code)]
+    UndefinedFunction {
+        name: String,
+    },
     ModuleError(String),
 }
 
@@ -83,7 +90,6 @@ impl CodeGen {
             Type::Named(name) => match name.as_str() {
                 "int" | "float" => 8,
                 "string" => 8,
-                "bool" => 1,
                 "void" => 0,
                 _ => {
                     if let Some(struct_def) = structs.get(name) {
@@ -94,6 +100,7 @@ impl CodeGen {
                 }
             },
             Type::Array(_) => 8,
+            Type::Function(_, _) => 8,
         }
     }
 
@@ -122,6 +129,7 @@ impl CodeGen {
                 }
             },
             Type::Array(_) => 8,
+            Type::Function(_, _) => 8,
         }
     }
 
@@ -1447,31 +1455,19 @@ impl CodeGen {
                 Ok(val)
             }
             Expr::Var(name) => {
-                let var = Self::lookup_var(name, scope_stack)
-                    .ok_or_else(|| CodeGenError::UndefinedVariable { name: name.clone() })?;
-                Ok(builder.use_var(*var))
+                if let Some(var) = Self::lookup_var(name, scope_stack) {
+                    return Ok(builder.use_var(*var));
+                }
+
+                if let Some((func_id, _)) = func_signatures.get(name) {
+                    let func_ref = module.declare_func_in_func(*func_id, builder.func);
+                    let addr = builder.ins().func_addr(types::I64, func_ref);
+                    return Ok(addr);
+                }
+
+                Err(CodeGenError::UndefinedVariable { name: name.clone() })
             }
             Expr::Call(callee, args) => {
-                let func_name = match &**callee {
-                    Expr::Var(name) => name,
-                    _ => {
-                        return Err(CodeGenError::ModuleError(
-                            "Only direct function calls are supported currently".to_string(),
-                        ));
-                    }
-                };
-
-                let (func_id, _) = match func_signatures.get(func_name) {
-                    Some(sig) => sig,
-                    None => {
-                        return Err(CodeGenError::UndefinedFunction {
-                            name: func_name.clone(),
-                        });
-                    }
-                };
-
-                let func_ref = module.declare_func_in_func(*func_id, builder.func);
-
                 let arg_values: Result<Vec<Value>, CodeGenError> = args
                     .iter()
                     .map(|a| {
@@ -1492,7 +1488,61 @@ impl CodeGen {
                     .collect();
 
                 let arg_values = arg_values?;
-                let call = builder.ins().call(func_ref, &arg_values);
+
+                if let Expr::Var(name) = &**callee {
+                    if let Some((func_id, _)) = func_signatures.get(name) {
+                        let func_ref = module.declare_func_in_func(*func_id, builder.func);
+                        let call = builder.ins().call(func_ref, &arg_values);
+                        let results = builder.inst_results(call);
+                        if results.is_empty() {
+                            return Ok(builder.ins().iconst(types::I64, 0));
+                        } else {
+                            return Ok(results[0]);
+                        }
+                    }
+                }
+
+                let callee_type = Self::get_expr_type(callee, type_stack);
+
+                let callee_val = Self::compile_expr(
+                    callee,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+
+                let sig = {
+                    let mut sig = module.make_signature();
+                    sig.call_conv = CallConv::SystemV;
+                    for arg in &arg_values {
+                        sig.params
+                            .push(AbiParam::new(builder.func.dfg.value_type(*arg)));
+                    }
+
+                    let return_type = if let Type::Function(_, ret) = callee_type {
+                        get_type(&ret, type_map)
+                    } else {
+                        types::I64
+                    };
+
+                    if return_type != types::INVALID {
+                        sig.returns.push(AbiParam::new(return_type));
+                    }
+                    sig
+                };
+
+                let sig_ref = builder.import_signature(sig);
+
+                let call = builder
+                    .ins()
+                    .call_indirect(sig_ref, callee_val, &arg_values);
                 let results = builder.inst_results(call);
                 if results.is_empty() {
                     Ok(builder.ins().iconst(types::I64, 0))
@@ -1552,7 +1602,7 @@ impl CodeGen {
                 builder.switch_to_block(then_block);
                 scope_stack.push(HashMap::new());
                 type_stack.push(HashMap::new());
-                Self::compile_expr(
+                let then_val = Self::compile_expr(
                     then_branch,
                     builder,
                     scope_stack,
@@ -1570,16 +1620,16 @@ impl CodeGen {
 
                 if !then_has_return {
                     if let Some(merge) = merge_block {
-                        builder.ins().jump(merge, &[]);
+                        builder.ins().jump(merge, &[then_val.into()]);
                     }
                 }
                 builder.seal_block(then_block);
 
                 builder.switch_to_block(else_block);
-                if let Some(else_expr) = else_branch {
+                let else_val = if let Some(else_expr) = else_branch {
                     scope_stack.push(HashMap::new());
                     type_stack.push(HashMap::new());
-                    Self::compile_expr(
+                    let val = Self::compile_expr(
                         else_expr,
                         builder,
                         scope_stack,
@@ -1597,20 +1647,31 @@ impl CodeGen {
 
                     if !else_has_return {
                         if let Some(merge) = merge_block {
-                            builder.ins().jump(merge, &[]);
+                            builder.ins().jump(merge, &[val.into()]);
                         }
                     }
+                    Some(val)
                 } else {
                     if let Some(merge) = merge_block {
                         builder.ins().jump(merge, &[]);
                     }
-                }
+                    None
+                };
                 builder.seal_block(else_block);
 
                 if let Some(merge) = merge_block {
-                    builder.switch_to_block(merge);
-                    builder.seal_block(merge);
-                    Ok(builder.ins().iconst(types::I64, 0))
+                    if else_val.is_some() {
+                        let merge_val = builder
+                            .append_block_param(merge, builder.func.dfg.value_type(then_val));
+
+                        builder.switch_to_block(merge);
+                        builder.seal_block(merge);
+                        Ok(merge_val)
+                    } else {
+                        builder.switch_to_block(merge);
+                        builder.seal_block(merge);
+                        Ok(then_val)
+                    }
                 } else {
                     Ok(Value::from_u32(0))
                 }
@@ -2151,5 +2212,6 @@ fn get_type(t: &Type, type_map: &HashMap<String, ir::Type>) -> ir::Type {
     return match t {
         Type::Named(name) => *type_map.get(name).unwrap_or(&types::I64),
         Type::Array(_) => types::I64,
+        Type::Function(_, _) => types::I64,
     };
 }
