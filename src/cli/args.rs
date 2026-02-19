@@ -31,4 +31,7 @@ pub struct Cli {
 
     #[arg(short = 'v', long)]
     pub verbose: bool,
+
+    #[arg(long)]
+    pub lib: bool,
 }

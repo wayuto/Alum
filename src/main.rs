@@ -50,6 +50,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             cli.include_paths.clone(),
             cli.preprocess_only,
             cli.verbose,
+            cli.lib,
         )?;
 
         if !obj_file.is_empty() {

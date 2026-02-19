@@ -8,6 +8,7 @@ pub fn build(
     include_paths: Vec<String>,
     preprocess_only: bool,
     verbose: bool,
+    lib_mode: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let src = fs::read_to_string(&input)?;
 
@@ -47,7 +48,11 @@ pub fn build(
     if verbose {
         eprintln!("Optimizing...");
     }
-    let optimizer = Optimizer::new();
+    let optimizer = if lib_mode {
+        Optimizer::new_lib()
+    } else {
+        Optimizer::new()
+    };
     optimizer.optimize(&mut ast);
 
     if print_ast {
@@ -84,7 +89,7 @@ pub fn exec_run(
     include_paths: Vec<String>,
     verbose: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let obj_file = build(input.clone(), false, None, include_paths, false, verbose)?;
+    let obj_file = build(input.clone(), false, None, include_paths, false, verbose, false)?;
 
     let exe_file = if input.ends_with(".al") {
         input.replace(".al", "")

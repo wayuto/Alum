@@ -10,6 +10,7 @@ Alum is a modern, systems programming language designed for simplicity and perfo
 - **Fast Compilation**: Efficient compilation pipeline
 - **FFI Support**: Interoperability with C for low-level operations
 - **Build Tool**: Integrated build system (almk) for project management
+- **Optimizations**: Built-in optimizations including constant folding, dead code elimination, and unused code removal
 
 ## Installation
 
@@ -94,6 +95,7 @@ Options:
   --ast                     Output AST representation
   -I <DIR>                  Add include directory (can be used multiple times)
   --nostdlib                Do not link with standard library
+  --lib                     Library mode - keep all functions (useful for building libraries)
   -v, --verbose             Verbose output
   -h, --help                Print help
   -V, --version             Print version
@@ -124,6 +126,11 @@ alc -r program.al
 Include custom directories:
 ```bash
 alc program.al -I ./include
+```
+
+Library mode (keep all functions for library building):
+```bash
+alc lib.al -o lib.o --lib
 ```
 
 ## Language Syntax
@@ -255,6 +262,11 @@ Source Code (.al)
         │
         ▼
 ┌───────────────┐
+│   Optimizer   │  →  Constant folding, dead code elimination, unused code removal
+└───────────────┘
+        │
+        ▼
+┌───────────────┐
 │ Code Generator│  →  Compiles AST to machine code using Cranelift
 └───────────────┘
         │
@@ -276,8 +288,9 @@ Source Code (.al)
 2. **Lexing**: Tokenizes source code into a stream of tokens
 3. **Parsing**: Builds Abstract Syntax Tree (AST) from tokens
 4. **Type Checking**: Validates type safety and semantic rules
-5. **Code Generation**: Compiles AST to machine code using Cranelift
-6. **Linking**: Links object files with standard library to produce executable
+5. **Optimization**: Performs constant folding, dead code elimination, and unused code removal
+6. **Code Generation**: Compiles AST to machine code using Cranelift
+7. **Linking**: Links object files with standard library to produce executable
 
 ## Project Structure
 
