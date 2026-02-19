@@ -87,8 +87,8 @@ pub struct TypeChecker {
     functions: HashMap<String, (Vec<Type>, Type)>,
     structs: HashMap<String, StructDef>,
     typedefs: HashMap<String, Type>,
-    type_var_counter: usize, // 用于生成唯一的类型变量
-    type_bindings: HashMap<usize, Type>, // 类型变量到实际类型的映射
+    type_var_counter: usize,
+    type_bindings: HashMap<usize, Type>,
 }
 
 impl TypeChecker {
@@ -103,14 +103,12 @@ impl TypeChecker {
         }
     }
 
-    // 创建一个新的类型变量
     fn new_type_var(&mut self) -> Type {
         let id = self.type_var_counter;
         self.type_var_counter += 1;
         Type::TypeVar(id)
     }
 
-    // 解析类型变量到实际类型
     fn resolve_type_var(&self, ty: &Type) -> Type {
         match ty {
             Type::TypeVar(id) => {
@@ -132,13 +130,11 @@ impl TypeChecker {
         }
     }
 
-    // 绑定类型变量到实际类型
     fn bind_type_var(&mut self, var_id: usize, ty: &Type) {
         let resolved_ty = self.resolve_type_var(ty);
         self.type_bindings.insert(var_id, resolved_ty);
     }
 
-    // 尝试统一两个类型
     fn unify_types(&mut self, t1: &Type, t2: &Type) -> Result<(), CheckerError> {
         let t1 = self.resolve_type_var(t1);
         let t2 = self.resolve_type_var(t2);
@@ -343,17 +339,16 @@ impl TypeChecker {
             Expr::Var(name) => {
                 if let Some(ty) = self.lookup_var(name) {
                     let resolved_ty = self.resolve_type(&ty);
-                    // 如果是 any 类型，创建一个类型变量
+
                     if matches!(resolved_ty, Type::Named(n) if n == "any") {
                         let type_var = self.new_type_var();
-                        // 将类型变量绑定到 any（表示可以是任何类型）
+
                         return Ok(type_var);
                     }
                     return Ok(ty);
                 }
 
                 if let Some((params, ret_type)) = self.functions.get(name) {
-                    // 解析函数类型，将 any 替换为类型变量
                     let params_cloned = params.clone();
                     let ret_type_cloned = ret_type.clone();
                     let resolved_params: Vec<Type> = params_cloned
@@ -366,13 +361,17 @@ impl TypeChecker {
                             }
                         })
                         .collect();
-                    let resolved_ret = if matches!(ret_type_cloned, Type::Named(ref n) if n == "any") {
+                    let resolved_ret = if matches!(ret_type_cloned, Type::Named(ref n) if n == "any")
+                    {
                         self.new_type_var()
                     } else {
                         ret_type_cloned.clone()
                     };
                     return Ok(Type::Function(
-                        resolved_params.iter().map(|t| Box::new(t.clone())).collect(),
+                        resolved_params
+                            .iter()
+                            .map(|t| Box::new(t.clone()))
+                            .collect(),
                         Box::new(resolved_ret),
                     ));
                 }
@@ -384,7 +383,6 @@ impl TypeChecker {
                 let resolved_ty = self.resolve_type(ty);
                 let value_type = self.check_expr(value)?;
 
-                // 如果类型是 any，创建类型变量
                 let actual_ty = if matches!(resolved_ty, Type::Named(ref n) if n == "any") {
                     self.new_type_var()
                 } else {
@@ -409,11 +407,12 @@ impl TypeChecker {
                     .ok_or_else(|| CheckerError::UndefinedVariable(name.clone()))?;
                 let value_type = self.check_expr(value)?;
 
-                // 使用类型统一而不是类型兼容性检查
-                self.unify_types(&var_type, &value_type).map_err(|_| CheckerError::TypeMismatch {
-                    expected: var_type.clone(),
-                    found: value_type,
-                    context: format!("assignment to '{}'", name),
+                self.unify_types(&var_type, &value_type).map_err(|_| {
+                    CheckerError::TypeMismatch {
+                        expected: var_type.clone(),
+                        found: value_type,
+                        context: format!("assignment to '{}'", name),
+                    }
                 })?;
 
                 Ok(var_type)
@@ -426,15 +425,13 @@ impl TypeChecker {
                 let lhs_type = self.check_expr(lhs)?;
                 let rhs_type = self.check_expr(rhs)?;
 
-                // 检查是否有类型变量
-                let has_type_var = matches!(&lhs_type, Type::TypeVar(_)) || matches!(&rhs_type, Type::TypeVar(_));
+                let has_type_var =
+                    matches!(&lhs_type, Type::TypeVar(_)) || matches!(&rhs_type, Type::TypeVar(_));
 
                 if Self::is_string_type(&lhs_type) || Self::is_string_type(&rhs_type) {
-                    // 如果任一操作数是类型变量，尝试统一为 string 类型
                     if has_type_var {
-                        // 统一两个类型
                         self.unify_types(&lhs_type, &rhs_type)?;
-                        // 将类型变量绑定到 string
+
                         let string_type = Type::Named("string".to_string());
                         if matches!(&lhs_type, Type::TypeVar(_)) {
                             if let Type::TypeVar(id) = &lhs_type {
@@ -477,7 +474,6 @@ impl TypeChecker {
                         });
                     }
 
-                    // 如果有类型变量，绑定到 float
                     if has_type_var {
                         self.unify_types(&lhs_type, &rhs_type)?;
                         let float_type = Type::Named("float".to_string());
@@ -517,7 +513,6 @@ impl TypeChecker {
                     });
                 }
 
-                // 如果有类型变量，绑定到 int
                 if has_type_var {
                     self.unify_types(&lhs_type, &rhs_type)?;
                     let int_type = Type::Named("int".to_string());
@@ -635,17 +630,18 @@ impl TypeChecker {
 
                 match &callee_type {
                     Type::Named(n) if n == "any" => {
-                        // When callee is any, create a type variable for the result
                         let ret_type_var = self.new_type_var();
                         Ok(ret_type_var)
                     }
                     Type::TypeVar(_) => {
-                        // When callee is a type variable, infer its function type from the call
                         let inferred_params: Vec<Type> = arg_types.clone();
                         let inferred_ret = self.new_type_var();
-                        // 绑定类型变量为推断出的函数类型
+
                         let inferred_func_type = Type::Function(
-                            inferred_params.iter().map(|t| Box::new(t.clone())).collect(),
+                            inferred_params
+                                .iter()
+                                .map(|t| Box::new(t.clone()))
+                                .collect(),
                             Box::new(inferred_ret.clone()),
                         );
                         self.unify_types(&callee_type, &inferred_func_type)?;
@@ -663,11 +659,12 @@ impl TypeChecker {
                         for (i, (arg_type, expected_ty)) in
                             arg_types.iter().zip(params.iter()).enumerate()
                         {
-                            // 使用类型统一而不是类型兼容性检查
-                            self.unify_types(expected_ty, arg_type).map_err(|_| CheckerError::TypeMismatch {
-                                expected: *expected_ty.clone(),
-                                found: arg_type.clone(),
-                                context: format!("argument {} of function pointer call", i + 1),
+                            self.unify_types(expected_ty, arg_type).map_err(|_| {
+                                CheckerError::TypeMismatch {
+                                    expected: *expected_ty.clone(),
+                                    found: arg_type.clone(),
+                                    context: format!("argument {} of function pointer call", i + 1),
+                                }
                             })?;
                         }
 
@@ -834,7 +831,6 @@ impl TypeChecker {
             Expr::FuncDecl(_name, params, _ret_type, body) => {
                 self.push_scope();
                 for (param_name, param_type) in params {
-                    // 如果参数类型是 any，创建类型变量
                     let actual_param_type = if matches!(param_type, Type::Named(n) if n == "any") {
                         self.new_type_var()
                     } else {

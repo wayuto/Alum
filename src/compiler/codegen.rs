@@ -106,7 +106,7 @@ impl CodeGen {
             },
             Type::Array(_) => 8,
             Type::Function(_, _) => 8,
-            Type::TypeVar(_) => 8, // 类型变量在运行时作为 any 类型处理
+            Type::TypeVar(_) => 8,
         }
     }
 
@@ -136,7 +136,7 @@ impl CodeGen {
             },
             Type::Array(_) => 8,
             Type::Function(_, _) => 8,
-            Type::TypeVar(_) => 8, // 类型变量在运行时作为 any 类型处理
+            Type::TypeVar(_) => 8,
         }
     }
 
@@ -1657,11 +1657,8 @@ impl CodeGen {
                 let var = Variable::from_u32(*idx);
                 *idx += 1;
 
-                // If the declared type is 'any', use the actual type of the value
                 let decl_type = if let Type::Named(n) = ty {
                     if n == "any" {
-                        // For 'any' type, use the value's actual type
-                        // Get the type from the expression
                         match &**value {
                             Expr::Int(_) => Type::Named("int".to_string()),
                             Expr::Float(_) => Type::Named("float".to_string()),
@@ -2640,6 +2637,6 @@ fn get_type(t: &Type, type_map: &HashMap<String, ir::Type>) -> ir::Type {
         Type::Named(name) => *type_map.get(name).unwrap_or(&types::I64),
         Type::Array(_) => types::I64,
         Type::Function(_, _) => types::I64,
-        Type::TypeVar(_) => types::I64, // 类型变量作为 I64（any）处理
+        Type::TypeVar(_) => types::I64,
     };
 }
