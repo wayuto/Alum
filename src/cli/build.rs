@@ -45,7 +45,7 @@ pub fn build(
     checker.check(&mut ast)?;
 
     if print_ast {
-        println!("{:#?}", ast);
+        println!("{}", ast);
         return Ok(String::new());
     }
 

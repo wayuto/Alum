@@ -1210,7 +1210,7 @@ impl CodeGen {
                     .fcmp(ir::condcodes::FloatCC::GreaterThanOrEqual, lhs, rhs))
             }
 
-            Expr::StrConcat(lhs, rhs) => {
+            Expr::StrCat(lhs, rhs) => {
                 let lhs_ptr = Self::compile_expr(
                     lhs,
                     builder,

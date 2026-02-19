@@ -201,7 +201,7 @@ impl TypeChecker {
             | Expr::Gt(_, _)
             | Expr::Ge(_, _) => Type::Named("bool".to_string()),
             Expr::And(_, _) | Expr::Or(_, _) | Expr::Not(_) => Type::Named("bool".to_string()),
-            Expr::StrConcat(_, _) => Type::Named("string".to_string()),
+            Expr::StrCat(_, _) => Type::Named("string".to_string()),
             Expr::Call(callee, _) => {
                 if let Expr::Var(name) = callee.as_ref() {
                     if let Some((_, ret_type)) = self.functions.get(name) {
@@ -320,7 +320,7 @@ impl TypeChecker {
                         Expr::Div(_, _) => unreachable!(),
                         _ => unreachable!(),
                     };
-                    *expr = Expr::StrConcat(l, r);
+                    *expr = Expr::StrCat(l, r);
                     return Ok(Type::Named("string".to_string()));
                 }
 
@@ -733,7 +733,7 @@ impl TypeChecker {
                 self.check_expr(rhs)?;
                 Ok(Type::Named("bool".to_string()))
             }
-            Expr::StrConcat(lhs, rhs) => {
+            Expr::StrCat(lhs, rhs) => {
                 self.check_expr(lhs)?;
                 self.check_expr(rhs)?;
                 Ok(Type::Named("string".to_string()))
