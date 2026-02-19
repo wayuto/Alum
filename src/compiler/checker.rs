@@ -37,7 +37,7 @@ impl std::fmt::Display for CheckerError {
             } => {
                 write!(
                     f,
-                    "Type mismatch in {}: expected {:?}, found {:?}",
+                    "Type mismatch in {}: expected {}, found {}",
                     context, expected, found
                 )
             }

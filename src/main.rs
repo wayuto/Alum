@@ -3,7 +3,14 @@ mod compiler;
 use clap::Parser;
 use cli::{Cli, build, exec_run, link};
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() {
+    if let Err(e) = run() {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     if cli.input.is_empty() {
