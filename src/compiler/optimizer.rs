@@ -15,17 +15,14 @@ impl Optimizer {
     }
 
     pub fn optimize(&self, program: &mut Program) {
-        // 常量传播
         for expr in &mut program.body {
             self.propagate_constants(expr, &mut HashMap::new());
         }
 
-        // 常量折叠
         for expr in &mut program.body {
             self.optimize_expr(expr);
         }
 
-        // 死代码消除
         for expr in &mut program.body {
             self.dce(expr);
         }
@@ -63,7 +60,7 @@ impl Optimizer {
             }
             Expr::If(cond, t, e) => {
                 self.propagate_constants(cond, consts);
-                // 分支需要新的常量表
+
                 let mut t_consts = consts.clone();
                 self.propagate_constants(t, &mut t_consts);
                 if let Some(e) = e {
@@ -83,80 +80,76 @@ impl Optimizer {
                 self.propagate_constants(body, &mut body_consts);
             }
             Expr::FuncDecl(_, params, _, body) => {
-                // 函数有新的作用域，清除常量
                 let mut func_consts = HashMap::new();
-                // 排除参数
+
                 for (param_name, _) in params {
                     func_consts.insert(param_name.clone(), Expr::Nil);
                 }
                 self.propagate_constants(body, &mut func_consts);
             }
-            _ => {
-                // 递归处理子表达式
-                match expr {
-                    Expr::Add(l, r)
-                    | Expr::Sub(l, r)
-                    | Expr::Mul(l, r)
-                    | Expr::Div(l, r)
-                    | Expr::Mod(l, r)
-                    | Expr::Eq(l, r)
-                    | Expr::Ne(l, r)
-                    | Expr::Lt(l, r)
-                    | Expr::Le(l, r)
-                    | Expr::Gt(l, r)
-                    | Expr::Ge(l, r) => {
-                        self.propagate_constants(l, consts);
-                        self.propagate_constants(r, consts);
+            _ => match expr {
+                Expr::Add(l, r)
+                | Expr::Sub(l, r)
+                | Expr::Mul(l, r)
+                | Expr::Div(l, r)
+                | Expr::Mod(l, r)
+                | Expr::Eq(l, r)
+                | Expr::Ne(l, r)
+                | Expr::Lt(l, r)
+                | Expr::Le(l, r)
+                | Expr::Gt(l, r)
+                | Expr::Ge(l, r) => {
+                    self.propagate_constants(l, consts);
+                    self.propagate_constants(r, consts);
+                }
+                Expr::FAdd(l, r)
+                | Expr::FSub(l, r)
+                | Expr::FMul(l, r)
+                | Expr::FDiv(l, r)
+                | Expr::FEq(l, r)
+                | Expr::FNe(l, r)
+                | Expr::FLt(l, r)
+                | Expr::FLe(l, r)
+                | Expr::FGt(l, r)
+                | Expr::FGe(l, r) => {
+                    self.propagate_constants(l, consts);
+                    self.propagate_constants(r, consts);
+                }
+                Expr::And(l, r) | Expr::Or(l, r) | Expr::Index(l, r) => {
+                    self.propagate_constants(l, consts);
+                    self.propagate_constants(r, consts);
+                }
+                Expr::Not(e) | Expr::ArrayFill(_, e) => {
+                    self.propagate_constants(e, consts);
+                }
+                Expr::Call(func, args) => {
+                    self.propagate_constants(func, consts);
+                    for arg in args {
+                        self.propagate_constants(arg, consts);
                     }
-                    Expr::FAdd(l, r)
-                    | Expr::FSub(l, r)
-                    | Expr::FMul(l, r)
-                    | Expr::FDiv(l, r)
-                    | Expr::FEq(l, r)
-                    | Expr::FNe(l, r)
-                    | Expr::FLt(l, r)
-                    | Expr::FLe(l, r)
-                    | Expr::FGt(l, r)
-                    | Expr::FGe(l, r) => {
-                        self.propagate_constants(l, consts);
-                        self.propagate_constants(r, consts);
-                    }
-                    Expr::And(l, r) | Expr::Or(l, r) | Expr::Index(l, r) => {
-                        self.propagate_constants(l, consts);
-                        self.propagate_constants(r, consts);
-                    }
-                    Expr::Not(e) | Expr::ArrayFill(_, e) => {
+                }
+                Expr::Return(e) => {
+                    self.propagate_constants(e, consts);
+                }
+                Expr::ArrayLiteral(elems) => {
+                    for e in elems {
                         self.propagate_constants(e, consts);
                     }
-                    Expr::Call(func, args) => {
-                        self.propagate_constants(func, consts);
-                        for arg in args {
-                            self.propagate_constants(arg, consts);
-                        }
-                    }
-                    Expr::Return(e) => {
-                        self.propagate_constants(e, consts);
-                    }
-                    Expr::ArrayLiteral(elems) => {
-                        for e in elems {
-                            self.propagate_constants(e, consts);
-                        }
-                    }
-                    Expr::IndexAssign(arr, v) => {
-                        self.propagate_constants(arr, consts);
+                }
+                Expr::IndexAssign(arr, v) => {
+                    self.propagate_constants(arr, consts);
+                    self.propagate_constants(v, consts);
+                }
+                Expr::StructLiteral(_, fields) => {
+                    for (_, v) in fields {
                         self.propagate_constants(v, consts);
                     }
-                    Expr::StructLiteral(_, fields) => {
-                        for (_, v) in fields {
-                            self.propagate_constants(v, consts);
-                        }
-                    }
-                    Expr::MemberAccess(obj, _) => {
-                        self.propagate_constants(obj, consts);
-                    }
-                    _ => {}
                 }
-            }
+                Expr::MemberAccess(obj, _) => {
+                    self.propagate_constants(obj, consts);
+                }
+                _ => {}
+            },
         }
     }
 
