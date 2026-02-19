@@ -345,6 +345,21 @@ impl<'a> Parser<'a> {
             }
             callee = Expr::Index(Box::new(callee), Box::new(index));
         }
+
+        while let Some(Ok(Token::DOT)) = self.peek() {
+            self.next()?;
+            let field_name = match self.next()? {
+                Token::IDENT(s) => s,
+                token => {
+                    return Err(ParserError::UnexpectedToken {
+                        expected: Some(Token::IDENT("FIELD NAME".to_string())),
+                        found: token,
+                    });
+                }
+            };
+            callee = Expr::MemberAccess(Box::new(callee), field_name);
+        }
+
         Ok(callee)
     }
 
