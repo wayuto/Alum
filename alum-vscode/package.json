@@ -1,1 +1,34 @@
-{"name": "alum-vscode", "displayName": "alum-vscode", "description": "Alum Programming Language - Syntax highlighting and language support for VSCode", "version": "0.8.0", "engines": {"vscode": "^1.107.0"}, "categories": ["Programming Languages"], "contributes": {"languages": [{"id": "alum", "aliases": ["alum", "Alum"], "extensions": ["al"], "configuration": "./language-configuration.json"}], "grammars": [{"language": "alum", "scopeName": "source.alum", "path": "./syntaxes/alum.tmLanguage.json"}]}}
+{
+    "name": "alum-vscode",
+    "displayName": "alum-vscode",
+    "description": "Alum Programming Language - Syntax highlighting and language support for VSCode",
+    "version": "0.8.0",
+    "engines": {
+        "vscode": "^1.107.0"
+    },
+    "categories": [
+        "Programming Languages"
+    ],
+    "contributes": {
+        "languages": [
+            {
+                "id": "alum",
+                "aliases": [
+                    "alum",
+                    "Alum"
+                ],
+                "extensions": [
+                    "al"
+                ],
+                "configuration": "./language-configuration.json"
+            }
+        ],
+        "grammars": [
+            {
+                "language": "alum",
+                "scopeName": "source.alum",
+                "path": "./syntaxes/alum.tmLanguage.json"
+            }
+        ]
+    }
+}

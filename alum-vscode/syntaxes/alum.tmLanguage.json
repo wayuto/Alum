@@ -10,40 +10,40 @@
             "include": "#preprocessor"
         },
         {
+            "include": "#keywords"
+        },
+        {
             "include": "#typedef"
         },
         {
-            "include": "#struct"
+            "include": "#struct-declaration"
         },
         {
-            "include": "#keywords"
+            "include": "#struct-literal"
         },
         {
             "include": "#types"
         },
         {
-            "include": "#literals"
-        },
-        {
             "include": "#lambda"
         },
         {
-            "include": "#function-pointer"
+            "include": "#function-declaration"
         },
         {
-            "include": "#function-declarations"
+            "include": "#extern-declaration"
         },
         {
-            "include": "#extern-declarations"
-        },
-        {
-            "include": "#function-calls"
-        },
-        {
-            "include": "#operators"
+            "include": "#variable-declaration"
         },
         {
             "include": "#builtin-functions"
+        },
+        {
+            "include": "#literals"
+        },
+        {
+            "include": "#operators"
         }
     ],
     "repository": {
@@ -51,7 +51,7 @@
             "patterns": [
                 {
                     "name": "comment.line.double-slash.alum",
-                    "match": "//.*"
+                    "match": "//.*$"
                 }
             ]
         },
@@ -59,150 +59,66 @@
             "patterns": [
                 {
                     "name": "keyword.control.preprocessor.alum",
-                    "match": "\\b\\$(import|define|ifdef|ifndef|endif)\\b"
+                    "match": "\\$(import|define|ifdef|ifndef|endif)\\b"
                 },
                 {
                     "name": "meta.preprocessor.import.alum",
-                    "begin": "\\$import\\s+\"",
-                    "end": "\"",
+                    "begin": "(\\$import)\\s+(\")",
+                    "end": "(\")",
                     "beginCaptures": {
-                        "0": {
-                            "patterns": [
-                                {
-                                    "name": "keyword.control.preprocessor.alum",
-                                    "match": "\\$import"
-                                }
-                            ]
+                        "1": {
+                            "name": "keyword.control.preprocessor.alum"
+                        },
+                        "2": {
+                            "name": "punctuation.definition.string.begin.alum"
+                        }
+                    },
+                    "endCaptures": {
+                        "1": {
+                            "name": "punctuation.definition.string.end.alum"
                         }
                     },
                     "contentName": "string.quoted.double.alum"
                 },
                 {
                     "name": "meta.preprocessor.define.simple.alum",
-                    "match": "(\\$define)\\s+(\\w+)\\s+([^\\n]+)",
-                    "captures": {
+                    "begin": "(\\$define)\\s+(\\w+)(\\s+)",
+                    "end": "(?=\\n|$)",
+                    "beginCaptures": {
                         "1": {
                             "name": "keyword.control.preprocessor.alum"
                         },
                         "2": {
-                            "name": "entity.name.constant.alum"
+                            "name": "entity.name.constant.macro.alum"
                         },
                         "3": {
-                            "name": "string.quoted.double.alum"
+                            "name": "text"
                         }
-                    }
+                    },
+                    "patterns": [
+                        {
+                            "include": "$self"
+                        }
+                    ]
                 },
                 {
                     "name": "meta.preprocessor.define.macro.alum",
-                    "match": "(\\$define)\\s+(\\w+)\\s*\\(",
-                    "captures": {
+                    "begin": "(\\$define)\\s+(\\w+)\\s*(\\()",
+                    "end": "(\\))",
+                    "beginCaptures": {
                         "1": {
                             "name": "keyword.control.preprocessor.alum"
                         },
                         "2": {
                             "name": "entity.name.function.macro.alum"
-                        }
-                    }
-                },
-                {
-                    "name": "meta.preprocessor.conditional.alum",
-                    "match": "(\\$ifdef|\\$ifndef|\\$endif)\\b",
-                    "captures": {
-                        "1": {
-                            "name": "keyword.control.preprocessor.conditional.alum"
-                        }
-                    }
-                }
-            ]
-        },
-        "typedef": {
-            "patterns": [
-                {
-                    "name": "meta.typedef.alum",
-                    "match": "(\\btypedef\\b)\\s+(\\w+)\\s*=\\s+([\\w\\[\\]]+)",
-                    "captures": {
-                        "1": {
-                            "name": "keyword.declaration.typedef.alum"
-                        },
-                        "2": {
-                            "name": "entity.name.type.typedef.alum"
                         },
                         "3": {
-                            "patterns": [
-                                {
-                                    "include": "#types"
-                                }
-                            ]
-                        }
-                    }
-                }
-            ]
-        },
-        "struct": {
-            "patterns": [
-                {
-                    "name": "meta.struct.declaration.alum",
-                    "begin": "(\\bstruct\\b)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\{",
-                    "end": "\\}",
-                    "beginCaptures": {
-                        "1": {
-                            "name": "keyword.declaration.struct.alum"
-                        },
-                        "2": {
-                            "name": "entity.name.type.struct.alum"
+                            "name": "punctuation.definition.parameters.begin.alum"
                         }
                     },
-                    "patterns": [
-                        {
-                            "include": "#comments"
-                        },
-                        {
-                            "name": "variable.other.member.alum",
-                            "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*:",
-                            "captures": {
-                                "1": {
-                                    "name": "variable.other.member.alum"
-                                }
-                            }
-                        },
-                        {
-                            "include": "#types"
-                        }
-                    ]
-                },
-                {
-                    "name": "meta.struct.literal.alum",
-                    "begin": "([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\{",
-                    "end": "\\}",
-                    "beginCaptures": {
+                    "endCaptures": {
                         "1": {
-                            "name": "entity.name.type.struct.alum"
-                        }
-                    },
-                    "patterns": [
-                        {
-                            "name": "variable.other.member.alum",
-                            "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*:",
-                            "captures": {
-                                "1": {
-                                    "name": "variable.other.member.alum"
-                                }
-                            }
-                        },
-                        {
-                            "include": "#literals"
-                        },
-                        {
-                            "include": "#variables"
-                        }
-                    ]
-                },
-                {
-                    "name": "variable.other.member.access.alum",
-                    "match": "(?<=\\w)\\.([a-zA-Z_][a-zA-Z0-9_]*)",
-                    "captures": {
-                        "1": {
-                            "name": "variable.other.member.alum"
+                            "name": "punctuation.definition.parameters.end.alum"
                         }
                     }
                 }
@@ -212,7 +128,15 @@
             "patterns": [
                 {
                     "name": "keyword.control.alum",
-                    "match": "\\b(let|return|if|else|while|for|in|break|continue)\\b"
+                    "match": "\\b(if|else|while|for|in|break|continue)\\b"
+                },
+                {
+                    "name": "keyword.control.return.alum",
+                    "match": "\\breturn\\b"
+                },
+                {
+                    "name": "storage.modifier.alum",
+                    "match": "\\blet\\b"
                 },
                 {
                     "name": "keyword.declaration.function.alum",
@@ -223,95 +147,38 @@
                     "match": "\\bextern\\b"
                 },
                 {
+                    "name": "keyword.declaration.struct.alum",
+                    "match": "\\bstruct\\b"
+                },
+                {
+                    "name": "keyword.declaration.typedef.alum",
+                    "match": "\\btypedef\\b"
+                },
+                {
+                    "name": "keyword.declaration.lambda.alum",
+                    "match": "\\blamb\\b"
+                },
+                {
                     "name": "constant.language.boolean.alum",
-                    "match": "\\b(true|false)\\b"
-                },
-                {
-                    "name": "storage.type.primitive.alum",
-                    "match": "\\b(void)\\b"
+                    "match": "\\b(true|false|nil)\\b"
                 }
             ]
         },
-        "types": {
+        "typedef": {
             "patterns": [
                 {
-                    "name": "storage.type.alum",
-                    "match": "\\b(int|float|string|bool)\\b"
-                },
-                {
-                    "name": "storage.type.array.alum",
-                    "match": "\\barr\\b"
-                },
-                {
-                    "name": "meta.type.array.generic.alum",
-                    "match": "\\barr\\s*\\[\\s*([\\w]+)\\s*\\]",
-                    "captures": {
-                        "0": {
-                            "patterns": [
-                                {
-                                    "name": "storage.type.array.alum",
-                                    "match": "\\barr\\b"
-                                },
-                                {
-                                    "name": "keyword.operator.angle-bracket.alum",
-                                    "match": "\\[|\\]"
-                                },
-                                {
-                                    "name": "storage.type.alum",
-                                    "match": "\\w+"
-                                }
-                            ]
-                        }
-                    }
-                },
-                {
-                    "name": "meta.type.function.pointer.alum",
-                    "match": "([\\w\\[\\]]+)\\s*\\(",
-                    "captures": {
-                        "1": {
-                            "patterns": [
-                                {
-                                    "include": "#types"
-                                }
-                            ]
-                        }
-                    }
-                }
-            ]
-        },
-        "literals": {
-            "patterns": [
-                {
-                    "name": "constant.numeric.integer.alum",
-                    "match": "\\b\\d+\\b"
-                },
-                {
-                    "name": "constant.numeric.float.alum",
-                    "match": "\\b\\d+\\.\\d+\\b"
-                },
-                {
-                    "name": "string.quoted.double.alum",
-                    "begin": "\"",
-                    "end": "\"",
-                    "patterns": [
-                        {
-                            "name": "constant.character.escape.alum",
-                            "match": "\\\\."
-                        }
-                    ]
-                },
-                {
-                    "name": "meta.array.literal.alum",
-                    "begin": "\\[",
-                    "end": "\\]",
+                    "name": "meta.typedef.alum",
+                    "begin": "(\\btypedef)\\s+(\\w+)\\s*(=)",
+                    "end": "(?=[\\n;\\}])",
                     "beginCaptures": {
-                        "0": {
-                            "name": "keyword.operator.bracket.alum"
-                        }
-                    },
-                    "endCaptures": {
-                        "0": {
-                            "name": "keyword.operator.bracket.alum"
+                        "1": {
+                            "name": "keyword.declaration.typedef.alum"
+                        },
+                        "2": {
+                            "name": "entity.name.type.typedef.alum"
+                        },
+                        "3": {
+                            "name": "keyword.operator.assignment.alum"
                         }
                     },
                     "patterns": [
@@ -319,26 +186,126 @@
                             "include": "$self"
                         }
                     ]
-                },
+                }
+            ]
+        },
+        "struct-declaration": {
+            "patterns": [
                 {
-                    "name": "meta.array.fill.alum",
-                    "match": "\\[\\s*([\\w]+)\\s*;\\s*(\\d+)\\s*\\]",
-                    "captures": {
-                        "0": {
-                            "patterns": [
-                                {
-                                    "name": "keyword.operator.bracket.alum",
-                                    "match": "\\[|\\]"
-                                }
-                            ]
-                        },
+                    "name": "meta.struct.declaration.alum",
+                    "begin": "(\\bstruct)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(\\{)",
+                    "end": "(\\})",
+                    "beginCaptures": {
                         "1": {
-                            "name": "storage.type.alum"
+                            "name": "keyword.declaration.struct.alum"
                         },
                         "2": {
-                            "name": "constant.numeric.integer.alum"
+                            "name": "entity.name.type.struct.alum"
+                        },
+                        "3": {
+                            "name": "punctuation.definition.block.begin.alum"
                         }
-                    }
+                    },
+                    "endCaptures": {
+                        "1": {
+                            "name": "punctuation.definition.block.end.alum"
+                        }
+                    },
+                    "patterns": [
+                        {
+                            "include": "#comments"
+                        },
+                        {
+                            "name": "variable.other.member.alum",
+                            "match": "([A-Za-z_][A-Za-z0-9_]*)\\s*(:)",
+                            "captures": {
+                                "1": {
+                                    "name": "variable.other.member.alum"
+                                },
+                                "2": {
+                                    "name": "punctuation.separator.type-annotation.alum"
+                                }
+                            }
+                        },
+                        {
+                            "include": "$self"
+                        }
+                    ]
+                }
+            ]
+        },
+        "struct-literal": {
+            "patterns": [
+                {
+                    "name": "meta.struct.literal.alum",
+                    "begin": "([A-Za-z_][A-Za-z0-9_]*)\\s*(\\{)",
+                    "end": "(\\})",
+                    "beginCaptures": {
+                        "1": {
+                            "name": "entity.name.type.struct.alum"
+                        },
+                        "2": {
+                            "name": "punctuation.definition.block.begin.alum"
+                        }
+                    },
+                    "endCaptures": {
+                        "1": {
+                            "name": "punctuation.definition.block.end.alum"
+                        }
+                    },
+                    "patterns": [
+                        {
+                            "name": "variable.other.member.alum",
+                            "match": "([A-Za-z_][A-Za-z0-9_]*)\\s*(:)",
+                            "captures": {
+                                "1": {
+                                    "name": "variable.other.member.alum"
+                                },
+                                "2": {
+                                    "name": "punctuation.separator.key-value.alum"
+                                }
+                            }
+                        },
+                        {
+                            "include": "$self"
+                        }
+                    ]
+                }
+            ]
+        },
+        "types": {
+            "patterns": [
+                {
+                    "name": "storage.type.primitive.alum",
+                    "match": "\\b(int|float|string|bool|void)\\b"
+                },
+                {
+                    "name": "meta.type.array.alum",
+                    "begin": "(\\barr)\\s*(\\[)",
+                    "end": "(\\])",
+                    "beginCaptures": {
+                        "1": {
+                            "name": "storage.type.array.alum"
+                        },
+                        "2": {
+                            "name": "punctuation.definition.array.begin.alum"
+                        }
+                    },
+                    "endCaptures": {
+                        "1": {
+                            "name": "punctuation.definition.array.end.alum"
+                        }
+                    },
+                    "patterns": [
+                        {
+                            "name": "storage.type.primitive.alum",
+                            "match": "[A-Za-z_][A-Za-z0-9_]*"
+                        }
+                    ]
+                },
+                {
+                    "name": "storage.type.alum",
+                    "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
                 }
             ]
         },
@@ -346,25 +313,46 @@
             "patterns": [
                 {
                     "name": "meta.lambda.alum",
-                    "begin": "\\blamb\\b",
-                    "end": "(?=\\})",
+                    "begin": "(\\blamb)\\s*(\\()",
+                    "end": "(\\))\\s*(:)\\s*([\\w\\[\\]]+)\\s*(\\{)",
                     "beginCaptures": {
-                        "0": {
+                        "1": {
                             "name": "keyword.declaration.lambda.alum"
+                        },
+                        "2": {
+                            "name": "punctuation.definition.parameters.begin.alum"
+                        }
+                    },
+                    "endCaptures": {
+                        "1": {
+                            "name": "punctuation.definition.parameters.end.alum"
+                        },
+                        "2": {
+                            "name": "punctuation.separator.type-annotation.alum"
+                        },
+                        "3": {
+                            "patterns": [
+                                {
+                                    "include": "#types"
+                                }
+                            ]
+                        },
+                        "4": {
+                            "name": "punctuation.definition.block.begin.alum"
                         }
                     },
                     "patterns": [
                         {
-                            "name": "punctuation.definition.parameters.begin.alum",
-                            "match": "\\("
-                        },
-                        {
-                            "name": "punctuation.definition.parameters.end.alum",
-                            "match": "\\)"
-                        },
-                        {
                             "name": "variable.parameter.alum",
-                            "match": "[a-zA-Z_][a-zA-Z0-9_]*"
+                            "match": "([A-Za-z_][A-Za-z0-9_]*)\\s*(:)",
+                            "captures": {
+                                "1": {
+                                    "name": "variable.parameter.alum"
+                                },
+                                "2": {
+                                    "name": "punctuation.separator.type-annotation.alum"
+                                }
+                            }
                         },
                         {
                             "include": "#types"
@@ -372,172 +360,169 @@
                         {
                             "name": "punctuation.separator.alum",
                             "match": ","
-                        },
-                        {
-                            "name": "punctuation.separator.alum",
-                            "match": ":"
-                        },
-                        {
-                            "include": "$self"
                         }
                     ]
                 }
             ]
         },
-        "function-pointer": {
-            "patterns": [
-                {
-                    "name": "meta.function.pointer.type.alum",
-                    "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*:\\s*([\\w\\[\\]]+)\\s*\\(",
-                    "captures": {
-                        "1": {
-                            "name": "variable.other.constant.alum"
-                        },
-                        "2": {
-                            "patterns": [
-                                {
-                                    "include": "#types"
-                                }
-                            ]
-                        }
-                    }
-                }
-            ]
-        },
-        "function-declarations": {
+        "function-declaration": {
             "patterns": [
                 {
                     "name": "meta.function.declaration.alum",
-                    "begin": "\\b(fun)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\(",
-                    "end": "\\)(\\s*:\\s*[\\w\\[\\]]+)?\\s*(?==|\\{)",
+                    "begin": "(\\bfun)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(\\()",
+                    "end": "(\\))\\s*(:)\\s*([\\w\\[\\]]+)\\s*(\\{)",
                     "beginCaptures": {
                         "1": {
                             "name": "keyword.declaration.function.alum"
                         },
                         "2": {
                             "name": "entity.name.function.alum"
+                        },
+                        "3": {
+                            "name": "punctuation.definition.parameters.begin.alum"
                         }
                     },
                     "endCaptures": {
                         "1": {
+                            "name": "punctuation.definition.parameters.end.alum"
+                        },
+                        "2": {
+                            "name": "punctuation.separator.type-annotation.alum"
+                        },
+                        "3": {
                             "patterns": [
                                 {
                                     "include": "#types"
                                 }
                             ]
+                        },
+                        "4": {
+                            "name": "punctuation.definition.block.begin.alum"
                         }
                     },
                     "patterns": [
                         {
+                            "name": "variable.parameter.alum",
+                            "match": "([A-Za-z_][A-Za-z0-9_]*)\\s*(:)\\s*([\\w\\[\\]]+)",
+                            "captures": {
+                                "1": {
+                                    "name": "variable.parameter.alum"
+                                },
+                                "2": {
+                                    "name": "punctuation.separator.type-annotation.alum"
+                                },
+                                "3": {
+                                    "patterns": [
+                                        {
+                                            "include": "#types"
+                                        }
+                                    ]
+                                }
+                            }
+                        },
+                        {
                             "include": "#types"
                         },
                         {
-                            "name": "variable.parameter.alum",
-                            "match": "[a-zA-Z_][a-zA-Z0-9_]*"
-                        },
-                        {
-                            "name": "keyword.operator.alum",
-                            "match": "[:,()]"
+                            "name": "punctuation.separator.alum",
+                            "match": ","
                         }
                     ]
                 }
             ]
         },
-        "extern-declarations": {
+        "extern-declaration": {
             "patterns": [
                 {
                     "name": "meta.extern.declaration.alum",
-                    "begin": "\\b(extern)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\(",
-                    "end": "\\)(\\s*:\\s*[\\w\\[\\]]+)?\\s*(?=;)",
+                    "begin": "(\\bextern)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(\\()",
+                    "end": "(\\))\\s*(:)\\s*([\\w\\[\\]]+)\\s*(;)",
                     "beginCaptures": {
                         "1": {
                             "name": "keyword.declaration.extern.alum"
                         },
                         "2": {
                             "name": "entity.name.function.extern.alum"
+                        },
+                        "3": {
+                            "name": "punctuation.definition.parameters.begin.alum"
                         }
                     },
                     "endCaptures": {
                         "1": {
+                            "name": "punctuation.definition.parameters.end.alum"
+                        },
+                        "2": {
+                            "name": "punctuation.separator.type-annotation.alum"
+                        },
+                        "3": {
                             "patterns": [
                                 {
                                     "include": "#types"
                                 }
                             ]
+                        },
+                        "4": {
+                            "name": "punctuation.terminator.alum"
                         }
                     },
                     "patterns": [
+                        {
+                            "name": "variable.parameter.alum",
+                            "match": "([A-Za-z_][A-Za-z0-9_]*)\\s*(:)\\s*([\\w\\[\\]]+)",
+                            "captures": {
+                                "1": {
+                                    "name": "variable.parameter.alum"
+                                },
+                                "2": {
+                                    "name": "punctuation.separator.type-annotation.alum"
+                                },
+                                "3": {
+                                    "patterns": [
+                                        {
+                                            "include": "#types"
+                                        }
+                                    ]
+                                }
+                            }
+                        },
                         {
                             "include": "#types"
                         },
                         {
-                            "name": "variable.parameter.alum",
-                            "match": "[a-zA-Z_][a-zA-Z0-9_]*"
-                        },
-                        {
-                            "name": "keyword.operator.alum",
-                            "match": "[:,()]"
+                            "name": "punctuation.separator.alum",
+                            "match": ","
                         }
                     ]
                 }
             ]
         },
-        "function-calls": {
+        "variable-declaration": {
             "patterns": [
                 {
-                    "name": "meta.function.call.alum",
-                    "begin": "([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\(",
-                    "end": "\\)",
-                    "beginCaptures": {
+                    "name": "meta.variable.declaration.alum",
+                    "match": "(\\blet)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(:)\\s*([\\w\\[\\]]+)\\s*(=)",
+                    "captures": {
                         "1": {
-                            "name": "entity.name.function.alum"
+                            "name": "storage.modifier.alum"
+                        },
+                        "2": {
+                            "name": "variable.other.readwrite.alum"
+                        },
+                        "3": {
+                            "name": "punctuation.separator.type-annotation.alum"
+                        },
+                        "4": {
+                            "patterns": [
+                                {
+                                    "include": "#types"
+                                }
+                            ]
+                        },
+                        "5": {
+                            "name": "keyword.operator.assignment.alum"
                         }
-                    },
-                    "patterns": [
-                        {
-                            "include": "$self"
-                        }
-                    ]
-                }
-            ]
-        },
-        "operators": {
-            "patterns": [
-                {
-                    "name": "keyword.operator.arithmetic.alum",
-                    "match": "\\+|\\-|\\*|\\/"
-                },
-                {
-                    "name": "keyword.operator.assignment.alum",
-                    "match": "=|\\+=|\\-=|\\*=|\\/="
-                },
-                {
-                    "name": "keyword.operator.comparison.alum",
-                    "match": "==|!=|>|<|>=|<="
-                },
-                {
-                    "name": "keyword.operator.logical.alum",
-                    "match": "&&|\\|\\|!"
-                },
-                {
-                    "name": "keyword.operator.access.alum",
-                    "match": "\\."
-                },
-                {
-                    "name": "keyword.operator.range.alum",
-                    "match": "\\.\\."
-                },
-                {
-                    "name": "keyword.operator.bracket.alum",
-                    "match": "\\[|\\]"
-                },
-                {
-                    "name": "keyword.operator.parenthesis.alum",
-                    "match": "\\(|\\)"
-                },
-                {
-                    "name": "keyword.operator.brace.alum",
-                    "match": "\\{|\\}"
+                    }
                 }
             ]
         },
@@ -545,7 +530,7 @@
             "patterns": [
                 {
                     "name": "support.function.builtin.io.alum",
-                    "match": "\\b(print|println|input|read|write|fopen|fclose|fread|fwrite|lseek)\\b"
+                    "match": "\\b(write|read|print|println|input|fopen|fclose|fread|fwrite|lseek)\\b"
                 },
                 {
                     "name": "support.function.builtin.math.alum",
@@ -569,11 +554,96 @@
                 }
             ]
         },
-        "variables": {
+        "literals": {
             "patterns": [
                 {
-                    "name": "variable.other.readwrite.alum",
-                    "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*\\b"
+                    "name": "constant.numeric.integer.alum",
+                    "match": "\\b[0-9]+\\b"
+                },
+                {
+                    "name": "constant.numeric.float.alum",
+                    "match": "\\b[0-9]+\\.[0-9]+([eE][+-]?[0-9]+)?\\b"
+                },
+                {
+                    "name": "string.quoted.double.alum",
+                    "begin": "\"",
+                    "end": "\"",
+                    "beginCaptures": {
+                        "0": {
+                            "name": "punctuation.definition.string.begin.alum"
+                        }
+                    },
+                    "endCaptures": {
+                        "0": {
+                            "name": "punctuation.definition.string.end.alum"
+                        }
+                    },
+                    "patterns": [
+                        {
+                            "name": "constant.character.escape.alum",
+                            "match": "\\\\."
+                        }
+                    ]
+                },
+                {
+                    "name": "meta.array.literal.alum",
+                    "begin": "(\\[)",
+                    "end": "(\\])",
+                    "beginCaptures": {
+                        "1": {
+                            "name": "punctuation.definition.array.begin.alum"
+                        }
+                    },
+                    "endCaptures": {
+                        "1": {
+                            "name": "punctuation.definition.array.end.alum"
+                        }
+                    },
+                    "patterns": [
+                        {
+                            "include": "$self"
+                        }
+                    ]
+                }
+            ]
+        },
+        "operators": {
+            "patterns": [
+                {
+                    "name": "keyword.operator.arithmetic.alum",
+                    "match": "\\+|\\-|\\*|\\/"
+                },
+                {
+                    "name": "keyword.operator.assignment.alum",
+                    "match": "((?<![\\w=])(=)|\\+=|\\-=|\\*=|\\/=|%=)"
+                },
+                {
+                    "name": "keyword.operator.comparison.alum",
+                    "match": "==|!=|>|<|>=|<="
+                },
+                {
+                    "name": "keyword.operator.logical.alum",
+                    "match": "&&|\\|\\||!"
+                },
+                {
+                    "name": "keyword.operator.range.alum",
+                    "match": "\\.\\."
+                },
+                {
+                    "name": "keyword.operator.modulo.alum",
+                    "match": "%"
+                },
+                {
+                    "name": "punctuation.accessor.alum",
+                    "match": "\\."
+                },
+                {
+                    "name": "punctuation.separator.alum",
+                    "match": ","
+                },
+                {
+                    "name": "punctuation.terminator.alum",
+                    "match": ";"
                 }
             ]
         }
