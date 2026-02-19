@@ -439,6 +439,7 @@ impl<'a> Lexer<'a> {
                     "string" => Token::TYPE(ident),
                     "arr" => Token::IDENT(ident),
                     "void" => Token::TYPE(ident),
+                    "any" => Token::TYPE(ident),
                     "true" => Token::BOOL(true),
                     "false" => Token::BOOL(false),
                     "nil" => Token::NIL,

@@ -146,6 +146,9 @@ Alum is a statically typed language with explicit type annotations. All variable
 - `string`: String type
 - `void`: No return type
 - `arr[T]`: Array of type T
+- `any`: Generic type with automatic type inference
+
+The `any` type supports generic-like programming with automatic type inference. Variables and parameters of type `any` can accept any value, and the compiler infers the actual type based on usage context.
 
 ### Variables
 
@@ -256,6 +259,55 @@ fun main(): int {
 
 Lambda syntax: `lamb(param: type, ...): return_type body`
 
+### Any Type (Generic Programming)
+
+The `any` type provides generic-like functionality with automatic type inference:
+
+```al
+fun identity(x: any): any {
+    return x
+}
+
+fun add(a: any, b: any): any {
+    return a + b
+}
+
+fun main(): int {
+    // any type accepts any value
+    let x: any = 42
+    let y: any = "hello"
+    let z: any = 3.14
+
+    // Type is inferred from usage
+    let result: any = identity(x)  // inferred as int
+    println(itoa(result))
+
+    // Works with arithmetic operations
+    let sum: any = add(10, 20)  // inferred as int
+    println(itoa(sum))
+
+    // Functions can return any type
+    fun get_func(): any {
+        fun helper(): any {
+            return 42
+        }
+        return helper
+    }
+
+    let func_ptr: any = get_func()
+    let value: any = func_ptr()  // inferred as int
+    println(itoa(value))
+
+    return 0
+}
+```
+
+**Key Features:**
+- **Type Inference**: The actual type is inferred from how the value is used
+- **Flexibility**: Can represent any type (int, float, string, functions, etc.)
+- **Safety**: Type checking is still performed at compile time
+- **Compatibility**: `any` is compatible with all other types
+
 ### Preprocessor Directives
 
 ```al
@@ -308,6 +360,11 @@ Source Code (.al)
         │
         ▼
 ┌───────────────┐
+│   Optimizer   │  →  Constant folding, dead code elimination
+└───────────────┘
+        │
+        ▼
+┌───────────────┐
 │ Code Generator│  →  Compiles AST to machine code using Cranelift
 └───────────────┘
         │
@@ -329,8 +386,15 @@ Source Code (.al)
 2. **Lexing**: Tokenizes source code into a stream of tokens
 3. **Parsing**: Builds Abstract Syntax Tree (AST) from tokens
 4. **Type Checking**: Validates type safety and semantic rules
-5. **Code Generation**: Compiles AST to machine code using Cranelift
-6. **Linking**: Links object files with standard library to produce executable
+5. **Optimization**: Performs constant folding, dead code elimination, and other optimizations
+6. **Code Generation**: Compiles AST to machine code using Cranelift
+7. **Linking**: Links object files with standard library to produce executable
+
+**Optimizations performed:**
+- Constant folding (e.g., `2 + 3` → `5`)
+- Algebraic simplifications (e.g., `x + 0` → `x`)
+- Dead code elimination
+- Branch elimination (e.g., removing unreachable code)
 
 ## Project Structure
 

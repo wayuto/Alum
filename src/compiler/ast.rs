@@ -10,6 +10,7 @@ pub enum Type {
     Named(String),
     Array(Box<Type>),
     Function(Vec<Box<Type>>, Box<Type>),
+    TypeVar(usize), // 类型变量，用于泛型支持
 }
 
 impl fmt::Display for Type {
@@ -21,6 +22,7 @@ impl fmt::Display for Type {
                 let param_str: Vec<String> = params.iter().map(|p| p.to_string()).collect();
                 write!(f, "{}({})", ret, param_str.join(", "))
             }
+            Type::TypeVar(id) => write!(f, "T{}", id),
         }
     }
 }

@@ -93,7 +93,7 @@ impl CodeGen {
     ) -> i64 {
         match ty {
             Type::Named(name) => match name.as_str() {
-                "int" | "float" => 8,
+                "int" | "float" | "any" => 8,
                 "string" => 8,
                 "void" => 0,
                 _ => {
@@ -106,6 +106,7 @@ impl CodeGen {
             },
             Type::Array(_) => 8,
             Type::Function(_, _) => 8,
+            Type::TypeVar(_) => 8, // 类型变量在运行时作为 any 类型处理
         }
     }
 
@@ -116,7 +117,7 @@ impl CodeGen {
     ) -> i64 {
         match ty {
             Type::Named(name) => match name.as_str() {
-                "int" | "float" => 8,
+                "int" | "float" | "any" => 8,
                 "string" => 8,
                 "bool" => 1,
                 "void" => 1,
@@ -135,6 +136,7 @@ impl CodeGen {
             },
             Type::Array(_) => 8,
             Type::Function(_, _) => 8,
+            Type::TypeVar(_) => 8, // 类型变量在运行时作为 any 类型处理
         }
     }
 
@@ -210,6 +212,7 @@ impl CodeGen {
         type_map.insert("bool".to_string(), types::I8);
         type_map.insert("string".to_string(), types::I64);
         type_map.insert("void".to_string(), types::INVALID);
+        type_map.insert("any".to_string(), types::I64);
         Self {
             ast,
             module,
@@ -1653,7 +1656,27 @@ impl CodeGen {
                 )?;
                 let var = Variable::from_u32(*idx);
                 *idx += 1;
-                builder.declare_var(get_type(ty, type_map));
+
+                // If the declared type is 'any', use the actual type of the value
+                let decl_type = if let Type::Named(n) = ty {
+                    if n == "any" {
+                        // For 'any' type, use the value's actual type
+                        // Get the type from the expression
+                        match &**value {
+                            Expr::Int(_) => Type::Named("int".to_string()),
+                            Expr::Float(_) => Type::Named("float".to_string()),
+                            Expr::Bool(_) => Type::Named("bool".to_string()),
+                            Expr::String(_) => Type::Named("string".to_string()),
+                            _ => Type::Named("int".to_string()),
+                        }
+                    } else {
+                        ty.clone()
+                    }
+                } else {
+                    ty.clone()
+                };
+
+                builder.declare_var(get_type(&decl_type, type_map));
                 builder.def_var(var, val);
                 scope_stack.last_mut().unwrap().insert(name.clone(), var);
                 type_stack
@@ -2617,5 +2640,6 @@ fn get_type(t: &Type, type_map: &HashMap<String, ir::Type>) -> ir::Type {
         Type::Named(name) => *type_map.get(name).unwrap_or(&types::I64),
         Type::Array(_) => types::I64,
         Type::Function(_, _) => types::I64,
+        Type::TypeVar(_) => types::I64, // 类型变量作为 I64（any）处理
     };
 }
