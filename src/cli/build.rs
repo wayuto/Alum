@@ -1,4 +1,4 @@
-use crate::compiler::{checker::TypeChecker, codegen::CodeGen, lexer::Lexer, parser::Parser, preprocessor::Preprocessor};
+use crate::compiler::{checker::TypeChecker, codegen::CodeGen, lexer::Lexer, optimizer::Optimizer, parser::Parser, preprocessor::Preprocessor};
 use std::fs;
 
 pub fn build(
@@ -43,6 +43,12 @@ pub fn build(
     }
     let checker = TypeChecker::new();
     checker.check(&mut ast)?;
+
+    if verbose {
+        eprintln!("Optimizing...");
+    }
+    let optimizer = Optimizer::new();
+    optimizer.optimize(&mut ast);
 
     if print_ast {
         println!("{}", ast);

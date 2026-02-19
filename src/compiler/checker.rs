@@ -83,11 +83,8 @@ struct StructDef {
 
 pub struct TypeChecker {
     type_stack: Vec<HashMap<String, Type>>,
-
     functions: HashMap<String, (Vec<Type>, Type)>,
-
     structs: HashMap<String, StructDef>,
-
     typedefs: HashMap<String, Type>,
 }
 

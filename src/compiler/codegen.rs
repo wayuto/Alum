@@ -2,7 +2,8 @@ use crate::compiler::ast::{Expr, Program, Type};
 use cranelift::{
     codegen::{ir, settings},
     prelude::{
-        AbiParam, FunctionBuilder, FunctionBuilderContext, InstBuilder, Signature, Value, Variable,
+        AbiParam, Configurable, FunctionBuilder, FunctionBuilderContext, InstBuilder, Signature,
+        Value, Variable,
         isa::{self, CallConv},
         types,
     },
@@ -158,7 +159,12 @@ impl CodeGen {
     }
 
     pub fn new(ast: Program) -> Self {
-        let flag_builder = settings::builder();
+        let mut flag_builder = settings::builder();
+        flag_builder.set("opt_level", "speed").unwrap();
+        flag_builder.set("enable_alias_analysis", "true").unwrap();
+        flag_builder
+            .set("regalloc_algorithm", "backtracking")
+            .unwrap();
         let flags = settings::Flags::new(flag_builder);
         let isa_builder = isa::lookup_by_name("x86_64").unwrap();
         let isa = isa_builder.finish(flags).unwrap();
