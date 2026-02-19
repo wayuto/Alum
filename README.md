@@ -10,7 +10,6 @@ Alum is a modern, systems programming language designed for simplicity and perfo
 - **Fast Compilation**: Efficient compilation pipeline
 - **FFI Support**: Interoperability with C for low-level operations
 - **Build Tool**: Integrated build system (almk) for project management
-- **Optimizations**: Built-in optimizations including constant folding, dead code elimination, and unused code removal
 - **Lambda Functions**: Support for anonymous functions and closures
 - **Parametric Macros**: Powerful macro system with parameter substitution
 
@@ -237,7 +236,7 @@ fun apply_function(f: fun(int): int, value: int): int {
 
 fun main(): int {
     // Define a lambda
-    let square: fun(int): int = lamb(x: int): int {
+    let square: int(int): int = lamb(x: int): int {
         return x * x
     }
 
@@ -245,7 +244,7 @@ fun main(): int {
     println(itoa(result))  // Output: 25
 
     // Use lambda directly
-    let double: fun(int): int = lamb(x: int): int {
+    let double: int(int): int = lamb(x: int): int {
         return x * 2
     }
     let doubled: int = double(10)
@@ -255,7 +254,7 @@ fun main(): int {
 }
 ```
 
-Lambda syntax: `lamb(params): return_type { body }`
+Lambda syntax: `lamb(param: type, ...): return_type body`
 
 ### Preprocessor Directives
 
@@ -309,11 +308,6 @@ Source Code (.al)
         │
         ▼
 ┌───────────────┐
-│   Optimizer   │  →  Constant folding, dead code elimination, unused code removal
-└───────────────┘
-        │
-        ▼
-┌───────────────┐
 │ Code Generator│  →  Compiles AST to machine code using Cranelift
 └───────────────┘
         │
@@ -335,9 +329,8 @@ Source Code (.al)
 2. **Lexing**: Tokenizes source code into a stream of tokens
 3. **Parsing**: Builds Abstract Syntax Tree (AST) from tokens
 4. **Type Checking**: Validates type safety and semantic rules
-5. **Optimization**: Performs constant folding, dead code elimination, and unused code removal
-6. **Code Generation**: Compiles AST to machine code using Cranelift
-7. **Linking**: Links object files with standard library to produce executable
+5. **Code Generation**: Compiles AST to machine code using Cranelift
+6. **Linking**: Links object files with standard library to produce executable
 
 ## Project Structure
 
