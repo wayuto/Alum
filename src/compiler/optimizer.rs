@@ -1,5 +1,5 @@
 use crate::compiler::ast::{Expr, Program};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 pub struct Optimizer {
     lib_mode: bool,
@@ -15,16 +15,155 @@ impl Optimizer {
     }
 
     pub fn optimize(&self, program: &mut Program) {
+        // 常量传播
+        for expr in &mut program.body {
+            self.propagate_constants(expr, &mut HashMap::new());
+        }
+        
+        // 常量折叠
         for expr in &mut program.body {
             self.optimize_expr(expr);
         }
-
+        
+        // 死代码消除
         for expr in &mut program.body {
             self.dce(expr);
         }
 
         if !self.lib_mode {
             self.eliminate_unused(program);
+        }
+    }
+
+    fn propagate_constants(&self, expr: &mut Expr, consts: &mut HashMap<String, Expr>) {
+        match expr {
+            Expr::Stmt(body) => {
+                for e in body {
+                    self.propagate_constants(e, consts);
+                }
+            }
+            Expr::VarDecl(name, _, value) => {
+                self.propagate_constants(value, consts);
+                if self.can_propagate(value) {
+                    consts.insert(name.clone(), *value.clone());
+                }
+            }
+            Expr::VarAssign(name, value) => {
+                self.propagate_constants(value, consts);
+                if self.can_propagate(value) {
+                    consts.insert(name.clone(), *value.clone());
+                } else {
+                    consts.remove(name);
+                }
+            }
+            Expr::Var(name) => {
+                if let Some(const_val) = consts.get(name) {
+                    *expr = const_val.clone();
+                }
+            }
+            Expr::If(cond, t, e) => {
+                self.propagate_constants(cond, consts);
+                // 分支需要新的常量表
+                let mut t_consts = consts.clone();
+                self.propagate_constants(t, &mut t_consts);
+                if let Some(e) = e {
+                    let mut e_consts = consts.clone();
+                    self.propagate_constants(e, &mut e_consts);
+                }
+            }
+            Expr::While(cond, body) => {
+                self.propagate_constants(cond, consts);
+                let mut body_consts = consts.clone();
+                self.propagate_constants(body, &mut body_consts);
+            }
+            Expr::For(_, start, end, body) => {
+                self.propagate_constants(start, consts);
+                self.propagate_constants(end, consts);
+                let mut body_consts = consts.clone();
+                self.propagate_constants(body, &mut body_consts);
+            }
+            Expr::FuncDecl(_, params, _, body) => {
+                // 函数有新的作用域，清除常量
+                let mut func_consts = HashMap::new();
+                // 排除参数
+                for (param_name, _) in params {
+                    func_consts.insert(param_name.clone(), Expr::Nil);
+                }
+                self.propagate_constants(body, &mut func_consts);
+            }
+            _ => {
+                // 递归处理子表达式
+                match expr {
+                    Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r)
+                    | Expr::Mod(l, r) | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r)
+                    | Expr::Le(l, r) | Expr::Gt(l, r) | Expr::Ge(l, r) => {
+                        self.propagate_constants(l, consts);
+                        self.propagate_constants(r, consts);
+                    }
+                    Expr::FAdd(l, r) | Expr::FSub(l, r) | Expr::FMul(l, r) | Expr::FDiv(l, r)
+                    | Expr::FEq(l, r) | Expr::FNe(l, r) | Expr::FLt(l, r) | Expr::FLe(l, r)
+                    | Expr::FGt(l, r) | Expr::FGe(l, r) => {
+                        self.propagate_constants(l, consts);
+                        self.propagate_constants(r, consts);
+                    }
+                    Expr::And(l, r) | Expr::Or(l, r) | Expr::Index(l, r) => {
+                        self.propagate_constants(l, consts);
+                        self.propagate_constants(r, consts);
+                    }
+                    Expr::Not(e) | Expr::ArrayFill(_, e) => {
+                        self.propagate_constants(e, consts);
+                    }
+                    Expr::Call(func, args) => {
+                        self.propagate_constants(func, consts);
+                        for arg in args {
+                            self.propagate_constants(arg, consts);
+                        }
+                    }
+                    Expr::Return(e) => {
+                        self.propagate_constants(e, consts);
+                    }
+                    Expr::ArrayLiteral(elems) => {
+                        for e in elems {
+                            self.propagate_constants(e, consts);
+                        }
+                    }
+                    Expr::IndexAssign(arr, v) => {
+                        self.propagate_constants(arr, consts);
+                        self.propagate_constants(v, consts);
+                    }
+                    Expr::StructLiteral(_, fields) => {
+                        for (_, v) in fields {
+                            self.propagate_constants(v, consts);
+                        }
+                    }
+                    Expr::MemberAccess(obj, _) => {
+                        self.propagate_constants(obj, consts);
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    fn is_constant(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Int(_) | Expr::Float(_) | Expr::Bool(_) | Expr::String(_) => true,
+            Expr::Nil => true,
+            _ => false,
+        }
+    }
+
+    fn can_propagate(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Int(_) | Expr::Float(_) | Expr::Bool(_) | Expr::String(_) => true,
+            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) => {
+                self.can_propagate(l) && self.can_propagate(r)
+            }
+            Expr::Div(l, r) => {
+                self.can_propagate(l) && self.can_propagate(r) && 
+                !matches!(r.as_ref(), Expr::Int(0) | Expr::Float(0.0))
+            }
+            _ => false,
         }
     }
 
@@ -110,21 +249,41 @@ impl Optimizer {
             Expr::Add(l, r) => match (l.as_ref(), r.as_ref()) {
                 (Expr::Int(a), Expr::Int(b)) => Some(Expr::Int(a + b)),
                 (Expr::Float(a), Expr::Float(b)) => Some(Expr::Float(a + b)),
+
+                (Expr::Int(0), _) => Some(*r.clone()),
+                (_, Expr::Int(0)) => Some(*l.clone()),
+                (Expr::Float(0.0), _) => Some(*r.clone()),
+                (_, Expr::Float(0.0)) => Some(*l.clone()),
                 _ => None,
             },
             Expr::Sub(l, r) => match (l.as_ref(), r.as_ref()) {
                 (Expr::Int(a), Expr::Int(b)) => Some(Expr::Int(a - b)),
                 (Expr::Float(a), Expr::Float(b)) => Some(Expr::Float(a - b)),
+
+                (_, Expr::Int(0)) => Some(*l.clone()),
+                (_, Expr::Float(0.0)) => Some(*l.clone()),
                 _ => None,
             },
             Expr::Mul(l, r) => match (l.as_ref(), r.as_ref()) {
                 (Expr::Int(a), Expr::Int(b)) => Some(Expr::Int(a * b)),
                 (Expr::Float(a), Expr::Float(b)) => Some(Expr::Float(a * b)),
+
+                (Expr::Int(0), _) => Some(Expr::Int(0)),
+                (_, Expr::Int(0)) => Some(Expr::Int(0)),
+                (Expr::Float(0.0), _) => Some(Expr::Float(0.0)),
+                (_, Expr::Float(0.0)) => Some(Expr::Float(0.0)),
+                (Expr::Int(1), _) => Some(*r.clone()),
+                (_, Expr::Int(1)) => Some(*l.clone()),
+                (Expr::Float(1.0), _) => Some(*r.clone()),
+                (_, Expr::Float(1.0)) => Some(*l.clone()),
                 _ => None,
             },
             Expr::Div(l, r) => match (l.as_ref(), r.as_ref()) {
                 (Expr::Int(a), Expr::Int(b)) => Some(Expr::Int(a / b)),
                 (Expr::Float(a), Expr::Float(b)) => Some(Expr::Float(a / b)),
+
+                (_, Expr::Int(1)) => Some(*l.clone()),
+                (_, Expr::Float(1.0)) => Some(*l.clone()),
                 _ => None,
             },
             Expr::Mod(l, r) => match (l.as_ref(), r.as_ref()) {
@@ -133,18 +292,26 @@ impl Optimizer {
             },
             Expr::FAdd(l, r) => match (l.as_ref(), r.as_ref()) {
                 (Expr::Float(a), Expr::Float(b)) => Some(Expr::Float(a + b)),
+                (Expr::Float(0.0), _) => Some(*r.clone()),
+                (_, Expr::Float(0.0)) => Some(*l.clone()),
                 _ => None,
             },
             Expr::FSub(l, r) => match (l.as_ref(), r.as_ref()) {
                 (Expr::Float(a), Expr::Float(b)) => Some(Expr::Float(a - b)),
+                (_, Expr::Float(0.0)) => Some(*l.clone()),
                 _ => None,
             },
             Expr::FMul(l, r) => match (l.as_ref(), r.as_ref()) {
                 (Expr::Float(a), Expr::Float(b)) => Some(Expr::Float(a * b)),
+                (Expr::Float(0.0), _) => Some(Expr::Float(0.0)),
+                (_, Expr::Float(0.0)) => Some(Expr::Float(0.0)),
+                (Expr::Float(1.0), _) => Some(*r.clone()),
+                (_, Expr::Float(1.0)) => Some(*l.clone()),
                 _ => None,
             },
             Expr::FDiv(l, r) => match (l.as_ref(), r.as_ref()) {
                 (Expr::Float(a), Expr::Float(b)) => Some(Expr::Float(a / b)),
+                (_, Expr::Float(1.0)) => Some(*l.clone()),
                 _ => None,
             },
             Expr::Eq(l, r) => match (l.as_ref(), r.as_ref()) {
