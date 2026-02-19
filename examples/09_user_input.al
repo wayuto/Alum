@@ -1,5 +1,6 @@
 $import "io.al"
 $import "convert.al"
+$import "memory.al"
 
 // User Input Example
 // Demonstrates reading user input

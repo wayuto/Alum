@@ -5,7 +5,10 @@ use clap::Parser;
 #[command(version = "0.7.0")]
 #[command(about = "Alum compiler")]
 pub struct Cli {
-    #[arg(value_name = "INPUT", help = "Input files (.al source files or .o/.obj object files)")]
+    #[arg(
+        value_name = "INPUT",
+        help = "Input files (.al source files or .o/.obj object files)"
+    )]
     pub input: Vec<String>,
 
     #[arg(short = 'o', long, value_name = "FILE", help = "Output file name")]
@@ -23,7 +26,10 @@ pub struct Cli {
     #[arg(short = 'I', value_name = "DIR", action = clap::ArgAction::Append, help = "Add include directory")]
     pub include_paths: Vec<String>,
 
-    #[arg(short = 'E', help = "Preprocess only; do not compile, assemble or link")]
+    #[arg(
+        short = 'E',
+        help = "Preprocess only; do not compile, assemble or link"
+    )]
     pub preprocess_only: bool,
 
     #[arg(long, help = "Do not link with standard library")]
@@ -31,7 +37,4 @@ pub struct Cli {
 
     #[arg(short = 'v', long, help = "Verbose output")]
     pub verbose: bool,
-
-    #[arg(long, help = "Library mode - keep all functions (useful for building libraries)")]
-    pub lib: bool,
 }

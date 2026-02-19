@@ -10,7 +10,10 @@ use cranelift::{
 };
 use cranelift_module::{FuncId, Linkage, Module};
 use cranelift_object::{ObjectBuilder, ObjectModule};
-use std::{collections::HashMap, fmt::Display};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Display,
+};
 
 #[derive(Debug)]
 pub enum CodeGenError {
@@ -53,6 +56,7 @@ struct LoopContext {
     header_block: ir::Block,
     exit_block: ir::Block,
     increment_block: Option<ir::Block>,
+    loop_params: Vec<(String, Variable)>,
 }
 
 #[derive(Clone, Debug)]
@@ -78,6 +82,7 @@ pub struct CodeGen {
     loop_stack: Vec<LoopContext>,
     type_map: HashMap<String, ir::Type>,
     structs: HashMap<String, StructDef>,
+    lambda_counter: u32,
 }
 
 impl CodeGen {
@@ -166,6 +171,22 @@ impl CodeGen {
         }
     }
 
+    fn has_break_or_continue(expr: &Expr) -> bool {
+        match expr {
+            Expr::Break | Expr::Continue => true,
+            Expr::Stmt(body) => body.iter().any(|e| Self::has_break_or_continue(e)),
+            Expr::If(_, then_branch, else_branch) => {
+                Self::has_break_or_continue(then_branch)
+                    || else_branch
+                        .as_ref()
+                        .map_or(false, |e| Self::has_break_or_continue(e))
+            }
+            Expr::While(_, body) => Self::has_break_or_continue(body),
+            Expr::For(_, _, _, body) => Self::has_break_or_continue(body),
+            _ => false,
+        }
+    }
+
     pub fn new(ast: Program) -> Self {
         let mut flag_builder = settings::builder();
         flag_builder.set("opt_level", "speed").unwrap();
@@ -197,10 +218,217 @@ impl CodeGen {
             loop_stack: Vec::new(),
             type_map,
             structs: HashMap::new(),
+            lambda_counter: 0,
         }
     }
 
+    fn convert_lambdas_to_functions(&mut self, program: Program) -> Program {
+        let mut new_body = Vec::new();
+        let mut lambda_map: std::collections::HashMap<String, Expr> =
+            std::collections::HashMap::new();
+
+        fn process_expr(
+            expr: Expr,
+            lambda_counter: &mut u32,
+            lambda_map: &mut std::collections::HashMap<String, Expr>,
+        ) -> Expr {
+            match expr {
+                Expr::Lambda(params, body, ret_type) => {
+                    let lambda_name = format!("_lambda_{}", lambda_counter);
+                    *lambda_counter += 1;
+
+                    let lambda_func = Expr::FuncDecl(lambda_name.clone(), params, ret_type, body);
+                    lambda_map.insert(lambda_name.clone(), lambda_func);
+
+                    Expr::Var(lambda_name)
+                }
+                Expr::Stmt(body) => Expr::Stmt(
+                    body.into_iter()
+                        .map(|e| process_expr(e, lambda_counter, lambda_map))
+                        .collect(),
+                ),
+                Expr::Add(l, r) => Expr::Add(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                ),
+                Expr::Sub(l, r) => Expr::Sub(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                ),
+                Expr::Mul(l, r) => Expr::Mul(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                ),
+                Expr::Div(l, r) => Expr::Div(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                ),
+                Expr::Mod(l, r) => Expr::Mod(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                ),
+                Expr::FAdd(l, r) => Expr::FAdd(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                ),
+                Expr::FSub(l, r) => Expr::FSub(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                ),
+                Expr::FMul(l, r) => Expr::FMul(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                ),
+                Expr::FDiv(l, r) => Expr::FDiv(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                ),
+                Expr::Eq(l, r) => Expr::Eq(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                ),
+                Expr::Ne(l, r) => Expr::Ne(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                ),
+                Expr::Lt(l, r) => Expr::Lt(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                ),
+                Expr::Le(l, r) => Expr::Le(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                ),
+                Expr::Gt(l, r) => Expr::Gt(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                ),
+                Expr::Ge(l, r) => Expr::Ge(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                ),
+                Expr::FEq(l, r) => Expr::FEq(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                ),
+                Expr::FNe(l, r) => Expr::FNe(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                ),
+                Expr::FLt(l, r) => Expr::FLt(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                ),
+                Expr::FLe(l, r) => Expr::FLe(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                ),
+                Expr::FGt(l, r) => Expr::FGt(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                ),
+                Expr::FGe(l, r) => Expr::FGe(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                ),
+                Expr::And(l, r) => Expr::And(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                ),
+                Expr::Or(l, r) => Expr::Or(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                ),
+                Expr::Not(e) => Expr::Not(Box::new(process_expr(*e, lambda_counter, lambda_map))),
+                Expr::StrCat(l, r) => Expr::StrCat(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                ),
+                Expr::VarDecl(name, ty, val) => Expr::VarDecl(
+                    name,
+                    ty,
+                    Box::new(process_expr(*val, lambda_counter, lambda_map)),
+                ),
+                Expr::VarAssign(name, val) => Expr::VarAssign(
+                    name,
+                    Box::new(process_expr(*val, lambda_counter, lambda_map)),
+                ),
+                Expr::Call(func, args) => Expr::Call(
+                    Box::new(process_expr(*func, lambda_counter, lambda_map)),
+                    args.into_iter()
+                        .map(|a| process_expr(a, lambda_counter, lambda_map))
+                        .collect(),
+                ),
+                Expr::Return(e) => {
+                    Expr::Return(Box::new(process_expr(*e, lambda_counter, lambda_map)))
+                }
+                Expr::If(cond, then_branch, else_branch) => Expr::If(
+                    Box::new(process_expr(*cond, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*then_branch, lambda_counter, lambda_map)),
+                    else_branch.map(|e| Box::new(process_expr(*e, lambda_counter, lambda_map))),
+                ),
+                Expr::While(cond, body) => Expr::While(
+                    Box::new(process_expr(*cond, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*body, lambda_counter, lambda_map)),
+                ),
+                Expr::For(var, start, end, body) => Expr::For(
+                    var,
+                    Box::new(process_expr(*start, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*end, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*body, lambda_counter, lambda_map)),
+                ),
+                Expr::Index(arr, idx) => Expr::Index(
+                    Box::new(process_expr(*arr, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*idx, lambda_counter, lambda_map)),
+                ),
+                Expr::IndexAssign(arr, val) => Expr::IndexAssign(
+                    Box::new(process_expr(*arr, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*val, lambda_counter, lambda_map)),
+                ),
+                Expr::ArrayLiteral(elements) => Expr::ArrayLiteral(
+                    elements
+                        .into_iter()
+                        .map(|e| process_expr(e, lambda_counter, lambda_map))
+                        .collect(),
+                ),
+                Expr::ArrayFill(ty, len) => {
+                    Expr::ArrayFill(ty, Box::new(process_expr(*len, lambda_counter, lambda_map)))
+                }
+                Expr::StructLiteral(name, fields) => Expr::StructLiteral(
+                    name,
+                    fields
+                        .into_iter()
+                        .map(|(n, e)| (n, process_expr(e, lambda_counter, lambda_map)))
+                        .collect(),
+                ),
+                Expr::MemberAccess(obj, field) => Expr::MemberAccess(
+                    Box::new(process_expr(*obj, lambda_counter, lambda_map)),
+                    field,
+                ),
+                Expr::FuncDecl(name, params, ret_type, body) => Expr::FuncDecl(
+                    name,
+                    params,
+                    ret_type,
+                    Box::new(process_expr(*body, lambda_counter, lambda_map)),
+                ),
+                _ => expr,
+            }
+        }
+
+        for expr in program.body {
+            let processed = process_expr(expr, &mut self.lambda_counter, &mut lambda_map);
+            new_body.push(processed);
+        }
+
+        let lambda_funcs: Vec<Expr> = lambda_map.into_values().collect();
+        new_body.splice(0..0, lambda_funcs);
+
+        Program { body: new_body }
+    }
+
     pub fn generate(mut self) -> Result<Vec<u8>, CodeGenError> {
+        self.ast = self.convert_lambdas_to_functions(self.ast.clone());
+
         for expr in self.ast.body.clone() {
             match expr {
                 Expr::FuncDecl(name, params, ret_type, _body) => {
@@ -1584,15 +1812,32 @@ impl CodeGen {
 
                 let then_has_return = Self::has_return(then_branch);
                 let else_has_return = else_branch.as_ref().map_or(false, |e| Self::has_return(e));
-                let both_return = then_has_return && else_has_return;
+
+                let then_has_break = Self::has_break_or_continue(then_branch);
+                let else_has_break = else_branch
+                    .as_ref()
+                    .map_or(false, |e| Self::has_break_or_continue(e));
+                let has_break_or_continue = then_has_break || else_has_break;
+
+                let in_loop = !loop_stack.is_empty();
+                let then_has_terminal = then_has_return || (in_loop && then_has_break);
+                let else_has_terminal = else_has_return || (in_loop && else_has_break);
+                let both_terminal = then_has_terminal && else_has_terminal;
+
+                let in_loop_with_increment = loop_stack
+                    .last()
+                    .and_then(|ctx| ctx.increment_block)
+                    .is_some();
 
                 let then_block = builder.create_block();
                 let else_block = builder.create_block();
-                let merge_block = if both_return {
-                    None
-                } else {
-                    Some(builder.create_block())
-                };
+
+                let merge_block =
+                    if both_terminal || in_loop_with_increment || has_break_or_continue {
+                        None
+                    } else {
+                        Some(builder.create_block())
+                    };
 
                 let cond_i64 = builder.ins().uextend(types::I64, cond_val);
                 builder
@@ -1618,9 +1863,19 @@ impl CodeGen {
                 scope_stack.pop();
                 type_stack.pop();
 
-                if !then_has_return {
+                if !then_has_terminal {
                     if let Some(merge) = merge_block {
-                        builder.ins().jump(merge, &[then_val.into()]);
+                        if else_branch.is_some() {
+                            builder.ins().jump(merge, &[then_val.into()]);
+                        } else {
+                            builder.ins().jump(merge, &[]);
+                        }
+                    } else if in_loop_with_increment {
+                        if let Some(loop_ctx) = loop_stack.last() {
+                            if let Some(inc_block) = loop_ctx.increment_block {
+                                builder.ins().jump(inc_block, &[]);
+                            }
+                        }
                     }
                 }
                 builder.seal_block(then_block);
@@ -1645,9 +1900,15 @@ impl CodeGen {
                     scope_stack.pop();
                     type_stack.pop();
 
-                    if !else_has_return {
+                    if !else_has_terminal {
                         if let Some(merge) = merge_block {
                             builder.ins().jump(merge, &[val.into()]);
+                        } else if in_loop_with_increment {
+                            if let Some(loop_ctx) = loop_stack.last() {
+                                if let Some(inc_block) = loop_ctx.increment_block {
+                                    builder.ins().jump(inc_block, &[]);
+                                }
+                            }
                         }
                     }
                     Some(val)
@@ -1673,7 +1934,7 @@ impl CodeGen {
                         Ok(then_val)
                     }
                 } else {
-                    Ok(Value::from_u32(0))
+                    Ok(then_val)
                 }
             }
             Expr::While(cond, body) => {
@@ -1685,11 +1946,45 @@ impl CodeGen {
                     header_block: loop_header,
                     exit_block: loop_exit,
                     increment_block: None,
+                    loop_params: Vec::new(),
                 });
 
-                builder.ins().jump(loop_header, &[]);
+                let mut modified_vars = HashSet::new();
+                Self::find_var_assignments(body, &mut modified_vars);
+
+                let mut loop_params = Vec::new();
+                let mut param_types = Vec::new();
+                for var_name in &modified_vars {
+                    if let Some(var) = Self::lookup_var(var_name, scope_stack) {
+                        let var_value = builder.use_var(*var);
+                        let var_type = builder.func.dfg.value_type(var_value);
+                        param_types.push(var_type);
+                        let param = builder.append_block_param(loop_header, var_type);
+                        loop_params.push((var_name.clone(), param, *var));
+                    }
+                }
+
+                if let Some(loop_ctx) = loop_stack.last_mut() {
+                    loop_ctx.loop_params = loop_params
+                        .iter()
+                        .map(|(name, _, var)| (name.clone(), *var))
+                        .collect();
+                }
+
+                let initial_values: Vec<Value> = loop_params
+                    .iter()
+                    .map(|(_, _, var)| builder.use_var(*var))
+                    .collect();
+                let initial_args: Vec<ir::BlockArg> =
+                    initial_values.iter().map(|v| (*v).into()).collect();
+                builder.ins().jump(loop_header, initial_args.as_slice());
 
                 builder.switch_to_block(loop_header);
+
+                for (_, param, var) in &loop_params {
+                    builder.def_var(*var, *param);
+                }
+
                 let cond_val = Self::compile_expr(
                     cond,
                     builder,
@@ -1725,7 +2020,18 @@ impl CodeGen {
                 scope_stack.pop();
                 type_stack.pop();
                 loop_stack.pop();
-                builder.ins().jump(loop_header, &[]);
+
+                let mut loop_values = Vec::new();
+                for (var_name, _, var) in &loop_params {
+                    if let Some(v) = Self::lookup_var(var_name, scope_stack) {
+                        loop_values.push(builder.use_var(*v));
+                    } else {
+                        loop_values.push(builder.use_var(*var));
+                    }
+                }
+                let loop_args: Vec<ir::BlockArg> =
+                    loop_values.iter().map(|v| (*v).into()).collect();
+                builder.ins().jump(loop_header, loop_args.as_slice());
 
                 builder.seal_block(loop_body);
                 builder.seal_block(loop_header);
@@ -1962,6 +2268,7 @@ impl CodeGen {
                     header_block: loop_header,
                     exit_block: loop_exit,
                     increment_block: Some(loop_increment),
+                    loop_params: Vec::new(),
                 });
 
                 let start_val = Self::compile_expr(
@@ -2056,8 +2363,6 @@ impl CodeGen {
             Expr::Break => {
                 if let Some(loop_ctx) = loop_stack.last() {
                     builder.ins().jump(loop_ctx.exit_block, &[]);
-                    let unreachable_block = builder.create_block();
-                    builder.switch_to_block(unreachable_block);
                     Ok(Value::from_u32(0))
                 } else {
                     Err(CodeGenError::ModuleError(
@@ -2070,10 +2375,20 @@ impl CodeGen {
                     if let Some(inc_block) = loop_ctx.increment_block {
                         builder.ins().jump(inc_block, &[]);
                     } else {
-                        builder.ins().jump(loop_ctx.header_block, &[]);
+                        let mut loop_values = Vec::new();
+                        for (var_name, var) in &loop_ctx.loop_params {
+                            if let Some(v) = Self::lookup_var(var_name, scope_stack) {
+                                loop_values.push(builder.use_var(*v));
+                            } else {
+                                loop_values.push(builder.use_var(*var));
+                            }
+                        }
+                        let loop_args: Vec<ir::BlockArg> =
+                            loop_values.iter().map(|v| (*v).into()).collect();
+                        builder
+                            .ins()
+                            .jump(loop_ctx.header_block, loop_args.as_slice());
                     }
-                    let unreachable_block = builder.create_block();
-                    builder.switch_to_block(unreachable_block);
                     Ok(Value::from_u32(0))
                 } else {
                     Err(CodeGenError::ModuleError(
@@ -2204,6 +2519,95 @@ impl CodeGen {
             _ => Err(CodeGenError::UnexpectedExpression {
                 found: expr.clone(),
             }),
+        }
+    }
+
+    fn find_var_assignments(expr: &Expr, modified_vars: &mut HashSet<String>) {
+        match expr {
+            Expr::Stmt(body) => {
+                for e in body {
+                    Self::find_var_assignments(e, modified_vars);
+                }
+            }
+            Expr::VarAssign(name, _) => {
+                modified_vars.insert(name.clone());
+            }
+            Expr::If(cond, t, e) => {
+                Self::find_var_assignments(cond, modified_vars);
+                Self::find_var_assignments(t, modified_vars);
+                if let Some(e) = e {
+                    Self::find_var_assignments(e, modified_vars);
+                }
+            }
+            Expr::While(cond, body) => {
+                Self::find_var_assignments(cond, modified_vars);
+                Self::find_var_assignments(body, modified_vars);
+            }
+            Expr::For(_, start, end, body) => {
+                Self::find_var_assignments(start, modified_vars);
+                Self::find_var_assignments(end, modified_vars);
+                Self::find_var_assignments(body, modified_vars);
+            }
+            Expr::Add(l, r)
+            | Expr::Sub(l, r)
+            | Expr::Mul(l, r)
+            | Expr::Div(l, r)
+            | Expr::Mod(l, r)
+            | Expr::FAdd(l, r)
+            | Expr::FSub(l, r)
+            | Expr::FMul(l, r)
+            | Expr::FDiv(l, r)
+            | Expr::Eq(l, r)
+            | Expr::Ne(l, r)
+            | Expr::Lt(l, r)
+            | Expr::Le(l, r)
+            | Expr::Gt(l, r)
+            | Expr::Ge(l, r)
+            | Expr::FEq(l, r)
+            | Expr::FNe(l, r)
+            | Expr::FLt(l, r)
+            | Expr::FLe(l, r)
+            | Expr::FGt(l, r)
+            | Expr::FGe(l, r)
+            | Expr::And(l, r)
+            | Expr::Or(l, r)
+            | Expr::StrCat(l, r) => {
+                Self::find_var_assignments(l, modified_vars);
+                Self::find_var_assignments(r, modified_vars);
+            }
+            Expr::Not(e) | Expr::Return(e) => {
+                Self::find_var_assignments(e, modified_vars);
+            }
+            Expr::Call(func, args) => {
+                Self::find_var_assignments(func, modified_vars);
+                for a in args {
+                    Self::find_var_assignments(a, modified_vars);
+                }
+            }
+            Expr::Index(arr, idx) => {
+                Self::find_var_assignments(arr, modified_vars);
+                Self::find_var_assignments(idx, modified_vars);
+            }
+            Expr::IndexAssign(arr, _) => {
+                Self::find_var_assignments(arr, modified_vars);
+            }
+            Expr::ArrayLiteral(elements) => {
+                for e in elements {
+                    Self::find_var_assignments(e, modified_vars);
+                }
+            }
+            Expr::ArrayFill(_, len) => {
+                Self::find_var_assignments(len, modified_vars);
+            }
+            Expr::StructLiteral(_, fields) => {
+                for (_, f) in fields {
+                    Self::find_var_assignments(f, modified_vars);
+                }
+            }
+            Expr::MemberAccess(obj, _) => {
+                Self::find_var_assignments(obj, modified_vars);
+            }
+            _ => {}
         }
     }
 }

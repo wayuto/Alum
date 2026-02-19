@@ -1,6 +1,12 @@
 use std::{collections::HashMap, fs, iter::Peekable, path::Path, str::Chars};
 
 #[derive(Debug, Clone)]
+pub struct MacroDefinition {
+    pub params: Vec<String>,
+    pub body: String,
+}
+
+#[derive(Debug, Clone)]
 pub enum PreprocessorError {
     ImportError {
         file: String,
@@ -13,6 +19,11 @@ pub enum PreprocessorError {
         col: usize,
     },
     ConditionError {
+        message: String,
+        row: usize,
+        col: usize,
+    },
+    MacroError {
         message: String,
         row: usize,
         col: usize,
@@ -37,6 +48,9 @@ impl std::fmt::Display for PreprocessorError {
             PreprocessorError::ConditionError { message, row, col } => {
                 write!(f, "Condition error at {}:{}: {}", row, col, message)
             }
+            PreprocessorError::MacroError { message, row, col } => {
+                write!(f, "Macro error at {}:{}: {}", row, col, message)
+            }
         }
     }
 }
@@ -47,7 +61,7 @@ pub struct Preprocessor<'a> {
     include_paths: Vec<String>,
     row: usize,
     col: usize,
-    defines: HashMap<String, String>,
+    defines: HashMap<String, MacroDefinition>,
     condition_stack: Vec<bool>,
     skipping: bool,
 }
@@ -139,14 +153,134 @@ impl<'a> Preprocessor<'a> {
 
         while changed && iterations < max_iterations {
             changed = false;
-            for (name, val) in &self.defines {
-                let pattern = format!("${}", name);
-                if result.contains(&pattern) {
-                    result = result.replace(&pattern, val);
+
+            for (name, macro_def) in &self.defines {
+                let macro_pattern = format!("{}(", name);
+                let mut search_start = 0;
+
+                while let Some(pos) = result[search_start..].find(&macro_pattern) {
+                    let abs_pos = search_start + pos;
+                    let args_start = abs_pos + name.len();
+
+                    let (args_str, args_end) = match self.extract_args(&result, args_start) {
+                        Some(args) => args,
+                        None => {
+                            search_start = abs_pos + 1;
+                            continue;
+                        }
+                    };
+
+                    let args: Vec<String> =
+                        args_str.split(',').map(|s| s.trim().to_string()).collect();
+
+                    if args.len() != macro_def.params.len() {
+                        search_start = abs_pos + 1;
+                        continue;
+                    }
+
+                    let expanded_body =
+                        self.substitute_params(&macro_def.body, &macro_def.params, &args);
+
+                    let before = &result[..abs_pos];
+                    let after = &result[args_end..];
+                    result = format!("{}{}{}", before, expanded_body, after);
+
                     changed = true;
+                    search_start = abs_pos + expanded_body.len();
                 }
             }
+
+            for (name, macro_def) in &self.defines {
+                if macro_def.params.is_empty() {
+                    let mut new_result = String::new();
+                    let mut i = 0;
+                    while i < result.len() {
+                        if result[i..].starts_with(name) {
+                            let before = if i > 0 {
+                                Some(result.chars().nth(i - 1).unwrap())
+                            } else {
+                                None
+                            };
+                            let after = if i + name.len() < result.len() {
+                                Some(result.chars().nth(i + name.len()).unwrap())
+                            } else {
+                                None
+                            };
+
+                            let is_ident_before =
+                                before.map_or(false, |c| c.is_alphanumeric() || c == '_');
+                            let is_ident_after =
+                                after.map_or(false, |c| c.is_alphanumeric() || c == '_');
+
+                            if !is_ident_before && !is_ident_after {
+                                new_result.push_str(&macro_def.body);
+                                i += name.len();
+                                changed = true;
+                                continue;
+                            }
+                        }
+                        new_result.push(result.chars().nth(i).unwrap());
+                        i += 1;
+                    }
+                    result = new_result;
+                }
+            }
+
             iterations += 1;
+        }
+
+        result
+    }
+
+    fn extract_args(&self, text: &str, start: usize) -> Option<(String, usize)> {
+        if start >= text.len() || text.as_bytes()[start] != b'(' {
+            return None;
+        }
+
+        let mut depth = 1;
+        let args_start = start + 1;
+        let mut args_end = start;
+        let mut in_string = false;
+        let mut string_char = '\0';
+
+        for (i, c) in text[start + 1..].char_indices() {
+            let pos = start + 1 + i;
+
+            if c == '"' || c == '\'' {
+                if !in_string {
+                    in_string = true;
+                    string_char = c;
+                } else if c == string_char {
+                    in_string = false;
+                }
+            }
+
+            if !in_string {
+                if c == '(' {
+                    depth += 1;
+                } else if c == ')' {
+                    if depth == 1 {
+                        args_end = pos;
+                        break;
+                    }
+                    depth -= 1;
+                }
+            }
+        }
+
+        if depth != 1 {
+            return None;
+        }
+
+        let args_str = text[args_start..args_end].trim().to_string();
+        Some((args_str, args_end + 1))
+    }
+
+    fn substitute_params(&self, body: &str, params: &[String], args: &[String]) -> String {
+        let mut result = body.to_string();
+
+        for (param, arg) in params.iter().zip(args.iter()) {
+            result = result.replace(param, arg);
         }
 
         result
@@ -216,15 +350,77 @@ impl<'a> Preprocessor<'a> {
                         let name = self.parse_ident();
                         self.skip_spaces();
 
-                        let mut value = String::new();
-                        while self.current() != '\n' && self.current() != '\0' {
-                            value.push(self.current());
+                        let (params, value) = if self.current() == '(' {
                             self.bump();
-                        }
+                            let mut params = Vec::new();
+                            let mut current_param = String::new();
 
-                        let value = value.trim().to_string();
+                            while self.current() != ')' && self.current() != '\0' {
+                                if self.current() == ',' {
+                                    if !current_param.trim().is_empty() {
+                                        params.push(current_param.trim().to_string());
+                                    }
+                                    current_param.clear();
+                                    self.bump();
+                                    self.skip_spaces();
+                                } else if self.current().is_alphanumeric() || self.current() == '_'
+                                {
+                                    current_param.push(self.current());
+                                    self.bump();
+                                } else if !self.current().is_whitespace() {
+                                    return Err(PreprocessorError::MacroError {
+                                        message: format!(
+                                            "Invalid parameter name: '{}'",
+                                            self.current()
+                                        ),
+                                        row: self.row,
+                                        col: self.col,
+                                    });
+                                } else {
+                                    self.bump();
+                                }
+                            }
+
+                            if !current_param.trim().is_empty() {
+                                params.push(current_param.trim().to_string());
+                            }
+
+                            if self.current() != ')' {
+                                return Err(PreprocessorError::MacroError {
+                                    message: "Unclosed parameter list in macro definition"
+                                        .to_string(),
+                                    row: self.row,
+                                    col: self.col,
+                                });
+                            }
+                            self.bump();
+                            self.skip_spaces();
+
+                            let mut macro_body = String::new();
+                            while self.current() != '\n' && self.current() != '\0' {
+                                macro_body.push(self.current());
+                                self.bump();
+                            }
+
+                            (params, macro_body.trim().to_string())
+                        } else {
+                            let mut simple_value = String::new();
+                            while self.current() != '\n' && self.current() != '\0' {
+                                simple_value.push(self.current());
+                                self.bump();
+                            }
+                            (Vec::new(), simple_value.trim().to_string())
+                        };
+
                         let expanded_value = self.expand_macros(&value);
-                        self.defines.insert(name, expanded_value);
+
+                        self.defines.insert(
+                            name,
+                            MacroDefinition {
+                                params,
+                                body: expanded_value,
+                            },
+                        );
                     }
                     "ifdef" => {
                         let condition_met = self.check_condition(false);
@@ -293,8 +489,13 @@ impl<'a> Preprocessor<'a> {
                             continue;
                         }
 
-                        if let Some(val) = self.defines.get(&cmd) {
-                            output.push_str(val);
+                        if let Some(macro_def) = self.defines.get(&cmd) {
+                            if macro_def.params.is_empty() {
+                                output.push_str(&macro_def.body);
+                            } else {
+                                output.push('$');
+                                output.push_str(&cmd);
+                            }
                         } else {
                             output.push('$');
                             output.push_str(&cmd);
@@ -309,12 +510,7 @@ impl<'a> Preprocessor<'a> {
 
                 if self.current().is_ascii_alphabetic() || self.current() == '_' {
                     let ident = self.parse_ident();
-
-                    if let Some(val) = self.defines.get(&ident) {
-                        output.push_str(val);
-                    } else {
-                        output.push_str(&ident);
-                    }
+                    output.push_str(&ident);
                 } else {
                     output.push(self.current());
                     self.bump();
@@ -330,6 +526,7 @@ impl<'a> Preprocessor<'a> {
             });
         }
 
-        Ok(output)
+        let expanded_output = self.expand_macros(&output);
+        Ok(expanded_output)
     }
 }

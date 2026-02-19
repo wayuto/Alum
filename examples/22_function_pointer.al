@@ -2,7 +2,7 @@
 $import "io.al"
 $import "convert.al"
 
-fun add_numbers(a: int, b: int): int {
+fun add(a: int, b: int): int {
     return a + b
 }
 
@@ -18,7 +18,7 @@ fun main(): int {
     println(result)
 
     // Test 3: Another function pointer
-    let g: int(int, int) = add_numbers
+    let g: int(int, int) = add
     let sum: int = g(5, 7)
 
     println("g(5, 7) = ")

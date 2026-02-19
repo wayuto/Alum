@@ -100,6 +100,7 @@ pub enum Token {
     STRUCT,
     TYPE(String),
     IDENT(String),
+    LAMBDA,
     EOF,
 }
 
@@ -449,6 +450,7 @@ impl<'a> Lexer<'a> {
                     "continue" => Token::CONTINUE,
                     "typedef" => Token::TYPEDEF,
                     "struct" => Token::STRUCT,
+                    "lamb" => Token::LAMBDA,
                     _ => Token::IDENT(ident),
                 }
             }

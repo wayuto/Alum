@@ -448,6 +448,15 @@ impl<'a> Parser<'a> {
                     self.next()?;
                     return Ok(Expr::Nil);
                 }
+                Ok(Token::LAMBDA) => {
+                    self.next()?;
+                    self.expect(Token::LPAREN)?;
+                    let params = self.get_params_list()?;
+                    self.expect(Token::RPAREN)?;
+                    self.expect(Token::COLON)?;
+                    let ret_type = self.parse_type()?;
+                    return Ok(Expr::Lambda(params, Box::new(self.expr()?), ret_type));
+                }
                 Ok(Token::LPAREN) => {
                     self.next()?;
                     let expr = self.logical()?;

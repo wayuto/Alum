@@ -78,6 +78,7 @@ pub enum Expr {
     Struct(String, Vec<(String, Type)>),
     StructLiteral(String, Vec<(String, Expr)>),
     MemberAccess(Box<Expr>, String),
+    Lambda(Vec<(String, Type)>, Box<Expr>, Type),
 }
 
 impl fmt::Display for Program {
@@ -466,6 +467,22 @@ impl Expr {
                 write!(f, "\n")?;
                 obj.fmt_with_indent(f, indent + 1)?;
                 write!(f, " .{}", field)?;
+                write!(f, "\n{})", indent_str)
+            }
+            Expr::Lambda(params, body, ret_type) => {
+                let param_str: Vec<String> = params
+                    .iter()
+                    .map(|(n, t)| format!("{}: {}", n, t))
+                    .collect();
+                write!(
+                    f,
+                    "{}Lambda({}) -> {}",
+                    indent_str,
+                    param_str.join(", "),
+                    ret_type
+                )?;
+                write!(f, "\n")?;
+                body.fmt_with_indent(f, indent + 1)?;
                 write!(f, "\n{})", indent_str)
             }
         }

@@ -11,6 +11,8 @@ Alum is a modern, systems programming language designed for simplicity and perfo
 - **FFI Support**: Interoperability with C for low-level operations
 - **Build Tool**: Integrated build system (almk) for project management
 - **Optimizations**: Built-in optimizations including constant folding, dead code elimination, and unused code removal
+- **Lambda Functions**: Support for anonymous functions and closures
+- **Parametric Macros**: Powerful macro system with parameter substitution
 
 ## Installation
 
@@ -95,7 +97,6 @@ Options:
   --ast                     Output AST representation
   -I <DIR>                  Add include directory (can be used multiple times)
   --nostdlib                Do not link with standard library
-  --lib                     Library mode - keep all functions (useful for building libraries)
   -v, --verbose             Verbose output
   -h, --help                Print help
   -V, --version             Print version
@@ -225,15 +226,61 @@ println(itoa(p.x))
 println(itoa(p.y))
 ```
 
+### Lambda Functions
+
+Alum supports anonymous functions (lambdas) for functional programming patterns:
+
+```al
+fun apply_function(f: fun(int): int, value: int): int {
+    return f(value)
+}
+
+fun main(): int {
+    // Define a lambda
+    let square: fun(int): int = lamb(x: int): int {
+        return x * x
+    }
+
+    let result: int = apply_function(square, 5)
+    println(itoa(result))  // Output: 25
+
+    // Use lambda directly
+    let double: fun(int): int = lamb(x: int): int {
+        return x * 2
+    }
+    let doubled: int = double(10)
+    println(itoa(doubled))  // Output: 20
+
+    return 0
+}
+```
+
+Lambda syntax: `lamb(params): return_type { body }`
+
 ### Preprocessor Directives
 
 ```al
+// Simple macro (no parameters)
 $define PI 3.14159
+$define HELLO "Hello, World!"
+
+// Parametric macro with parameters
+$define ADD(a, b) a + b
+$define MAX(a, b) if a > b { a } else { b }
+
+// Conditional compilation
 $ifndef ALUM_LIB
 $define ALUM_LIB 1
 $endif
+
+// Import modules
 $import "io.al"
 ```
+
+**Macro Usage:**
+- Simple macros are used directly without a prefix: `println(HELLO)`
+- Parametric macros are called like functions: `let sum: int = ADD(10, 20)`
+- Macros support nested calls: `MAX(ADD(x, y), 100)`
 
 ## Compilation Pipeline
 
@@ -284,7 +331,7 @@ Source Code (.al)
 
 ### Pipeline Stages
 
-1. **Preprocessing**: Handles `$import`, `$define`, `$ifdef`, `$ifndef`, `$endif` directives
+1. **Preprocessing**: Handles `$import`, `$define`, `$ifdef`, `$ifndef`, `$endif` directives, and macro expansion
 2. **Lexing**: Tokenizes source code into a stream of tokens
 3. **Parsing**: Builds Abstract Syntax Tree (AST) from tokens
 4. **Type Checking**: Validates type safety and semantic rules

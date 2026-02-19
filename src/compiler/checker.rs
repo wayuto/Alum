@@ -758,6 +758,19 @@ impl TypeChecker {
                 self.check_expr(rhs)?;
                 Ok(Type::Named("string".to_string()))
             }
+            Expr::Lambda(params, body, ret_type) => {
+                self.push_scope();
+                for (param_name, param_type) in params.iter() {
+                    self.declare_var(param_name, param_type.clone());
+                }
+                self.check_expr(body)?;
+                self.pop_scope();
+                let param_types: Vec<Type> = params.iter().map(|(_, t)| t.clone()).collect();
+                Ok(Type::Function(
+                    param_types.iter().map(|t| Box::new(t.clone())).collect(),
+                    Box::new(ret_type.clone()),
+                ))
+            }
         }
     }
 
