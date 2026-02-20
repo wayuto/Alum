@@ -561,7 +561,7 @@
                 },
                 {
                     "name": "support.function.builtin.memory.alum",
-                    "match": "\\b(malloc)\\b"
+                    "match": "\\b(malloc|free)\\b"
                 },
                 {
                     "name": "support.function.builtin.system.alum",
