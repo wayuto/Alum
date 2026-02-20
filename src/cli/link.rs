@@ -6,7 +6,6 @@ pub fn link(
     exe_path: &str,
     verbose: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // std_lib_path should point to libalum.a (merged Rust + Alum standard library)
     let mut cmd = Command::new("rust-lld");
 
     cmd.arg("-flavor").arg("gnu");
