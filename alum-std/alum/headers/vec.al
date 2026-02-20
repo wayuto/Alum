@@ -1,5 +1,5 @@
 $ifndef ALUM_VEC
-$define ALUM_VECs 1
+$define ALUM_VEC 1
 
 struct Vec {
     data: arr[any],
