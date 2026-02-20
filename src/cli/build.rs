@@ -97,7 +97,7 @@ pub fn exec_run(
 
     let exe_path = std::path::Path::new(&exe_file);
 
-    let std_lib_path = "/usr/local/lib/libalum_std.a";
+    let std_lib_path = "/usr/local/lib/libalum.a";
 
     super::link::link(
         vec![obj_file],

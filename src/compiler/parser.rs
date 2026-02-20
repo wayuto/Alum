@@ -266,7 +266,33 @@ impl<'a> Parser<'a> {
                     if let Some(Ok(Token::EQ)) = self.peek() {
                         self.next()?;
                         let val = self.expr()?;
-                        return Ok(Expr::IndexAssign(Box::new(expr), Box::new(val)));
+                        return match &expr {
+                            Expr::Index(_, _) => {
+                                if let Expr::Index(arr, idx) = expr {
+                                    Ok(Expr::IndexAssign(
+                                        Box::new(Expr::Index(arr, idx)),
+                                        Box::new(val),
+                                    ))
+                                } else {
+                                    unreachable!()
+                                }
+                            }
+                            Expr::MemberAccess(_, _) => {
+                                if let Expr::MemberAccess(obj, field) = expr {
+                                    Ok(Expr::MemberAssign(obj, field, Box::new(val)))
+                                } else {
+                                    unreachable!()
+                                }
+                            }
+                            Expr::Deref(_) => {
+                                if let Expr::Deref(ptr) = expr {
+                                    Ok(Expr::DerefAssign(ptr, Box::new(val)))
+                                } else {
+                                    unreachable!()
+                                }
+                            }
+                            _ => Ok(Expr::IndexAssign(Box::new(expr), Box::new(val))),
+                        };
                     }
                     Ok(expr)
                 }
@@ -298,66 +324,70 @@ impl<'a> Parser<'a> {
 
     fn call(&mut self) -> Result<Expr, ParserError> {
         let mut callee = self.factor()?;
-        while let Some(Ok(Token::LPAREN)) = self.peek() {
-            self.next()?;
-            let mut args = Vec::new();
-            loop {
-                match self.peek().cloned() {
-                    Some(Ok(Token::RPAREN)) => {
-                        self.next()?;
-                        break;
-                    }
-                    Some(Ok(_)) => {
-                        args.push(self.expr()?);
-                        match self.next()? {
-                            Token::COMMA => {}
-                            Token::RPAREN => break,
-                            token => {
+
+        loop {
+            match self.peek().cloned() {
+                Some(Ok(Token::LPAREN)) => {
+                    self.next()?;
+                    let mut args = Vec::new();
+                    loop {
+                        match self.peek().cloned() {
+                            Some(Ok(Token::RPAREN)) => {
+                                self.next()?;
+                                break;
+                            }
+                            Some(Ok(_)) => {
+                                args.push(self.expr()?);
+                                match self.next()? {
+                                    Token::COMMA => {}
+                                    Token::RPAREN => break,
+                                    token => {
+                                        return Err(ParserError::UnexpectedToken {
+                                            expected: Some(Token::COMMA),
+                                            found: token,
+                                        });
+                                    }
+                                }
+                            }
+                            _ => {
                                 return Err(ParserError::UnexpectedToken {
-                                    expected: Some(Token::COMMA),
-                                    found: token,
+                                    expected: Some(Token::RPAREN),
+                                    found: Token::EOF,
                                 });
                             }
                         }
                     }
-                    _ => {
-                        return Err(ParserError::UnexpectedToken {
-                            expected: Some(Token::RPAREN),
-                            found: Token::EOF,
-                        });
+                    callee = Expr::Call(Box::new(callee), args);
+                }
+                Some(Ok(Token::LBRACKET)) => {
+                    self.next()?;
+                    let index = self.expr()?;
+                    match self.next()? {
+                        Token::RBRACKET => {}
+                        token => {
+                            return Err(ParserError::UnexpectedToken {
+                                expected: Some(Token::RBRACKET),
+                                found: token,
+                            });
+                        }
                     }
+                    callee = Expr::Index(Box::new(callee), Box::new(index));
                 }
+                Some(Ok(Token::DOT)) => {
+                    self.next()?;
+                    let field_name = match self.next()? {
+                        Token::IDENT(s) => s,
+                        token => {
+                            return Err(ParserError::UnexpectedToken {
+                                expected: Some(Token::IDENT("FIELD NAME".to_string())),
+                                found: token,
+                            });
+                        }
+                    };
+                    callee = Expr::MemberAccess(Box::new(callee), field_name);
+                }
+                _ => break,
             }
-            callee = Expr::Call(Box::new(callee), args);
-        }
-
-        while let Some(Ok(Token::LBRACKET)) = self.peek() {
-            self.next()?;
-            let index = self.expr()?;
-            match self.next()? {
-                Token::RBRACKET => {}
-                token => {
-                    return Err(ParserError::UnexpectedToken {
-                        expected: Some(Token::RBRACKET),
-                        found: token,
-                    });
-                }
-            }
-            callee = Expr::Index(Box::new(callee), Box::new(index));
-        }
-
-        while let Some(Ok(Token::DOT)) = self.peek() {
-            self.next()?;
-            let field_name = match self.next()? {
-                Token::IDENT(s) => s,
-                token => {
-                    return Err(ParserError::UnexpectedToken {
-                        expected: Some(Token::IDENT("FIELD NAME".to_string())),
-                        found: token,
-                    });
-                }
-            };
-            callee = Expr::MemberAccess(Box::new(callee), field_name);
         }
 
         Ok(callee)
@@ -619,6 +649,21 @@ impl<'a> Parser<'a> {
                     let operand = self.factor()?;
                     return Ok(Expr::Sub(Box::new(Expr::Int(0)), Box::new(operand)));
                 }
+                Ok(Token::PLUS) => {
+                    self.next()?;
+                    let operand = self.factor()?;
+                    return Ok(Expr::Add(Box::new(Expr::Int(0)), Box::new(operand)));
+                }
+                Ok(Token::STAR) => {
+                    self.next()?;
+                    let operand = self.parse_atom()?;
+                    return Ok(Expr::Deref(Box::new(operand)));
+                }
+                Ok(Token::LAND) => {
+                    self.next()?;
+                    let operand = self.parse_atom()?;
+                    return Ok(Expr::AddressOf(Box::new(operand)));
+                }
                 Ok(Token::NOT) => {
                     self.next()?;
                     let operand = self.factor()?;
@@ -723,6 +768,12 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_type(&mut self) -> Result<Type, ParserError> {
+        if let Some(Ok(Token::STAR)) = self.peek() {
+            self.next()?;
+            let inner_type = self.parse_type()?;
+            return Ok(Type::Pointer(Box::new(inner_type)));
+        }
+
         let first_token = self.next()?;
 
         match first_token {
@@ -801,5 +852,17 @@ impl<'a> Parser<'a> {
 impl From<LexerError> for ParserError {
     fn from(value: LexerError) -> Self {
         Self::LexerError(value)
+    }
+}
+
+impl<'a> Parser<'a> {
+    fn parse_atom(&mut self) -> Result<Expr, ParserError> {
+        match self.next()? {
+            Token::IDENT(name) => Ok(Expr::Var(name)),
+            token => Err(ParserError::UnexpectedToken {
+                expected: Some(Token::IDENT("IDENT".to_string())),
+                found: token,
+            }),
+        }
     }
 }

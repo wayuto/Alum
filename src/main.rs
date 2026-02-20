@@ -1,7 +1,8 @@
 mod cli;
 mod compiler;
 use clap::Parser;
-use cli::{Cli, build, exec_run, link};
+use cli::{Cli, build, exec_run};
+use cli::link::{link, create_static_library, create_shared_library};
 
 fn main() {
     if let Err(e) = run() {
@@ -67,11 +68,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         let std_lib_path = if cli.nostdlib {
             String::new()
         } else {
-            let has_stdlib = obj_files.iter().any(|f| f.contains("libalum_std.a"));
+            let has_stdlib = obj_files.iter().any(|f| f.contains("libalum.a"));
             if has_stdlib {
                 String::new()
             } else {
-                let path = "/usr/local/lib/libalum_std.a";
+                let path = "/usr/local/lib/libalum.a";
                 path.to_string()
             }
         };
@@ -80,7 +81,35 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("Linking {} to {}", obj_files.join(", "), exe_path);
         }
 
-        link::link(obj_files, &std_lib_path, &exe_path, cli.verbose)?;
+        link(obj_files, &std_lib_path, &exe_path, cli.verbose)?;
+        return Ok(());
+    }
+
+if cli.library.is_some() {
+        let lib_type = cli.library.as_ref().unwrap().to_lowercase();
+        let output_path = if let Some(output) = cli.output {
+            output
+        } else {
+            let first_input = cli.input.first().unwrap();
+            let name = if first_input.ends_with(".al") {
+                first_input.replace(".al", "")
+            } else {
+                first_input.clone()
+            };
+            format!("lib{}.a", name)
+        };
+
+        match lib_type.as_str() {
+            "static" | "a" => {
+                create_static_library(obj_files, &output_path, cli.verbose)?;
+            }
+            "shared" | "so" => {
+                create_shared_library(obj_files, &output_path, cli.verbose)?;
+            }
+            _ => {
+                return Err(format!("Unknown library type: {}", lib_type).into());
+            }
+        }
         return Ok(());
     }
 
@@ -99,7 +128,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         let std_lib_path = if cli.nostdlib {
             String::new()
         } else {
-            let path = "/usr/local/lib/libalum_std.a";
+            let path = "/usr/local/lib/libalum.a";
             path.to_string()
         };
 
@@ -107,7 +136,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("Linking {} to {}", obj_files.join(", "), exe_path);
         }
 
-        link::link(obj_files, &std_lib_path, &exe_path, cli.verbose)?;
+        link(obj_files, &std_lib_path, &exe_path, cli.verbose)?;
     }
 
     Ok(())

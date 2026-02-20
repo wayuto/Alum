@@ -6,6 +6,7 @@ pub fn link(
     exe_path: &str,
     verbose: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // std_lib_path should point to libalum.a (merged Rust + Alum standard library)
     let mut cmd = Command::new("rust-lld");
 
     cmd.arg("-flavor").arg("gnu");
@@ -45,6 +46,53 @@ pub fn link(
             }
             let _ = std::fs::remove_file(&obj_file);
         }
+    }
+
+    Ok(())
+}
+
+pub fn create_static_library(
+    obj_files: Vec<String>,
+    output_path: &str,
+    verbose: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if verbose {
+        eprintln!("Creating static library: {}", output_path);
+    }
+
+    let status = Command::new("ar")
+        .arg("rcs")
+        .arg(output_path)
+        .args(&obj_files)
+        .status()?;
+
+    if !status.success() {
+        return Err("Failed to create static library with 'ar' command. Please ensure ar is available (it's part of binutils on Linux/macOS, or available via MinGW on Windows).".into());
+    }
+
+    Ok(())
+}
+
+pub fn create_shared_library(
+    obj_files: Vec<String>,
+    output_path: &str,
+    verbose: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if verbose {
+        eprintln!("Creating shared library: {}", output_path);
+    }
+
+    let status = Command::new("rust-lld")
+        .arg("-flavor")
+        .arg("gnu")
+        .arg("-shared")
+        .arg("-o")
+        .arg(output_path)
+        .args(&obj_files)
+        .status()?;
+
+    if !status.success() {
+        return Err("Failed to create shared library with rust-lld".into());
     }
 
     Ok(())

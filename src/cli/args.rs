@@ -37,4 +37,7 @@ pub struct Cli {
 
     #[arg(short = 'v', long, help = "Verbose output")]
     pub verbose: bool,
+
+    #[arg(long, value_name = "TYPE", help = "Build library (static or shared)")]
+    pub library: Option<String>,
 }

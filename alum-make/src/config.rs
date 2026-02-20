@@ -28,6 +28,8 @@ pub struct Build {
     pub lnflags: Option<String>,
     pub includes: Option<Vec<String>>,
     pub nostdlib: Option<bool>,
+    #[serde(default)]
+    pub library_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

@@ -28,6 +28,7 @@ pub fn new(
             lnflags: None,
             includes: None,
             nostdlib: None,
+            library_type: None,
         },
         dependencies: None,
     };

@@ -3,7 +3,7 @@ use cranelift::{
     codegen::{ir, settings},
     prelude::{
         AbiParam, Configurable, FunctionBuilder, FunctionBuilderContext, InstBuilder, Signature,
-        Value, Variable,
+        Value,
         isa::{self, CallConv},
         types,
     },
@@ -14,6 +14,11 @@ use std::{
     collections::{HashMap, HashSet},
     fmt::Display,
 };
+
+#[derive(Debug, Clone, Copy)]
+enum Slot {
+    StackSlot(ir::StackSlot),
+}
 
 #[derive(Debug)]
 pub enum CodeGenError {
@@ -56,7 +61,8 @@ struct LoopContext {
     header_block: ir::Block,
     exit_block: ir::Block,
     increment_block: Option<ir::Block>,
-    loop_params: Vec<(String, Variable)>,
+    #[allow(dead_code)]
+    loop_params: Vec<(String, Slot)>,
 }
 
 #[derive(Clone, Debug)]
@@ -105,6 +111,7 @@ impl CodeGen {
                 }
             },
             Type::Array(_) => 8,
+            Type::Pointer(_) => 8,
             Type::Function(_, _) => 8,
             Type::TypeVar(_) => 8,
         }
@@ -135,6 +142,7 @@ impl CodeGen {
                 }
             },
             Type::Array(_) => 8,
+            Type::Pointer(_) => 8,
             Type::Function(_, _) => 8,
             Type::TypeVar(_) => 8,
         }
@@ -408,6 +416,21 @@ impl CodeGen {
                     Box::new(process_expr(*obj, lambda_counter, lambda_map)),
                     field,
                 ),
+                Expr::MemberAssign(obj, field, val) => Expr::MemberAssign(
+                    Box::new(process_expr(*obj, lambda_counter, lambda_map)),
+                    field,
+                    Box::new(process_expr(*val, lambda_counter, lambda_map)),
+                ),
+                Expr::AddressOf(expr) => {
+                    Expr::AddressOf(Box::new(process_expr(*expr, lambda_counter, lambda_map)))
+                }
+                Expr::Deref(expr) => {
+                    Expr::Deref(Box::new(process_expr(*expr, lambda_counter, lambda_map)))
+                }
+                Expr::DerefAssign(ptr, val) => Expr::DerefAssign(
+                    Box::new(process_expr(*ptr, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*val, lambda_counter, lambda_map)),
+                ),
                 Expr::FuncDecl(name, params, ret_type, body) => Expr::FuncDecl(
                     name,
                     params,
@@ -545,18 +568,13 @@ impl CodeGen {
         let mut new_ctx = self.module.make_context();
         new_ctx.func.signature = sig.clone();
 
-        let param_types: Vec<ir::Type> = params
-            .iter()
-            .map(|(_, ty)| get_type(ty, &self.type_map))
-            .collect();
-
         let mut builder = FunctionBuilder::new(&mut new_ctx.func, &mut self.builder_context);
         let entry_block = builder.create_block();
         builder.append_block_params_for_function_params(entry_block);
         builder.switch_to_block(entry_block);
         builder.seal_block(entry_block);
 
-        let mut scope_stack: Vec<HashMap<String, Variable>> = Vec::new();
+        let mut scope_stack: Vec<HashMap<String, Slot>> = Vec::new();
         let mut type_stack: Vec<HashMap<String, Type>> = Vec::new();
         scope_stack.push(HashMap::new());
         type_stack.push(HashMap::new());
@@ -564,12 +582,18 @@ impl CodeGen {
 
         for (i, (param_name, param_ty)) in params.iter().enumerate() {
             let val = builder.block_params(entry_block)[i];
-            let var = Variable::from_u32(idx);
-            idx += 1;
-            builder.declare_var(param_types[i]);
-            builder.def_var(var, val);
-            scope_stack[0].insert(param_name.clone(), var);
+
+            let slot_size = Self::get_type_size(param_ty, &self.type_map, &self.structs) as u32;
+            let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                ir::StackSlotKind::ExplicitSlot,
+                slot_size,
+                0,
+            ));
+
+            builder.ins().stack_store(val, slot, 0);
+            scope_stack[0].insert(param_name.clone(), Slot::StackSlot(slot));
             type_stack[0].insert(param_name.clone(), param_ty.clone());
+            idx += 1;
         }
 
         Self::compile_expr(
@@ -602,10 +626,7 @@ impl CodeGen {
         Ok(())
     }
 
-    fn lookup_var<'a>(
-        name: &str,
-        scope_stack: &'a Vec<HashMap<String, Variable>>,
-    ) -> Option<&'a Variable> {
+    fn lookup_var<'a>(name: &str, scope_stack: &'a Vec<HashMap<String, Slot>>) -> Option<&'a Slot> {
         for scope in scope_stack.iter().rev() {
             if let Some(v) = scope.get(name) {
                 return Some(v);
@@ -617,7 +638,7 @@ impl CodeGen {
     fn compile_expr(
         expr: &Expr,
         builder: &mut FunctionBuilder,
-        scope_stack: &mut Vec<HashMap<String, Variable>>,
+        scope_stack: &mut Vec<HashMap<String, Slot>>,
         type_stack: &mut Vec<HashMap<String, Type>>,
         idx: &mut u32,
         func_signatures: &HashMap<String, (FuncId, Signature)>,
@@ -1654,8 +1675,6 @@ impl CodeGen {
                     type_map,
                     structs,
                 )?;
-                let var = Variable::from_u32(*idx);
-                *idx += 1;
 
                 let decl_type = if let Type::Named(n) = ty {
                     if n == "any" {
@@ -1673,13 +1692,23 @@ impl CodeGen {
                     ty.clone()
                 };
 
-                builder.declare_var(get_type(&decl_type, type_map));
-                builder.def_var(var, val);
-                scope_stack.last_mut().unwrap().insert(name.clone(), var);
+                let slot_size = Self::get_type_size(&decl_type, type_map, structs) as u32;
+                let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                    ir::StackSlotKind::ExplicitSlot,
+                    slot_size,
+                    0,
+                ));
+
+                builder.ins().stack_store(val, slot, 0);
+                scope_stack
+                    .last_mut()
+                    .unwrap()
+                    .insert(name.clone(), Slot::StackSlot(slot));
                 type_stack
                     .last_mut()
                     .unwrap()
                     .insert(name.clone(), ty.clone());
+                *idx += 1;
                 Ok(Value::from_u32(0))
             }
 
@@ -1697,14 +1726,42 @@ impl CodeGen {
                     type_map,
                     structs,
                 )?;
-                let var = Self::lookup_var(name, scope_stack)
+                let slot = Self::lookup_var(name, scope_stack)
                     .ok_or_else(|| CodeGenError::UndefinedVariable { name: name.clone() })?;
-                builder.def_var(*var, val);
+                match slot {
+                    Slot::StackSlot(s) => {
+                        builder.ins().stack_store(val, *s, 0);
+                    }
+                }
                 Ok(val)
             }
             Expr::Var(name) => {
-                if let Some(var) = Self::lookup_var(name, scope_stack) {
-                    return Ok(builder.use_var(*var));
+                if let Some(slot) = Self::lookup_var(name, scope_stack) {
+                    return match slot {
+                        Slot::StackSlot(s) => {
+                            let mut found_type = None;
+                            for scope in type_stack.iter().rev() {
+                                if let Some(ty) = scope.get(name) {
+                                    found_type = Some(ty.clone());
+                                    break;
+                                }
+                            }
+
+                            let ty = match found_type {
+                                Some(t) => t,
+                                None => Type::Named("int".to_string()),
+                            };
+
+                            let ir_type = get_type(&ty, type_map);
+                            let val = builder.ins().stack_load(ir_type, *s, 0);
+
+                            if ir_type == types::I8 {
+                                Ok(builder.ins().uextend(types::I64, val))
+                            } else {
+                                Ok(val)
+                            }
+                        }
+                    };
                 }
 
                 if let Some((func_id, _)) = func_signatures.get(name) {
@@ -1859,7 +1916,13 @@ impl CodeGen {
                         Some(builder.create_block())
                     };
 
-                let cond_i64 = builder.ins().uextend(types::I64, cond_val);
+                let cond_type = builder.func.dfg.value_type(cond_val);
+                let cond_i64 = if cond_type == types::I64 {
+                    cond_val
+                } else {
+                    builder.ins().uextend(types::I64, cond_val)
+                };
+
                 builder
                     .ins()
                     .brif(cond_i64, then_block, &[], else_block, &[]);
@@ -1972,28 +2035,32 @@ impl CodeGen {
                 let mut modified_vars = HashSet::new();
                 Self::find_var_assignments(body, &mut modified_vars);
 
-                let mut loop_params = Vec::new();
+                let mut loop_params: Vec<(String, Value, ir::StackSlot)> = Vec::new();
                 let mut param_types = Vec::new();
                 for var_name in &modified_vars {
-                    if let Some(var) = Self::lookup_var(var_name, scope_stack) {
-                        let var_value = builder.use_var(*var);
-                        let var_type = builder.func.dfg.value_type(var_value);
-                        param_types.push(var_type);
-                        let param = builder.append_block_param(loop_header, var_type);
-                        loop_params.push((var_name.clone(), param, *var));
+                    if let Some(slot) = Self::lookup_var(var_name, scope_stack) {
+                        match slot {
+                            Slot::StackSlot(s) => {
+                                let var_value = builder.ins().stack_load(types::I64, *s, 0);
+                                let var_type = builder.func.dfg.value_type(var_value);
+                                param_types.push(var_type);
+                                let param = builder.append_block_param(loop_header, var_type);
+                                loop_params.push((var_name.clone(), param, *s));
+                            }
+                        }
                     }
                 }
 
                 if let Some(loop_ctx) = loop_stack.last_mut() {
                     loop_ctx.loop_params = loop_params
                         .iter()
-                        .map(|(name, _, var)| (name.clone(), *var))
+                        .map(|(name, _, s)| (name.clone(), Slot::StackSlot(*s)))
                         .collect();
                 }
 
                 let initial_values: Vec<Value> = loop_params
                     .iter()
-                    .map(|(_, _, var)| builder.use_var(*var))
+                    .map(|(_, _, s)| builder.ins().stack_load(types::I64, *s, 0))
                     .collect();
                 let initial_args: Vec<ir::BlockArg> =
                     initial_values.iter().map(|v| (*v).into()).collect();
@@ -2001,8 +2068,8 @@ impl CodeGen {
 
                 builder.switch_to_block(loop_header);
 
-                for (_, param, var) in &loop_params {
-                    builder.def_var(*var, *param);
+                for (_, param, s) in &loop_params {
+                    builder.ins().stack_store(*param, *s, 0);
                 }
 
                 let cond_val = Self::compile_expr(
@@ -2042,11 +2109,15 @@ impl CodeGen {
                 loop_stack.pop();
 
                 let mut loop_values = Vec::new();
-                for (var_name, _, var) in &loop_params {
-                    if let Some(v) = Self::lookup_var(var_name, scope_stack) {
-                        loop_values.push(builder.use_var(*v));
+                for (var_name, _, s) in &loop_params {
+                    if let Some(slot) = Self::lookup_var(var_name, scope_stack) {
+                        match slot {
+                            Slot::StackSlot(ss) => {
+                                loop_values.push(builder.ins().stack_load(types::I64, *ss, 0));
+                            }
+                        }
                     } else {
-                        loop_values.push(builder.use_var(*var));
+                        loop_values.push(builder.ins().stack_load(types::I64, *s, 0));
                     }
                 }
                 let loop_args: Vec<ir::BlockArg> =
@@ -2318,15 +2389,18 @@ impl CodeGen {
                     structs,
                 )?;
 
-                let loop_var = Variable::from_u32(*idx);
-                *idx += 1;
-                builder.declare_var(types::I64);
-                builder.def_var(loop_var, start_val);
+                let loop_slot =
+                    builder.create_sized_stack_slot(cranelift::codegen::ir::StackSlotData::new(
+                        cranelift::codegen::ir::StackSlotKind::ExplicitSlot,
+                        8,
+                        0,
+                    ));
+                builder.ins().stack_store(start_val, loop_slot, 0);
 
                 builder.ins().jump(loop_header, &[]);
 
                 builder.switch_to_block(loop_header);
-                let current_val = builder.use_var(loop_var);
+                let current_val = builder.ins().stack_load(types::I64, loop_slot, 0);
 
                 let cmp = builder.ins().icmp(
                     ir::condcodes::IntCC::UnsignedLessThan,
@@ -2342,7 +2416,7 @@ impl CodeGen {
                 scope_stack
                     .last_mut()
                     .unwrap()
-                    .insert(var.clone(), loop_var);
+                    .insert(var.clone(), Slot::StackSlot(loop_slot));
 
                 Self::compile_expr(
                     body,
@@ -2364,9 +2438,9 @@ impl CodeGen {
                 builder.ins().jump(loop_increment, &[]);
 
                 builder.switch_to_block(loop_increment);
-                let current_val_inc = builder.use_var(loop_var);
+                let current_val_inc = builder.ins().stack_load(types::I64, loop_slot, 0);
                 let next_val = builder.ins().iadd_imm(current_val_inc, 1);
-                builder.def_var(loop_var, next_val);
+                builder.ins().stack_store(next_val, loop_slot, 0);
                 builder.ins().jump(loop_header, &[]);
 
                 loop_stack.pop();
@@ -2396,11 +2470,27 @@ impl CodeGen {
                         builder.ins().jump(inc_block, &[]);
                     } else {
                         let mut loop_values = Vec::new();
-                        for (var_name, var) in &loop_ctx.loop_params {
-                            if let Some(v) = Self::lookup_var(var_name, scope_stack) {
-                                loop_values.push(builder.use_var(*v));
+                        for (var_name, slot) in &loop_ctx.loop_params {
+                            if let Some(s) = Self::lookup_var(var_name, scope_stack) {
+                                match s {
+                                    Slot::StackSlot(ss) => {
+                                        loop_values.push(builder.ins().stack_load(
+                                            types::I64,
+                                            *ss,
+                                            0,
+                                        ));
+                                    }
+                                }
                             } else {
-                                loop_values.push(builder.use_var(*var));
+                                match slot {
+                                    Slot::StackSlot(ss) => {
+                                        loop_values.push(builder.ins().stack_load(
+                                            types::I64,
+                                            *ss,
+                                            0,
+                                        ));
+                                    }
+                                }
                             }
                         }
                         let loop_args: Vec<ir::BlockArg> =
@@ -2492,7 +2582,7 @@ impl CodeGen {
                     structs,
                 )?;
 
-                let struct_name = match &**obj {
+                let (struct_name, is_pointer) = match &**obj {
                     Expr::Var(name) => {
                         let mut found_type = None;
                         for scope in type_stack.iter().rev() {
@@ -2502,7 +2592,16 @@ impl CodeGen {
                             }
                         }
                         match found_type {
-                            Some(Type::Named(name)) => name,
+                            Some(Type::Named(name)) => (name, false),
+                            Some(Type::Pointer(inner_type)) => {
+                                if let Type::Named(name) = *inner_type {
+                                    (name, true)
+                                } else {
+                                    return Err(CodeGenError::ModuleError(
+                                        "Pointer to non-struct type".to_string(),
+                                    ));
+                                }
+                            }
                             _ => {
                                 return Err(CodeGenError::ModuleError(
                                     "Member access on non-struct type".to_string(),
@@ -2515,6 +2614,14 @@ impl CodeGen {
                             "Member access only supported on variables".to_string(),
                         ));
                     }
+                };
+
+                let obj_ptr = if is_pointer {
+                    builder
+                        .ins()
+                        .load(types::I64, ir::MemFlags::trusted(), obj_ptr, 0)
+                } else {
+                    obj_ptr
                 };
 
                 let struct_def = structs.get(&struct_name).ok_or_else(|| {
@@ -2535,6 +2642,289 @@ impl CodeGen {
                         struct_name, field_name
                     )))
                 }
+            }
+            Expr::MemberAssign(obj, field_name, value) => {
+                let obj_ptr = Self::compile_expr(
+                    obj,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+
+                let (struct_name, is_pointer) = match &**obj {
+                    Expr::Var(name) => {
+                        let mut found_type = None;
+                        for scope in type_stack.iter().rev() {
+                            if let Some(ty) = scope.get(name) {
+                                found_type = Some(ty.clone());
+                                break;
+                            }
+                        }
+                        match found_type {
+                            Some(Type::Named(name)) => (name, false),
+                            Some(Type::Pointer(inner_type)) => {
+                                if let Type::Named(name) = *inner_type {
+                                    (name, true)
+                                } else {
+                                    return Err(CodeGenError::ModuleError(
+                                        "Pointer to non-struct type".to_string(),
+                                    ));
+                                }
+                            }
+                            _ => {
+                                return Err(CodeGenError::ModuleError(
+                                    "Member assign on non-struct type".to_string(),
+                                ));
+                            }
+                        }
+                    }
+                    _ => {
+                        return Err(CodeGenError::ModuleError(
+                            "Member assign only supported on variables".to_string(),
+                        ));
+                    }
+                };
+
+                let obj_ptr = if is_pointer {
+                    builder
+                        .ins()
+                        .load(types::I64, ir::MemFlags::trusted(), obj_ptr, 0)
+                } else {
+                    obj_ptr
+                };
+
+                let struct_def = structs.get(&struct_name).ok_or_else(|| {
+                    CodeGenError::ModuleError(format!("Undefined struct type: {}", struct_name))
+                })?;
+
+                let field_info = struct_def.fields.iter().find(|f| &f.name == field_name);
+                if let Some(field) = field_info {
+                    let value_val = Self::compile_expr(
+                        value,
+                        builder,
+                        scope_stack,
+                        type_stack,
+                        idx,
+                        func_signatures,
+                        module,
+                        str_idx,
+                        loop_stack,
+                        type_map,
+                        structs,
+                    )?;
+
+                    let field_ptr = builder.ins().iadd_imm(obj_ptr, field.offset);
+                    builder
+                        .ins()
+                        .store(ir::MemFlags::trusted(), value_val, field_ptr, 0);
+                    Ok(builder.ins().iconst(types::I64, 0))
+                } else {
+                    Err(CodeGenError::ModuleError(format!(
+                        "Struct {} has no field {}",
+                        struct_name, field_name
+                    )))
+                }
+            }
+            Expr::AddressOf(expr) => match &**expr {
+                Expr::Var(name) => {
+                    if let Some(slot) = Self::lookup_var(name, scope_stack) {
+                        match slot {
+                            Slot::StackSlot(s) => Ok(builder.ins().stack_addr(types::I64, *s, 0)),
+                        }
+                    } else {
+                        Err(CodeGenError::ModuleError(format!(
+                            "Undefined variable: {}",
+                            name
+                        )))
+                    }
+                }
+                Expr::MemberAccess(obj, field_name) => {
+                    let obj_ptr = Self::compile_expr(
+                        obj,
+                        builder,
+                        scope_stack,
+                        type_stack,
+                        idx,
+                        func_signatures,
+                        module,
+                        str_idx,
+                        loop_stack,
+                        type_map,
+                        structs,
+                    )?;
+
+                    let struct_name = match &**obj {
+                        Expr::Var(name) => {
+                            let mut found_type = None;
+                            for scope in type_stack.iter().rev() {
+                                if let Some(ty) = scope.get(name) {
+                                    found_type = Some(ty.clone());
+                                    break;
+                                }
+                            }
+                            match found_type {
+                                Some(Type::Pointer(inner_type)) => {
+                                    if let Type::Named(name) = *inner_type {
+                                        name
+                                    } else {
+                                        return Err(CodeGenError::ModuleError(
+                                            "Pointer to non-struct type".to_string(),
+                                        ));
+                                    }
+                                }
+                                Some(Type::Named(name)) => name,
+                                _ => {
+                                    return Err(CodeGenError::ModuleError(
+                                        "Member access on non-struct type".to_string(),
+                                    ));
+                                }
+                            }
+                        }
+                        Expr::Deref(inner) => match &**inner {
+                            Expr::Var(name) => {
+                                let mut found_type = None;
+                                for scope in type_stack.iter().rev() {
+                                    if let Some(ty) = scope.get(name) {
+                                        found_type = Some(ty.clone());
+                                        break;
+                                    }
+                                }
+                                match found_type {
+                                    Some(Type::Pointer(inner_type)) => {
+                                        if let Type::Named(name) = *inner_type {
+                                            name
+                                        } else {
+                                            return Err(CodeGenError::ModuleError(
+                                                "Deref of non-pointer type".to_string(),
+                                            ));
+                                        }
+                                    }
+                                    _ => {
+                                        return Err(CodeGenError::ModuleError(
+                                            "Member access on non-struct type".to_string(),
+                                        ));
+                                    }
+                                }
+                            }
+                            _ => {
+                                return Err(CodeGenError::ModuleError(
+                                    "Member access on non-struct type".to_string(),
+                                ));
+                            }
+                        },
+                        _ => {
+                            return Err(CodeGenError::ModuleError(
+                                "Member access only supported on variables".to_string(),
+                            ));
+                        }
+                    };
+
+                    let struct_def = structs.get(&struct_name).ok_or_else(|| {
+                        CodeGenError::ModuleError(format!("Undefined struct type: {}", struct_name))
+                    })?;
+
+                    let field_info = struct_def.fields.iter().find(|f| &f.name == field_name);
+                    if let Some(field) = field_info {
+                        let field_ptr = builder.ins().iadd_imm(obj_ptr, field.offset);
+                        Ok(field_ptr)
+                    } else {
+                        Err(CodeGenError::ModuleError(format!(
+                            "Struct {} has no field {}",
+                            struct_name, field_name
+                        )))
+                    }
+                }
+                Expr::Index(arr, index_expr) => {
+                    let arr_ptr = Self::compile_expr(
+                        arr,
+                        builder,
+                        scope_stack,
+                        type_stack,
+                        idx,
+                        func_signatures,
+                        module,
+                        str_idx,
+                        loop_stack,
+                        type_map,
+                        structs,
+                    )?;
+                    let index_val = Self::compile_expr(
+                        index_expr,
+                        builder,
+                        scope_stack,
+                        type_stack,
+                        idx,
+                        func_signatures,
+                        module,
+                        str_idx,
+                        loop_stack,
+                        type_map,
+                        structs,
+                    )?;
+                    let offset = builder.ins().imul_imm(index_val, 8);
+                    let element_ptr = builder.ins().iadd(arr_ptr, offset);
+                    Ok(element_ptr)
+                }
+                _ => Err(CodeGenError::ModuleError(
+                    "AddressOf only supported on variables, member access, or array index"
+                        .to_string(),
+                )),
+            },
+            Expr::Deref(expr) => {
+                let ptr = Self::compile_expr(
+                    expr,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                let value = builder
+                    .ins()
+                    .load(types::I64, ir::MemFlags::trusted(), ptr, 0);
+                Ok(value)
+            }
+            Expr::DerefAssign(ptr_expr, val_expr) => {
+                let ptr = Self::compile_expr(
+                    ptr_expr,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                let val = Self::compile_expr(
+                    val_expr,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+                builder.ins().store(ir::MemFlags::trusted(), val, ptr, 0);
+                Ok(builder.ins().iconst(types::I64, 0))
             }
             _ => Err(CodeGenError::UnexpectedExpression {
                 found: expr.clone(),
@@ -2627,6 +3017,20 @@ impl CodeGen {
             Expr::MemberAccess(obj, _) => {
                 Self::find_var_assignments(obj, modified_vars);
             }
+            Expr::MemberAssign(obj, _, val) => {
+                Self::find_var_assignments(obj, modified_vars);
+                Self::find_var_assignments(val, modified_vars);
+            }
+            Expr::AddressOf(expr) => {
+                Self::find_var_assignments(expr, modified_vars);
+            }
+            Expr::Deref(expr) => {
+                Self::find_var_assignments(expr, modified_vars);
+            }
+            Expr::DerefAssign(ptr, val) => {
+                Self::find_var_assignments(ptr, modified_vars);
+                Self::find_var_assignments(val, modified_vars);
+            }
             _ => {}
         }
     }
@@ -2636,6 +3040,7 @@ fn get_type(t: &Type, type_map: &HashMap<String, ir::Type>) -> ir::Type {
     return match t {
         Type::Named(name) => *type_map.get(name).unwrap_or(&types::I64),
         Type::Array(_) => types::I64,
+        Type::Pointer(_) => types::I64,
         Type::Function(_, _) => types::I64,
         Type::TypeVar(_) => types::I64,
     };

@@ -62,6 +62,16 @@ impl Optimizer {
                 fields.iter_mut().for_each(|(_, v)| self.optimize_expr(v));
             }
             Expr::MemberAccess(obj, _) => self.optimize_expr(obj),
+            Expr::MemberAssign(obj, _, val) => {
+                self.optimize_expr(obj);
+                self.optimize_expr(val);
+            }
+            Expr::AddressOf(expr) => self.optimize_expr(expr),
+            Expr::Deref(expr) => self.optimize_expr(expr),
+            Expr::DerefAssign(ptr, val) => {
+                self.optimize_expr(ptr);
+                self.optimize_expr(val);
+            }
             Expr::Add(l, r)
             | Expr::Sub(l, r)
             | Expr::Mul(l, r)
@@ -303,6 +313,16 @@ impl Optimizer {
                 }
             }
             Expr::MemberAccess(obj, _) => self.dce(obj),
+            Expr::MemberAssign(obj, _, val) => {
+                self.dce(obj);
+                self.dce(val);
+            }
+            Expr::AddressOf(expr) => self.dce(expr),
+            Expr::Deref(expr) => self.dce(expr),
+            Expr::DerefAssign(ptr, val) => {
+                self.dce(ptr);
+                self.dce(val);
+            }
             Expr::Add(l, r)
             | Expr::Sub(l, r)
             | Expr::Mul(l, r)
@@ -371,6 +391,9 @@ impl Optimizer {
             Expr::ArrayFill(_, len) => self.is_pure(len),
             Expr::StructLiteral(_, fields) => fields.iter().all(|(_, v)| self.is_pure(v)),
             Expr::MemberAccess(obj, _) => self.is_pure(obj),
+            Expr::AddressOf(expr) => self.is_pure(expr),
+            Expr::Deref(expr) => self.is_pure(expr),
+            Expr::DerefAssign(ptr, val) => self.is_pure(ptr) && self.is_pure(val),
             _ => false,
         }
     }
@@ -382,6 +405,8 @@ impl Optimizer {
                 | Expr::VarAssign(_, _)
                 | Expr::Call(_, _)
                 | Expr::IndexAssign(_, _)
+                | Expr::MemberAssign(_, _, _)
+                | Expr::DerefAssign(_, _)
                 | Expr::Return(_)
                 | Expr::Break
                 | Expr::Continue

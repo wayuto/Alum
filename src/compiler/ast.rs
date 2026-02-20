@@ -9,8 +9,9 @@ pub struct Program {
 pub enum Type {
     Named(String),
     Array(Box<Type>),
+    Pointer(Box<Type>),
     Function(Vec<Box<Type>>, Box<Type>),
-    TypeVar(usize), // 类型变量，用于泛型支持
+    TypeVar(usize),
 }
 
 impl fmt::Display for Type {
@@ -18,6 +19,7 @@ impl fmt::Display for Type {
         match self {
             Type::Named(name) => write!(f, "{}", name),
             Type::Array(inner) => write!(f, "arr[{}]", inner),
+            Type::Pointer(inner) => write!(f, "*{}", inner),
             Type::Function(params, ret) => {
                 let param_str: Vec<String> = params.iter().map(|p| p.to_string()).collect();
                 write!(f, "{}({})", ret, param_str.join(", "))
@@ -80,7 +82,11 @@ pub enum Expr {
     Struct(String, Vec<(String, Type)>),
     StructLiteral(String, Vec<(String, Expr)>),
     MemberAccess(Box<Expr>, String),
+    MemberAssign(Box<Expr>, String, Box<Expr>),
     Lambda(Vec<(String, Type)>, Box<Expr>, Type),
+    AddressOf(Box<Expr>),
+    Deref(Box<Expr>),
+    DerefAssign(Box<Expr>, Box<Expr>),
 }
 
 impl fmt::Display for Program {
@@ -471,6 +477,15 @@ impl Expr {
                 write!(f, " .{}", field)?;
                 write!(f, "\n{})", indent_str)
             }
+            Expr::MemberAssign(obj, field, val) => {
+                write!(f, "{}MemberAssign(", indent_str)?;
+                write!(f, "\n")?;
+                obj.fmt_with_indent(f, indent + 1)?;
+                write!(f, " .{} =", field)?;
+                write!(f, "\n")?;
+                val.fmt_with_indent(f, indent + 1)?;
+                write!(f, "\n{})", indent_str)
+            }
             Expr::Lambda(params, body, ret_type) => {
                 let param_str: Vec<String> = params
                     .iter()
@@ -485,6 +500,26 @@ impl Expr {
                 )?;
                 write!(f, "\n")?;
                 body.fmt_with_indent(f, indent + 1)?;
+                write!(f, "\n{})", indent_str)
+            }
+            Expr::AddressOf(expr) => {
+                write!(f, "{}AddressOf(", indent_str)?;
+                write!(f, "\n")?;
+                expr.fmt_with_indent(f, indent + 1)?;
+                write!(f, "\n{})", indent_str)
+            }
+            Expr::Deref(expr) => {
+                write!(f, "{}Deref(", indent_str)?;
+                write!(f, "\n")?;
+                expr.fmt_with_indent(f, indent + 1)?;
+                write!(f, "\n{})", indent_str)
+            }
+            Expr::DerefAssign(ptr, val) => {
+                write!(f, "{}DerefAssign(", indent_str)?;
+                write!(f, "\n")?;
+                ptr.fmt_with_indent(f, indent + 1)?;
+                write!(f, "\n")?;
+                val.fmt_with_indent(f, indent + 1)?;
                 write!(f, "\n{})", indent_str)
             }
         }

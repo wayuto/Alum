@@ -40,6 +40,9 @@
             "include": "#builtin-functions"
         },
         {
+            "include": "#function-call"
+        },
+        {
             "include": "#literals"
         },
         {
@@ -277,7 +280,15 @@
             "patterns": [
                 {
                     "name": "storage.type.primitive.alum",
-                    "match": "\\b(int|float|string|bool|void)\\b"
+                    "match": "\\b(int|float|string|bool|void|any)\\b"
+                },
+                {
+                    "name": "storage.type.pointer.alum",
+                    "match": "\\*[A-Za-z_][A-Za-z0-9_]*"
+                },
+                {
+                    "name": "storage.type.vec.alum",
+                    "match": "\\bVec\\b"
                 },
                 {
                     "name": "meta.type.array.alum",
@@ -533,6 +544,10 @@
                     "match": "\\b(write|read|print|println|input|fopen|fclose|fread|fwrite|lseek)\\b"
                 },
                 {
+                    "name": "support.function.builtin.vec.alum",
+                    "match": "\\b(vec_new)\\b"
+                },
+                {
                     "name": "support.function.builtin.math.alum",
                     "match": "\\b(abs|sqrt|max|min|pow|fact)\\b"
                 },
@@ -604,6 +619,22 @@
                             "include": "$self"
                         }
                     ]
+                }
+            ]
+        },
+        "function-call": {
+            "patterns": [
+                {
+                    "name": "meta.function-call.alum",
+                    "match": "(?<!\\w|\\.)\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(\\()",
+                    "captures": {
+                        "1": {
+                            "name": "entity.name.function.call.alum"
+                        },
+                        "2": {
+                            "name": "punctuation.definition.arguments.begin.alum"
+                        }
+                    }
                 }
             ]
         },

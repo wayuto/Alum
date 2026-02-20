@@ -203,6 +203,147 @@ let buffer: arr[int] = [int; 100]
 let first: int = numbers[0]
 ```
 
+### Pointers
+
+Alum supports pointers for direct memory access and manipulation. Pointers are declared using the `*` prefix before a type.
+
+**Declaration and Usage:**
+```al
+$import "memory.al"
+
+fun main(): int {
+    let value: int = 42
+    let ptr: *int = &value  // Get address of value
+    
+    // Dereference to access value
+    println(itoa(*ptr))  // Output: 42
+    
+    // Modify value through pointer
+    *ptr = 100
+    println(itoa(value))  // Output: 100
+    
+    return 0
+}
+```
+
+**Pointer to Struct:**
+```al
+struct Point {
+    x: int,
+    y: int
+}
+
+fun modify_point(p: *Point): void {
+    p.x = 100
+    p.y = 200
+}
+
+fun main(): int {
+    let point: Point = Point {
+        x: 10,
+        y: 20
+    }
+    
+    modify_point(&point)
+    println(itoa(point.x))  // Output: 100
+    println(itoa(point.y))  // Output: 200
+    
+    return 0
+}
+```
+
+**Dynamic Memory:**
+```al
+extern malloc(int): *int  // Allocate memory
+extern free(*int): void   // Free memory
+
+fun main(): int {
+    let ptr: *int = malloc(10)  // Allocate memory for 10 integers
+    *ptr = 42
+    println(itoa(*ptr))
+    free(ptr)
+    return 0
+}
+```
+
+### Vec Container
+
+Alum provides a dynamic array (Vec) for storing collections of elements that can grow or shrink at runtime. The Vec is part of the standard library and supports various operations.
+
+**Importing Vec:**
+```al
+$import "vec.al"
+```
+
+**Creating a Vec:**
+```al
+fun main(): int {
+    let vec: Vec = vec_new()
+    return 0
+}
+```
+
+**Vec Operations:**
+```al
+$import "vec.al"
+$import "convert.al"
+
+fun main(): int {
+    let vec: Vec = vec_new()
+    
+    // Push elements
+    vec.push(&vec, 10)
+    vec.push(&vec, 20)
+    vec.push(&vec, 30)
+    
+    // Access elements by index
+    let first: any = vec.at(&vec, 0)
+    let second: any = vec.at(&vec, 1)
+    
+    println(itoa(first))   // Output: 10
+    println(itoa(second))  // Output: 20
+    
+    // Pop elements
+    let popped: any = vec.pop(&vec)
+    println(itoa(popped))  // Output: 30
+    
+    return 0
+}
+```
+
+**Vec with Structs:**
+```al
+struct Point {
+    x: int,
+    y: int
+}
+
+$import "vec.al"
+
+fun main(): int {
+    let vec: Vec = vec_new()
+    
+    let p1: Point = Point { x: 10, y: 20 }
+    let p2: Point = Point { x: 30, y: 40 }
+    
+    vec.push(&vec, p1)
+    vec.push(&vec, p2)
+    
+    let point: any = vec.at(&vec, 0)
+    // Access struct fields (requires casting or direct access pattern)
+    
+    return 0
+}
+```
+
+**Vec Methods:**
+- `vec_new()`: Creates a new empty Vec
+- `vec.at(&vec, index)`: Access element at the given index
+- `vec.push(&vec, element)`: Add an element to the end
+- `vec.pop(&vec)`: Remove and return the last element
+
+**Note:** The Vec uses `any` type to store elements, allowing it to hold values of any type. The compiler automatically infers the actual type based on usage context.
+
 ### Structs
 
 Define custom data structures with the `struct` keyword:

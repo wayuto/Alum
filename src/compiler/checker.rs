@@ -150,6 +150,7 @@ impl TypeChecker {
             }
             (Type::Named(n1), Type::Named(n2)) if n1 == n2 => Ok(()),
             (Type::Array(a1), Type::Array(a2)) => self.unify_types(a1, a2),
+            (Type::Pointer(p1), Type::Pointer(p2)) => self.unify_types(p1, p2),
             (Type::Function(p1, r1), Type::Function(p2, r2)) => {
                 if p1.len() != p2.len() {
                     return Err(CheckerError::TypeMismatch {
@@ -239,6 +240,7 @@ impl TypeChecker {
                 }
             }
             Type::Array(inner) => Type::Array(Box::new(self.resolve_type(inner))),
+            Type::Pointer(inner) => Type::Pointer(Box::new(self.resolve_type(inner))),
             Type::Function(params, ret) => Type::Function(
                 params
                     .iter()
@@ -308,6 +310,18 @@ impl TypeChecker {
             Expr::ArrayLiteral(_) | Expr::ArrayFill(_, _) => {
                 Type::Array(Box::new(Type::Named("int".to_string())))
             }
+            Expr::AddressOf(expr) => {
+                let inner_type = self.get_expr_type(expr);
+                Type::Pointer(Box::new(inner_type))
+            }
+            Expr::Deref(expr) => {
+                let ptr_type = self.get_expr_type(expr);
+                match ptr_type {
+                    Type::Pointer(inner) => *inner,
+                    _ => Type::Named("int".to_string()),
+                }
+            }
+            Expr::DerefAssign(_, _) => Type::Named("void".to_string()),
             _ => Type::Named("int".to_string()),
         }
     }
@@ -761,6 +775,7 @@ impl TypeChecker {
 
                 match array_type {
                     Type::Array(inner) => Ok(*inner),
+                    Type::Named(n) if n == "string" => Ok(Type::Named("int".to_string())),
                     _ => Err(CheckerError::InvalidOperation {
                         op: "index".to_string(),
                         type_name: format!("{:?}", array_type),
@@ -789,6 +804,15 @@ impl TypeChecker {
                                     expected: *inner,
                                     found: value_type,
                                     context: "array assignment".to_string(),
+                                });
+                            }
+                        }
+                        Type::Named(n) if n == "string" => {
+                            if !self.types_compatible(&Type::Named("int".to_string()), &value_type) {
+                                return Err(CheckerError::TypeMismatch {
+                                    expected: Type::Named("int".to_string()),
+                                    found: value_type,
+                                    context: "string assignment".to_string(),
                                 });
                             }
                         }
@@ -889,23 +913,107 @@ impl TypeChecker {
 
             Expr::MemberAccess(obj, field_name) => {
                 let obj_type = self.check_expr(obj)?;
-                match obj_type {
+                let struct_name = match &obj_type {
+                    Type::Named(name) => name.clone(),
+                    Type::Pointer(inner) => {
+                        if let Type::Named(ref name) = **inner {
+                            name.clone()
+                        } else {
+                            return Err(CheckerError::NonStructMemberAccess(format!(
+                                "{:?}",
+                                obj_type
+                            )));
+                        }
+                    }
+                    _ => {
+                        return Err(CheckerError::NonStructMemberAccess(format!(
+                            "{:?}",
+                            obj_type
+                        )));
+                    }
+                };
+                let struct_def = self
+                    .structs
+                    .get(&struct_name)
+                    .ok_or_else(|| CheckerError::UndefinedStruct(struct_name.clone()))?;
+
+                for (name, ty) in &struct_def.fields {
+                    if name == field_name {
+                        return Ok(ty.clone());
+                    }
+                }
+
+                Err(CheckerError::UndefinedField {
+                    struct_name,
+                    field: field_name.clone(),
+                })
+            }
+
+            Expr::MemberAssign(obj, field_name, value) => {
+                let obj_type = self.check_expr(obj)?;
+                let value_type = self.check_expr(value)?;
+
+                match &obj_type {
                     Type::Named(struct_name) => {
                         let struct_def = self
                             .structs
-                            .get(&struct_name)
+                            .get(struct_name)
                             .ok_or_else(|| CheckerError::UndefinedStruct(struct_name.clone()))?;
 
                         for (name, ty) in &struct_def.fields {
                             if name == field_name {
-                                return Ok(ty.clone());
+                                if !self.types_compatible(ty, &value_type) {
+                                    return Err(CheckerError::TypeMismatch {
+                                        expected: ty.clone(),
+                                        found: value_type,
+                                        context: format!(
+                                            "struct '{}' field '{}' assignment",
+                                            struct_name, field_name
+                                        ),
+                                    });
+                                }
+                                return Ok(Type::Named("void".to_string()));
                             }
                         }
 
                         Err(CheckerError::UndefinedField {
-                            struct_name,
+                            struct_name: struct_name.clone(),
                             field: field_name.clone(),
                         })
+                    }
+                    Type::Pointer(inner) => {
+                        if let Type::Named(struct_name) = &**inner {
+                            let struct_def = self
+                                .structs
+                                .get(struct_name)
+                                .ok_or_else(|| CheckerError::UndefinedStruct(struct_name.clone()))?;
+
+                            for (name, ty) in &struct_def.fields {
+                                if name == field_name {
+                                    if !self.types_compatible(ty, &value_type) {
+                                        return Err(CheckerError::TypeMismatch {
+                                            expected: ty.clone(),
+                                            found: value_type,
+                                            context: format!(
+                                                "struct '{}' field '{}' assignment",
+                                                struct_name, field_name
+                                            ),
+                                        });
+                                    }
+                                    return Ok(Type::Named("void".to_string()));
+                                }
+                            }
+
+                            Err(CheckerError::UndefinedField {
+                                struct_name: struct_name.clone(),
+                                field: field_name.clone(),
+                            })
+                        } else {
+                            Err(CheckerError::NonStructMemberAccess(format!(
+                                "{:?}",
+                                obj_type
+                            )))
+                        }
                     }
                     _ => Err(CheckerError::NonStructMemberAccess(format!(
                         "{:?}",
@@ -950,6 +1058,40 @@ impl TypeChecker {
                     Box::new(ret_type.clone()),
                 ))
             }
+            Expr::AddressOf(expr) => {
+                let inner_type = self.check_expr(expr)?;
+                Ok(Type::Pointer(Box::new(inner_type)))
+            }
+            Expr::Deref(expr) => {
+                let ptr_type = self.check_expr(expr)?;
+                match ptr_type {
+                    Type::Pointer(inner) => Ok(*inner),
+                    _ => Err(CheckerError::InvalidOperation {
+                        op: "dereference".to_string(),
+                        type_name: format!("{:?}", ptr_type),
+                    }),
+                }
+            }
+            Expr::DerefAssign(ptr, val) => {
+                let ptr_type = self.check_expr(ptr)?;
+                let val_type = self.check_expr(val)?;
+                match ptr_type {
+                    Type::Pointer(inner) => {
+                        if !self.types_compatible(&inner, &val_type) {
+                            return Err(CheckerError::TypeMismatch {
+                                expected: *inner,
+                                found: val_type,
+                                context: "dereference assignment".to_string(),
+                            });
+                        }
+                        Ok(Type::Named("void".to_string()))
+                    }
+                    _ => Err(CheckerError::InvalidOperation {
+                        op: "dereference assignment".to_string(),
+                        type_name: format!("{:?}", ptr_type),
+                    }),
+                }
+            }
         }
     }
 
@@ -966,6 +1108,7 @@ impl TypeChecker {
             (_, Type::Named(n)) if n == "void" => true,
             (Type::Named(a), Type::Named(b)) => a == b,
             (Type::Array(a), Type::Array(b)) => self.types_compatible(a, b),
+            (Type::Pointer(a), Type::Pointer(b)) => self.types_compatible(a, b),
             (Type::Function(exp_params, exp_ret), Type::Function(found_params, found_ret)) => {
                 if exp_params.len() != found_params.len() {
                     return false;
@@ -987,6 +1130,7 @@ impl TypeChecker {
             Type::Named(_) => Ok(()),
             Type::TypeVar(_) => Ok(()),
             Type::Array(inner) => self.validate_type(inner),
+            Type::Pointer(inner) => self.validate_type(inner),
             Type::Function(params, ret) => {
                 for param in params {
                     self.validate_type(param)?;

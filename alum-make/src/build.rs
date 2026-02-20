@@ -180,36 +180,78 @@ pub fn build(log: bool) -> Result<(), Box<dyn Error>> {
     let obj_files = get_files("target/objects", Target::OBJ);
 
     if !obj_files.is_empty() {
-        let mut link_cmd = config.build.linker.clone();
-        link_cmd.push(' ');
+        match config.build.library_type.as_deref() {
+            Some("static") | Some("a") => {
+                let mut ar_cmd = String::from("ar rcs ");
+                ar_cmd.push_str(&format!("target/lib{}.a ", name));
+                for file in &obj_files {
+                    ar_cmd.push_str(file.to_str().unwrap());
+                    ar_cmd.push(' ');
+                }
+                if log {
+                    println!("{}", ar_cmd);
+                }
+                let status = std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(ar_cmd)
+                    .status()?;
+                if !status.success() {
+                    return Err(format!("Failed to create static library: {:?}", name).into());
+                }
+            }
+            Some("shared") | Some("so") => {
+                let mut link_cmd = config.build.linker.clone();
+                link_cmd.push_str(" -shared -fPIC ");
+                for file in &obj_files {
+                    link_cmd.push_str(file.to_str().unwrap());
+                    link_cmd.push(' ');
+                }
+                link_cmd.push_str(&format!("-o target/lib{}.so", name));
+                if log {
+                    println!("{}", link_cmd);
+                }
+                let status = std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(link_cmd)
+                    .status()?;
+                if !status.success() {
+                    return Err(format!("Failed to create shared library: {:?}", name).into());
+                }
+            }
+            _ => {
+                let mut link_cmd = config.build.linker.clone();
+                link_cmd.push(' ');
 
-        if config.build.linker.contains("cc") || config.build.linker.contains("gcc") {
-            link_cmd.push_str("-nostartfiles ");
-        }
+                if config.build.linker.contains("cc") || config.build.linker.contains("gcc") {
+                    link_cmd.push_str("-nostartfiles ");
+                }
 
-        if let Some(lnflags) = config.build.lnflags.clone() {
-            link_cmd.push_str(&lnflags);
-            link_cmd.push(' ');
-        }
-        for file in &obj_files {
-            link_cmd.push_str(file.to_str().unwrap());
-            link_cmd.push(' ');
-        }
+                if let Some(lnflags) = config.build.lnflags.clone() {
+                    link_cmd.push_str(&lnflags);
+                    link_cmd.push(' ');
+                }
+                for file in &obj_files {
+                    link_cmd.push_str(file.to_str().unwrap());
+                    link_cmd.push(' ');
+                }
 
-        let should_link_stdlib = config.build.alc.is_some() && config.build.nostdlib != Some(true);
-        if should_link_stdlib {
-            link_cmd.push_str("/usr/local/lib/libalum_std.a ");
-        }
-        link_cmd.push_str(&format!("-o target/{}", name));
-        if log {
-            println!("{}", link_cmd);
-        }
-        let status = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(link_cmd)
-            .status()?;
-        if !status.success() {
-            return Err(format!("Failed to link file: {:?}", name).into());
+                let should_link_stdlib =
+                    config.build.alc.is_some() && config.build.nostdlib != Some(true);
+                if should_link_stdlib {
+                    link_cmd.push_str("/usr/local/lib/libalum.a ");
+                }
+                link_cmd.push_str(&format!("-o target/{}", name));
+                if log {
+                    println!("{}", link_cmd);
+                }
+                let status = std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(link_cmd)
+                    .status()?;
+                if !status.success() {
+                    return Err(format!("Failed to link file: {:?}", name).into());
+                }
+            }
         }
     }
     Ok(())

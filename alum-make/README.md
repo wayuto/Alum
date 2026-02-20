@@ -91,16 +91,104 @@ alc = "alc"
 
 ### Build
 
-| Field    | Type        | Optionality | Description                                |
-| -------- | ----------- | ----------- | ------------------------------------------ |
-| linker   | String      | required    | linking `target/objects/*.o` to executable |
-| cc       | String      | optional    | C compiler (for C/Alum mixed projects)     |
-| alc      | String      | optional    | Alum compiler                              |
-| cflags   | String      | optional    | compilation parameters for C compiler      |
-| alflags  | String      | optional    | compilation parameters for Alum compiler   |
-| lnflags  | String      | optional    | compilation parameters for linker          |
-| includes | Vec<String> | optional    | add `-I./path/to/include` when compiling   |
-| nostdlib | bool        | optional    | don't link with Alum standard library      |
+| Field       | Type        | Optionality | Description                                |
+| ----------- | ----------- | ----------- | ------------------------------------------ |
+| linker      | String      | required    | linking `target/objects/*.o` to executable |
+| cc          | String      | optional    | C compiler (for C/Alum mixed projects)     |
+| alc         | String      | optional    | Alum compiler                              |
+| cflags      | String      | optional    | compilation parameters for C compiler      |
+| alflags     | String      | optional    | compilation parameters for Alum compiler   |
+| lnflags     | String      | optional    | compilation parameters for linker          |
+| includes    | Vec<String> | optional    | add `-I./path/to/include` when compiling   |
+| nostdlib    | bool        | optional    | don't link with Alum standard library      |
+| library_type| String      | optional    | library type: "static", "a", "shared", "so"|
+
+### Library Types
+
+The `library_type` field in the `[build]` section specifies the type of library to build. If omitted, almk will build an executable.
+
+#### Static Library (`static` or `a`)
+
+Builds a static library (`.a` file) that can be linked statically with other projects.
+
+**Alumake.toml:**
+```toml
+[package]
+name = "mylib"
+version = "1.0.0"
+language = "alum"
+
+[build]
+linker = "alc"
+alc = "alc"
+library_type = "static"
+```
+
+After running `almk build`, this will generate `target/libmylib.a`.
+
+**Using the static library in another project:**
+```al
+// main.al
+extern add(int, int): int
+
+fun main(): int {
+    let result: int = add(10, 20)
+    return 0
+}
+```
+
+Compile and link:
+```bash
+alc main.al -c -o main.o
+cc main.o -L./target -lmylib -L/usr/local/lib -lalum -o main
+```
+
+#### Shared Library (`shared` or `so`)
+
+Builds a shared library (`.so` file) that can be loaded at runtime.
+
+**Alumake.toml:**
+```toml
+[package]
+name = "mylib"
+version = "1.0.0"
+language = "alum"
+
+[build]
+linker = "alc"
+alc = "alc"
+library_type = "shared"
+```
+
+After running `almk build`, this will generate `target/libmylib.so`.
+
+**Using the shared library:**
+```bash
+# Set library path
+export LD_LIBRARY_PATH=./target:$LD_LIBRARY_PATH
+
+# Compile and link your program
+alc main.al -L./target -lmylib -o main
+```
+
+#### Executable (default)
+
+If `library_type` is omitted or set to any value other than `"static"`, `"a"`, `"shared"`, or `"so"`, almk will build an executable file.
+
+**Alumake.toml:**
+```toml
+[package]
+name = "myapp"
+version = "1.0.0"
+language = "alum"
+
+[build]
+linker = "alc"
+alc = "alc"
+# library_type is omitted - builds executable
+```
+
+After running `almk build`, this will generate `target/myapp`.
 
 ### Mixed C/Alum Projects
 
