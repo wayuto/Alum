@@ -2,7 +2,7 @@ use clap::Parser;
 
 #[derive(Parser)]
 #[command(name = "alc")]
-#[command(version = "0.7.0")]
+#[command(version = "0.9.1")]
 #[command(about = "Alum compiler")]
 pub struct Cli {
     #[arg(

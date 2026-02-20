@@ -295,7 +295,12 @@ impl TypeChecker {
             Expr::Index(_, _) => Type::Named("int".to_string()),
             Expr::MemberAccess(obj, field_name) => {
                 let obj_type = self.get_expr_type(obj);
-                if let Type::Named(struct_name) = obj_type {
+                let inner_type = match obj_type {
+                    Type::Pointer(inner) => *inner,
+                    Type::Named(_) => obj_type,
+                    _ => return Type::Named("int".to_string()),
+                };
+                if let Type::Named(struct_name) = inner_type {
                     if let Some(struct_def) = self.structs.get(&struct_name) {
                         for (name, ty) in &struct_def.fields {
                             if name == field_name {

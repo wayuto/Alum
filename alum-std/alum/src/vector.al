@@ -2,26 +2,40 @@ $import "vec.al"
 
 fun vec_new(): Vec {
     return Vec {
-        data: [any; 1], 
+        data: [any; 0],
         len: 0,
-		at: lamb(v: *Vec, i: int): any return v.data[i],
+        capacity: 0,
+		at: lamb(v: *Vec, i: int): any {
+			if i >= v.len || i < 0 return nil
+			return v.data[i]
+		},
 		push: lamb(v: *Vec, elem: any): void {
-			v.len = v.len + 1
-			let data: arr[any] = [any; v.len]
-			for i in 0..v.len - 1 {
-				data[i] = v.data[i]
+			if v.len >= v.capacity {
+				let new_capacity: int = if v.capacity == 0 {
+					4
+				} else {
+					v.capacity * 2
+				}
+				let new_data: arr[any] = [any; new_capacity]
+				for i in 0..v.len {
+					new_data[i] = v.data[i]
+				}
+				v.data = new_data
+				v.capacity = new_capacity
 			}
-			data[v.len - 1] = elem
-			v.data = data
+			v.data[v.len] = elem
+			v.len = v.len + 1
 		},
 		pop: lamb(v: *Vec): any {
+			if v.len == 0 return nil
 			v.len = v.len - 1
-			let data: arr[any] = [any; v.len]
-			for i in 0..v.len {
-				data[i] = v.data[i]
-			}
-			v.data = data
-			return v.data[v.len]
+			let elem: any = v.data[v.len]
+			return elem
+		},
+		clear: lamb(v: *Vec): void {
+			v.len = 0
+			v.capacity = 0
+			v.data = [any; 0]
 		},
 	}
 }

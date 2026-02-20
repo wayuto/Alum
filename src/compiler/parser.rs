@@ -749,6 +749,26 @@ impl<'a> Parser<'a> {
                         }
                     }
                 }
+                Some(Ok(Token::STAR)) => {
+                    self.next()?;
+                    let inner_type = self.parse_type()?;
+                    params.push(("_anon".to_string(), Type::Pointer(Box::new(inner_type))));
+
+                    match self.peek().cloned() {
+                        Some(Ok(Token::COMMA)) => {
+                            self.next()?;
+                        }
+                        Some(Ok(Token::RPAREN)) => {
+                            break;
+                        }
+                        _ => {
+                            return Err(ParserError::UnexpectedToken {
+                                expected: Some(Token::COMMA),
+                                found: Token::EOF,
+                            });
+                        }
+                    }
+                }
                 Some(Ok(Token::RPAREN)) => {
                     break;
                 }

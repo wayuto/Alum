@@ -4,9 +4,11 @@ $define ALUM_VEC 1
 struct Vec {
     data: arr[any],
     len: int,
+    capacity: int,
     at: any(*Vec, int),
     push: void(*Vec, any),
     pop: any(*Vec),
+    clear: void(*Vec),
 }
 
 extern vec_new(): Vec
