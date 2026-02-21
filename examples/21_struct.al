@@ -13,6 +13,6 @@ fun main(): int {
         x: 1,
         y: 1
     }
-    print("Point(" + itoa(p.x) + ", " + itoa(p.y) +")")
+    println("Point(" + itoa(p.x) + ", " + itoa(p.y) +")")
     return 0
 }
