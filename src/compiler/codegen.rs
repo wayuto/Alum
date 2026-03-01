@@ -99,7 +99,7 @@ impl CodeGen {
     ) -> i64 {
         match ty {
             Type::Named(name) => match name.as_str() {
-                "int" | "float" | "any" => 8,
+                "int" | "float" | "gen" => 8,
                 "string" => 8,
                 "void" => 0,
                 _ => {
@@ -114,6 +114,8 @@ impl CodeGen {
             Type::Pointer(_) => 8,
             Type::Function(_, _) => 8,
             Type::TypeVar(_) => 8,
+            Type::Auto => 8,
+            Type::Gen => 8,
         }
     }
 
@@ -124,7 +126,7 @@ impl CodeGen {
     ) -> i64 {
         match ty {
             Type::Named(name) => match name.as_str() {
-                "int" | "float" | "any" => 8,
+                "int" | "float" | "gen" => 8,
                 "string" => 8,
                 "bool" => 1,
                 "void" => 1,
@@ -145,6 +147,8 @@ impl CodeGen {
             Type::Pointer(_) => 8,
             Type::Function(_, _) => 8,
             Type::TypeVar(_) => 8,
+            Type::Auto => 8,
+            Type::Gen => 8,
         }
     }
 
@@ -170,7 +174,7 @@ impl CodeGen {
     fn has_return(expr: &Expr) -> bool {
         match expr {
             Expr::Return(_) => true,
-            Expr::Stmt(body) => body.last().map_or(false, |e| Self::has_return(e)),
+            Expr::Block(body) => body.last().map_or(false, |e| Self::has_return(e)),
             Expr::If(_, then_branch, else_branch) => {
                 Self::has_return(then_branch)
                     && else_branch.as_ref().map_or(false, |e| Self::has_return(e))
@@ -184,7 +188,7 @@ impl CodeGen {
     fn has_break_or_continue(expr: &Expr) -> bool {
         match expr {
             Expr::Break | Expr::Continue => true,
-            Expr::Stmt(body) => body.iter().any(|e| Self::has_break_or_continue(e)),
+            Expr::Block(body) => body.iter().any(|e| Self::has_break_or_continue(e)),
             Expr::If(_, then_branch, else_branch) => {
                 Self::has_break_or_continue(then_branch)
                     || else_branch
@@ -253,7 +257,7 @@ impl CodeGen {
 
                     Expr::Var(lambda_name)
                 }
-                Expr::Stmt(body) => Expr::Stmt(
+                Expr::Block(body) => Expr::Block(
                     body.into_iter()
                         .map(|e| process_expr(e, lambda_counter, lambda_map))
                         .collect(),
@@ -649,7 +653,7 @@ impl CodeGen {
         structs: &HashMap<String, StructDef>,
     ) -> Result<Value, CodeGenError> {
         match expr {
-            Expr::Stmt(body) => {
+            Expr::Block(body) => {
                 scope_stack.push(HashMap::new());
                 type_stack.push(HashMap::new());
                 let result = if body.len() > 1 {
@@ -1677,7 +1681,7 @@ impl CodeGen {
                 )?;
 
                 let decl_type = if let Type::Named(n) = ty {
-                    if n == "any" {
+                    if n == "gen" {
                         match &**value {
                             Expr::Int(_) => Type::Named("int".to_string()),
                             Expr::Float(_) => Type::Named("float".to_string()),
@@ -2934,7 +2938,7 @@ impl CodeGen {
 
     fn find_var_assignments(expr: &Expr, modified_vars: &mut HashSet<String>) {
         match expr {
-            Expr::Stmt(body) => {
+            Expr::Block(body) => {
                 for e in body {
                     Self::find_var_assignments(e, modified_vars);
                 }
@@ -3043,5 +3047,7 @@ fn get_type(t: &Type, type_map: &HashMap<String, ir::Type>) -> ir::Type {
         Type::Pointer(_) => types::I64,
         Type::Function(_, _) => types::I64,
         Type::TypeVar(_) => types::I64,
+        Type::Auto => types::I64,
+        Type::Gen => types::I64,
     };
 }

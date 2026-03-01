@@ -1,28 +1,28 @@
 $import "io.al"
 $import "convert.al"
 
-// Any Type Example
-// Demonstrates the use of 'any' type with generic-like type inference
+// Gen Type Example
+// Demonstrates the use of 'gen' type with generic-like type inference
 
-// Generic identity function - accepts and returns any type
-fun identity(x: any): any {
+// Generic identity function - accepts and returns gen type
+fun identity(x: gen): gen {
     return x
 }
 
-// Generic add function - works with any numeric type
-fun add(a: any, b: any): any {
+// Generic add function - works with gen numeric type
+fun add(a: gen, b: gen): gen {
     return a + b
 }
 
 fun main(): int {
-    // Test 1: any type with integer
-    let x: any = 42
-    let result: any = identity(x)
+    // Test 1: gen type with integer
+    let x: gen = 42
+    let result: gen = identity(x)
     println("identity(42) = ")
     println(itoa(result))
 
     // Test 2: Generic addition with integers
-    let sum: any = add(10, 20)
+    let sum: gen = add(10, 20)
     println("add(10, 20) = ")
     println(itoa(sum))
 

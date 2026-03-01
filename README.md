@@ -146,9 +146,9 @@ Alum is a statically typed language with explicit type annotations. All variable
 - `string`: String type
 - `void`: No return type
 - `arr[T]`: Array of type T
-- `any`: Generic type with automatic type inference
+- `gen`: Generic type with automatic type inference
 
-The `any` type supports generic-like programming with automatic type inference. Variables and parameters of type `any` can accept any value, and the compiler infers the actual type based on usage context.
+The `gen` type supports generic-like programming with automatic type inference. Variables and parameters of type `gen` can accept gen value, and the compiler infers the actual type based on usage context.
 
 ### Variables
 
@@ -297,14 +297,14 @@ fun main(): int {
     vec.push(&vec, 30)
     
     // Access elements by index
-    let first: any = vec.at(&vec, 0)
-    let second: any = vec.at(&vec, 1)
+    let first: gen = vec.at(&vec, 0)
+    let second: gen = vec.at(&vec, 1)
     
     println(itoa(first))   // Output: 10
     println(itoa(second))  // Output: 20
     
     // Pop elements
-    let popped: any = vec.pop(&vec)
+    let popped: gen = vec.pop(&vec)
     println(itoa(popped))  // Output: 30
     
     return 0
@@ -329,7 +329,7 @@ fun main(): int {
     vec.push(&vec, p1)
     vec.push(&vec, p2)
     
-    let point: any = vec.at(&vec, 0)
+    let point: gen = vec.at(&vec, 0)
     // Access struct fields (requires casting or direct access pattern)
     
     return 0
@@ -342,7 +342,7 @@ fun main(): int {
 - `vec.push(&vec, element)`: Add an element to the end
 - `vec.pop(&vec)`: Remove and return the last element
 
-**Note:** The Vec uses `any` type to store elements, allowing it to hold values of any type. The compiler automatically infers the actual type based on usage context.
+**Note:** The Vec uses `gen` type to store elements, allowing it to hold values of gen type. The compiler automatically infers the actual type based on usage context.
 
 ### Structs
 
@@ -402,41 +402,41 @@ Lambda syntax: `lamb(param: type, ...): return_type body`
 
 ### Any Type (Generic Programming)
 
-The `any` type provides generic-like functionality with automatic type inference:
+The `gen` type provides generic-like functionality with automatic type inference:
 
 ```al
-fun identity(x: any): any {
+fun identity(x: gen): gen {
     return x
 }
 
-fun add(a: any, b: any): any {
+fun add(a: gen, b: gen): gen {
     return a + b
 }
 
 fun main(): int {
-    // any type accepts any value
-    let x: any = 42
-    let y: any = "hello"
-    let z: any = 3.14
+    // gen type accepts gen value
+    let x: gen = 42
+    let y: gen = "hello"
+    let z: gen = 3.14
 
     // Type is inferred from usage
-    let result: any = identity(x)  // inferred as int
+    let result: gen = identity(x)  // inferred as int
     println(itoa(result))
 
     // Works with arithmetic operations
-    let sum: any = add(10, 20)  // inferred as int
+    let sum: gen = add(10, 20)  // inferred as int
     println(itoa(sum))
 
-    // Functions can return any type
-    fun get_func(): any {
-        fun helper(): any {
+    // Functions can return gen type
+    fun get_func(): gen {
+        fun helper(): gen {
             return 42
         }
         return helper
     }
 
-    let func_ptr: any = get_func()
-    let value: any = func_ptr()  // inferred as int
+    let func_ptr: gen = get_func()
+    let value: gen = func_ptr()  // inferred as int
     println(itoa(value))
 
     return 0
@@ -445,9 +445,9 @@ fun main(): int {
 
 **Key Features:**
 - **Type Inference**: The actual type is inferred from how the value is used
-- **Flexibility**: Can represent any type (int, float, string, functions, etc.)
+- **Flexibility**: Can represent gen type (int, float, string, functions, etc.)
 - **Safety**: Type checking is still performed at compile time
-- **Compatibility**: `any` is compatible with all other types
+- **Compatibility**: `gen` is compatible with all other types
 
 ### Preprocessor Directives
 

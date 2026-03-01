@@ -280,7 +280,7 @@
             "patterns": [
                 {
                     "name": "storage.type.primitive.alum",
-                    "match": "\\b(int|float|string|bool|void|any)\\b"
+                    "match": "\\b(int|float|string|bool|void|gen)\\b"
                 },
                 {
                     "name": "storage.type.pointer.alum",

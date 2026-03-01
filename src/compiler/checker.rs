@@ -164,9 +164,8 @@ impl TypeChecker {
                 }
                 self.unify_types(r1, r2)
             }
-            (Type::Named(n), _) if n == "any" => Ok(()),
-            (_, Type::Named(n)) if n == "any" => Ok(()),
-            _ => Err(CheckerError::TypeMismatch {
+                            (Type::Named(n), _) if n == "T" => Ok(()),
+                            (_, Type::Named(n)) if n == "T" => Ok(()),            _ => Err(CheckerError::TypeMismatch {
                 expected: t1,
                 found: t2,
                 context: "type unification".to_string(),
@@ -249,6 +248,8 @@ impl TypeChecker {
                 Box::new(self.resolve_type(ret)),
             ),
             Type::TypeVar(_) => self.resolve_type_var(ty),
+            Type::Auto => Type::Auto,
+            Type::Gen => Type::Gen,
         }
     }
 
@@ -359,7 +360,7 @@ impl TypeChecker {
                 if let Some(ty) = self.lookup_var(name) {
                     let resolved_ty = self.resolve_type(&ty);
 
-                    if matches!(resolved_ty, Type::Named(n) if n == "any") {
+                    if matches!(resolved_ty, Type::Named(n) if n == "gen") {
                         let type_var = self.new_type_var();
 
                         return Ok(type_var);
@@ -370,17 +371,16 @@ impl TypeChecker {
                 if let Some((params, ret_type)) = self.functions.get(name) {
                     let params_cloned = params.clone();
                     let ret_type_cloned = ret_type.clone();
-                    let resolved_params: Vec<Type> = params_cloned
-                        .iter()
-                        .map(|t| {
-                            if matches!(t, Type::Named(n) if n == "any") {
-                                self.new_type_var()
-                            } else {
-                                t.clone()
-                            }
-                        })
-                        .collect();
-                    let resolved_ret = if matches!(ret_type_cloned, Type::Named(ref n) if n == "any")
+                                let resolved_params: Vec<Type> = params_cloned
+                                    .iter()
+                                    .map(|t| {
+                                        if matches!(t, Type::Named(n) if n == "gen") {
+                                            self.new_type_var()
+                                        } else {
+                                            t.clone()
+                                        }
+                                    })
+                                    .collect();                    let resolved_ret = if matches!(ret_type_cloned, Type::Named(ref n) if n == "gen")
                     {
                         self.new_type_var()
                     } else {
@@ -402,10 +402,10 @@ impl TypeChecker {
                 let resolved_ty = self.resolve_type(ty);
                 let value_type = self.check_expr(value)?;
 
-                let actual_ty = if matches!(resolved_ty, Type::Named(ref n) if n == "any") {
-                    self.new_type_var()
-                } else {
-                    resolved_ty.clone()
+                let actual_ty = match &resolved_ty {
+                    Type::Auto => self.new_type_var(),
+                    Type::Gen => self.new_type_var(),
+                    _ => resolved_ty.clone(),
                 };
 
                 if !self.types_compatible(&actual_ty, &value_type) {
@@ -648,7 +648,7 @@ impl TypeChecker {
                 let arg_types = arg_types?;
 
                 match &callee_type {
-                    Type::Named(n) if n == "any" => {
+                    Type::Named(n) if n == "gen" => {
                         let ret_type_var = self.new_type_var();
                         Ok(ret_type_var)
                     }
@@ -758,7 +758,7 @@ impl TypeChecker {
                 Ok(Type::Named("void".to_string()))
             }
 
-            Expr::Stmt(body) => {
+            Expr::Block(body) => {
                 self.push_scope();
                 for e in body {
                     self.check_expr(e)?;
@@ -813,7 +813,8 @@ impl TypeChecker {
                             }
                         }
                         Type::Named(n) if n == "string" => {
-                            if !self.types_compatible(&Type::Named("int".to_string()), &value_type) {
+                            if !self.types_compatible(&Type::Named("int".to_string()), &value_type)
+                            {
                                 return Err(CheckerError::TypeMismatch {
                                     expected: Type::Named("int".to_string()),
                                     found: value_type,
@@ -860,7 +861,7 @@ impl TypeChecker {
             Expr::FuncDecl(_name, params, _ret_type, body) => {
                 self.push_scope();
                 for (param_name, param_type) in params {
-                    let actual_param_type = if matches!(param_type, Type::Named(n) if n == "any") {
+                    let actual_param_type = if matches!(param_type, Type::Named(n) if n == "gen") {
                         self.new_type_var()
                     } else {
                         param_type.clone()
@@ -988,10 +989,9 @@ impl TypeChecker {
                     }
                     Type::Pointer(inner) => {
                         if let Type::Named(struct_name) = &**inner {
-                            let struct_def = self
-                                .structs
-                                .get(struct_name)
-                                .ok_or_else(|| CheckerError::UndefinedStruct(struct_name.clone()))?;
+                            let struct_def = self.structs.get(struct_name).ok_or_else(|| {
+                                CheckerError::UndefinedStruct(struct_name.clone())
+                            })?;
 
                             for (name, ty) in &struct_def.fields {
                                 if name == field_name {
@@ -1107,8 +1107,8 @@ impl TypeChecker {
         match (&expected, &found) {
             (Type::TypeVar(_), _) => true,
             (_, Type::TypeVar(_)) => true,
-            (Type::Named(n), _) if n == "any" => true,
-            (_, Type::Named(n)) if n == "any" => true,
+            (Type::Named(n), _) if n == "gen" => true,
+            (_, Type::Named(n)) if n == "gen" => true,
             (Type::Named(n), _) if n == "void" => true,
             (_, Type::Named(n)) if n == "void" => true,
             (Type::Named(a), Type::Named(b)) => a == b,
@@ -1142,6 +1142,8 @@ impl TypeChecker {
                 }
                 self.validate_type(ret)
             }
+            Type::Auto => Ok(()),
+            Type::Gen => Ok(()),
         }
     }
 }

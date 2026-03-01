@@ -26,7 +26,7 @@ impl Optimizer {
 
     fn visit(&self, expr: &mut Expr) {
         match expr {
-            Expr::Stmt(body) => body.iter_mut().for_each(|e| self.optimize_expr(e)),
+            Expr::Block(body) => body.iter_mut().for_each(|e| self.optimize_expr(e)),
             Expr::FuncDecl(_, _, _, body) => self.optimize_expr(body),
             Expr::If(cond, t, e) => {
                 self.optimize_expr(cond);
@@ -248,12 +248,12 @@ impl Optimizer {
 
     fn dce(&self, expr: &mut Expr) {
         match expr {
-            Expr::Stmt(body) => {
+            Expr::Block(body) => {
                 body.retain(|e| !self.is_pure_dead(e));
                 for e in &mut *body {
                     self.dce(e);
                 }
-                body.retain(|e| !matches!(e, Expr::Stmt(b) if b.is_empty()));
+                body.retain(|e| !matches!(e, Expr::Block(b) if b.is_empty()));
             }
             Expr::If(cond, t, e) => {
                 self.dce(cond);
@@ -267,7 +267,7 @@ impl Optimizer {
                     if let Some(else_expr) = e {
                         *expr = *else_expr.clone();
                     } else {
-                        *expr = Expr::Stmt(vec![]);
+                        *expr = Expr::Block(vec![]);
                     }
                 }
             }
@@ -275,7 +275,7 @@ impl Optimizer {
                 self.dce(cond);
                 self.dce(body);
                 if let Expr::Bool(false) = cond.as_ref() {
-                    *expr = Expr::Stmt(vec![]);
+                    *expr = Expr::Block(vec![]);
                 }
             }
             Expr::For(_, s, e, body) => {

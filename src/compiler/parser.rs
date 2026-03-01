@@ -71,14 +71,12 @@ impl<'a> Parser<'a> {
                             });
                         }
                     };
-                    let token = self.next()?;
-                    if token != Token::COLON {
-                        return Err(ParserError::UnexpectedToken {
-                            expected: Some(Token::COLON),
-                            found: token,
-                        });
-                    }
-                    let ty = self.parse_type()?;
+                    let ty = if matches!(self.peek(), Some(Ok(Token::COLON))) {
+                        self.next()?;
+                        self.parse_type()?
+                    } else {
+                        Type::Auto
+                    };
                     let token = self.next()?;
                     if token != Token::EQ {
                         return Err(ParserError::UnexpectedToken {
@@ -541,7 +539,7 @@ impl<'a> Parser<'a> {
                             }
                         }
                     }
-                    return Ok(Expr::Stmt(exprs));
+                    return Ok(Expr::Block(exprs));
                 }
                 Ok(Token::LBRACKET) => {
                     self.next()?;

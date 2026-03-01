@@ -2,12 +2,12 @@ $ifndef ALUM_VEC
 $define ALUM_VEC 1
 
 struct Vec {
-    data: arr[any],
+    data: arr[gen],
     len: int,
     capacity: int,
-    at: any(*Vec, int),
-    push: void(*Vec, any),
-    pop: any(*Vec),
+    at: gen(*Vec, int),
+    push: void(*Vec, gen),
+    pop: gen(*Vec),
     clear: void(*Vec),
 }
 

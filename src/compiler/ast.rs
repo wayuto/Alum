@@ -6,12 +6,23 @@ pub struct Program {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+
 pub enum Type {
+
     Named(String),
+
     Array(Box<Type>),
+
     Pointer(Box<Type>),
+
     Function(Vec<Box<Type>>, Box<Type>),
+
     TypeVar(usize),
+
+    Auto,                 // 自动推导类型
+
+    Gen,                  // 泛型类型gen
+
 }
 
 impl fmt::Display for Type {
@@ -25,6 +36,8 @@ impl fmt::Display for Type {
                 write!(f, "{}({})", ret, param_str.join(", "))
             }
             Type::TypeVar(id) => write!(f, "T{}", id),
+            Type::Auto => write!(f, "auto"),
+            Type::Gen => write!(f, "gen"),
         }
     }
 }
@@ -72,7 +85,7 @@ pub enum Expr {
     While(Box<Expr>, Box<Expr>),
     Break,
     Continue,
-    Stmt(Vec<Expr>),
+    Block(Vec<Expr>),
     Index(Box<Expr>, Box<Expr>),
     IndexAssign(Box<Expr>, Box<Expr>),
     ArrayLiteral(Vec<Expr>),
@@ -392,8 +405,8 @@ impl Expr {
             }
             Expr::Break => write!(f, "{}Break", indent_str),
             Expr::Continue => write!(f, "{}Continue", indent_str),
-            Expr::Stmt(exprs) => {
-                write!(f, "{}Stmt(", indent_str)?;
+            Expr::Block(exprs) => {
+                write!(f, "{}Block(", indent_str)?;
                 for (i, expr) in exprs.iter().enumerate() {
                     write!(f, "\n")?;
                     expr.fmt_with_indent(f, indent + 1)?;
