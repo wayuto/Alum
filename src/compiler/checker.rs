@@ -164,8 +164,9 @@ impl TypeChecker {
                 }
                 self.unify_types(r1, r2)
             }
-                            (Type::Named(n), _) if n == "T" => Ok(()),
-                            (_, Type::Named(n)) if n == "T" => Ok(()),            _ => Err(CheckerError::TypeMismatch {
+            (Type::Named(n), _) if n == "T" => Ok(()),
+            (_, Type::Named(n)) if n == "T" => Ok(()),
+            _ => Err(CheckerError::TypeMismatch {
                 expected: t1,
                 found: t2,
                 context: "type unification".to_string(),
@@ -371,16 +372,17 @@ impl TypeChecker {
                 if let Some((params, ret_type)) = self.functions.get(name) {
                     let params_cloned = params.clone();
                     let ret_type_cloned = ret_type.clone();
-                                let resolved_params: Vec<Type> = params_cloned
-                                    .iter()
-                                    .map(|t| {
-                                        if matches!(t, Type::Named(n) if n == "gen") {
-                                            self.new_type_var()
-                                        } else {
-                                            t.clone()
-                                        }
-                                    })
-                                    .collect();                    let resolved_ret = if matches!(ret_type_cloned, Type::Named(ref n) if n == "gen")
+                    let resolved_params: Vec<Type> = params_cloned
+                        .iter()
+                        .map(|t| {
+                            if matches!(t, Type::Named(n) if n == "gen") {
+                                self.new_type_var()
+                            } else {
+                                t.clone()
+                            }
+                        })
+                        .collect();
+                    let resolved_ret = if matches!(ret_type_cloned, Type::Named(ref n) if n == "gen")
                     {
                         self.new_type_var()
                     } else {

@@ -1,8 +1,8 @@
 mod cli;
 mod compiler;
 use clap::Parser;
+use cli::link::{create_shared_library, create_static_library, link};
 use cli::{Cli, build, exec_run};
-use cli::link::{link, create_static_library, create_shared_library};
 
 fn main() {
     if let Err(e) = run() {
@@ -85,7 +85,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-if cli.library.is_some() {
+    if cli.library.is_some() {
         let lib_type = cli.library.as_ref().unwrap().to_lowercase();
         let output_path = if let Some(output) = cli.output {
             output
