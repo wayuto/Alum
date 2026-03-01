@@ -145,7 +145,8 @@ Alum is a statically typed language with explicit type annotations. All variable
 - `bool`: Boolean value
 - `string`: String type
 - `void`: No return type
-- `arr[T]`: Array of type T
+- `T[N]`: Fixed-size array of type T with N elements
+- `T[]`: Dynamic array (length determined at runtime)
 - `gen`: Generic type with automatic type inference
 
 The `gen` type supports generic-like programming with automatic type inference. Variables and parameters of type `gen` can accept gen value, and the compiler infers the actual type based on usage context.
@@ -189,18 +190,45 @@ while i < 10 {
     i = i + 1
 }
 
-// For Loop
+// For Loop with Range
 for i in 0..10 {
     println(itoa(i))
+}
+
+// For Loop iterating over array elements
+let numbers: int[5] = [10, 20, 30, 40, 50]
+for x in numbers {
+    println(itoa(x))  // Prints each element
 }
 ```
 
 ### Arrays
 
+Alum arrays have C-compatible memory layout and compile-time known length.
+
 ```al
-let numbers: arr[int] = [1, 2, 3, 4, 5]
-let buffer: arr[int] = [int; 100]
+// Fixed-size array with explicit length
+let numbers: int[5] = [1, 2, 3, 4, 5]
+
+// Array with fill syntax (creates array of specified size)
+let buffer: int[100] = [int; 100]
+
+// Access array elements
 let first: int = numbers[0]
+```
+
+**C Compatibility:**
+Alum arrays are fully compatible with C arrays. You can pass an Alum array directly to C functions:
+
+```al
+// C function declaration
+extern c_sum(*int, int): int
+
+// Alum array
+let arr: int[5] = [10, 20, 30, 40, 50]
+
+// Directly pass to C function (no conversion needed)
+let sum: int = c_sum(arr, 5)
 ```
 
 ### Pointers

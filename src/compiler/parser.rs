@@ -192,20 +192,11 @@ impl<'a> Parser<'a> {
 
                     self.expect(Token::IN)?;
 
-                    let start = self.expr()?;
-
-                    self.expect(Token::DOTDOT)?;
-
-                    let end = self.expr()?;
+                    let array_expr = self.expr()?;
 
                     let body = self.expr()?;
 
-                    Ok(Expr::For(
-                        var_name,
-                        Box::new(start),
-                        Box::new(end),
-                        Box::new(body),
-                    ))
+                    Ok(Expr::For(var_name, Box::new(array_expr), Box::new(body)))
                 }
                 Ok(Token::STRUCT) => {
                     self.next()?;
@@ -416,6 +407,13 @@ impl<'a> Parser<'a> {
 
     fn additive(&mut self) -> Result<Expr, ParserError> {
         let mut left = self.term()?;
+
+        if let Some(Ok(Token::DOTDOT)) = self.peek() {
+            self.next()?;
+            let right = self.term()?;
+            return Ok(Expr::Range(Box::new(left), Box::new(right)));
+        }
+
         while let Some(Ok(op)) = self.peek().cloned() {
             match op {
                 Token::PLUS | Token::MINUS => {
@@ -434,12 +432,12 @@ impl<'a> Parser<'a> {
     }
 
     fn term(&mut self) -> Result<Expr, ParserError> {
-        let mut left = self.call()?;
+        let mut left = self.prefix()?;
         while let Some(Ok(op)) = self.peek().cloned() {
             match op {
                 Token::STAR | Token::SLASH | Token::PERCENT => {
                     self.next()?;
-                    let right = self.call()?;
+                    let right = self.prefix()?;
                     left = match op {
                         Token::STAR => Expr::Mul(Box::new(left), Box::new(right)),
                         Token::SLASH => Expr::Div(Box::new(left), Box::new(right)),
@@ -451,6 +449,22 @@ impl<'a> Parser<'a> {
             }
         }
         Ok(left)
+    }
+
+    fn prefix(&mut self) -> Result<Expr, ParserError> {
+        match self.peek().cloned() {
+            Some(Ok(Token::STAR)) => {
+                self.next()?;
+                let operand = self.prefix()?;
+                Ok(Expr::Deref(Box::new(operand)))
+            }
+            Some(Ok(Token::LAND)) => {
+                self.next()?;
+                let operand = self.prefix()?;
+                Ok(Expr::AddressOf(Box::new(operand)))
+            }
+            _ => self.call(),
+        }
     }
 
     fn factor(&mut self) -> Result<Expr, ParserError> {
@@ -546,7 +560,7 @@ impl<'a> Parser<'a> {
 
                     let is_fill_syntax = match self.peek() {
                         Some(Ok(Token::TYPE(_))) => true,
-                        Some(Ok(Token::IDENT(s))) if s == "arr" => true,
+                        Some(Ok(Token::IDENT(s))) if s == "gen" => true,
                         _ => false,
                     };
 
@@ -652,16 +666,6 @@ impl<'a> Parser<'a> {
                     let operand = self.factor()?;
                     return Ok(Expr::Add(Box::new(Expr::Int(0)), Box::new(operand)));
                 }
-                Ok(Token::STAR) => {
-                    self.next()?;
-                    let operand = self.parse_atom()?;
-                    return Ok(Expr::Deref(Box::new(operand)));
-                }
-                Ok(Token::LAND) => {
-                    self.next()?;
-                    let operand = self.parse_atom()?;
-                    return Ok(Expr::AddressOf(Box::new(operand)));
-                }
                 Ok(Token::NOT) => {
                     self.next()?;
                     let operand = self.factor()?;
@@ -704,13 +708,27 @@ impl<'a> Parser<'a> {
                         self.expect(Token::COLON)?;
                         let ty = self.parse_type()?;
                         params.push((s, ty));
-                    } else if s == "arr" && matches!(self.peek(), Some(Ok(Token::LBRACKET))) {
-                        self.expect(Token::LBRACKET)?;
-                        let inner_type = self.parse_type()?;
-                        self.expect(Token::RBRACKET)?;
-                        params.push(("_anon".to_string(), Type::Array(Box::new(inner_type))));
                     } else {
-                        params.push(("_anon".to_string(), Type::Named(s)));
+                        let ty = if let Some(ty) = self.typedefs.get(&s) {
+                            ty.clone()
+                        } else {
+                            Type::Named(s)
+                        };
+
+                        if matches!(self.peek(), Some(Ok(Token::LBRACKET))) {
+                            self.next()?;
+                            let len = if let Some(Ok(Token::INT(n))) = self.peek() {
+                                let length = *n as usize;
+                                self.next()?;
+                                length
+                            } else {
+                                0
+                            };
+                            self.expect(Token::RBRACKET)?;
+                            params.push(("_anon".to_string(), Type::Array(Box::new(ty), len)));
+                        } else {
+                            params.push(("_anon".to_string(), ty));
+                        }
                     }
 
                     match self.peek().cloned() {
@@ -728,9 +746,9 @@ impl<'a> Parser<'a> {
                         }
                     }
                 }
-                Some(Ok(Token::TYPE(t))) => {
-                    self.next()?;
-                    params.push(("_anon".to_string(), Type::Named(t)));
+                Some(Ok(Token::TYPE(_))) => {
+                    let ty = self.parse_type()?;
+                    params.push(("_anon".to_string(), ty));
 
                     match self.peek().cloned() {
                         Some(Ok(Token::COMMA)) => {
@@ -748,9 +766,8 @@ impl<'a> Parser<'a> {
                     }
                 }
                 Some(Ok(Token::STAR)) => {
-                    self.next()?;
-                    let inner_type = self.parse_type()?;
-                    params.push(("_anon".to_string(), Type::Pointer(Box::new(inner_type))));
+                    let ty = self.parse_type()?;
+                    params.push(("_anon".to_string(), ty));
 
                     match self.peek().cloned() {
                         Some(Ok(Token::COMMA)) => {
@@ -794,7 +811,7 @@ impl<'a> Parser<'a> {
 
         let first_token = self.next()?;
 
-        match first_token {
+        let base_type = match first_token {
             Token::TYPE(t) => {
                 if let Some(Ok(Token::LPAREN)) = self.peek() {
                     let mut params = Vec::new();
@@ -830,26 +847,39 @@ impl<'a> Parser<'a> {
                     return Ok(Type::Function(params, Box::new(Type::Named(t))));
                 }
 
-                Ok(Type::Named(t))
-            }
-            Token::IDENT(s) if s == "arr" => {
-                self.expect(Token::LBRACKET)?;
-                let inner_type = self.parse_type()?;
-                self.expect(Token::RBRACKET)?;
-                Ok(Type::Array(Box::new(inner_type)))
+                Type::Named(t)
             }
             Token::IDENT(s) => {
                 if let Some(ty) = self.typedefs.get(&s) {
-                    Ok(ty.clone())
+                    ty.clone()
                 } else {
-                    Ok(Type::Named(s))
+                    Type::Named(s)
                 }
             }
-            token => Err(ParserError::UnexpectedToken {
-                expected: Some(Token::TYPE("int".to_string())),
-                found: token,
-            }),
+            token => {
+                return Err(ParserError::UnexpectedToken {
+                    expected: Some(Token::TYPE("int".to_string())),
+                    found: token,
+                });
+            }
+        };
+
+        if let Some(Ok(Token::LBRACKET)) = self.peek() {
+            self.next()?;
+
+            let len = if let Some(Ok(Token::INT(n))) = self.peek() {
+                let length = *n as usize;
+                self.next()?;
+                length
+            } else {
+                0
+            };
+
+            self.expect(Token::RBRACKET)?;
+            return Ok(Type::Array(Box::new(base_type), len));
         }
+
+        Ok(base_type)
     }
 
     fn next(&mut self) -> Result<Token, ParserError> {
@@ -870,17 +900,5 @@ impl<'a> Parser<'a> {
 impl From<LexerError> for ParserError {
     fn from(value: LexerError) -> Self {
         Self::LexerError(value)
-    }
-}
-
-impl<'a> Parser<'a> {
-    fn parse_atom(&mut self) -> Result<Expr, ParserError> {
-        match self.next()? {
-            Token::IDENT(name) => Ok(Expr::Var(name)),
-            token => Err(ParserError::UnexpectedToken {
-                expected: Some(Token::IDENT("IDENT".to_string())),
-                found: token,
-            }),
-        }
     }
 }

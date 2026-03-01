@@ -110,7 +110,10 @@ impl CodeGen {
                     }
                 }
             },
-            Type::Array(_) => 8,
+            Type::Array(inner, len) => {
+                let elem_size = Self::get_type_size(inner, _type_map, structs);
+                8 + elem_size * (*len as i64)
+            }
             Type::Pointer(_) => 8,
             Type::Function(_, _) => 8,
             Type::TypeVar(_) => 8,
@@ -143,7 +146,7 @@ impl CodeGen {
                     }
                 }
             },
-            Type::Array(_) => 8,
+            Type::Array(inner, _) => Self::get_type_align(inner, type_map, structs),
             Type::Pointer(_) => 8,
             Type::Function(_, _) => 8,
             Type::TypeVar(_) => 8,
@@ -180,7 +183,7 @@ impl CodeGen {
                     && else_branch.as_ref().map_or(false, |e| Self::has_return(e))
             }
             Expr::While(_, body) => Self::has_return(body),
-            Expr::For(_, _, _, body) => Self::has_return(body),
+            Expr::For(_, _, body) => Self::has_return(body),
             _ => false,
         }
     }
@@ -196,7 +199,7 @@ impl CodeGen {
                         .map_or(false, |e| Self::has_break_or_continue(e))
             }
             Expr::While(_, body) => Self::has_break_or_continue(body),
-            Expr::For(_, _, _, body) => Self::has_break_or_continue(body),
+            Expr::For(_, _, body) => Self::has_break_or_continue(body),
             _ => false,
         }
     }
@@ -386,10 +389,9 @@ impl CodeGen {
                     Box::new(process_expr(*cond, lambda_counter, lambda_map)),
                     Box::new(process_expr(*body, lambda_counter, lambda_map)),
                 ),
-                Expr::For(var, start, end, body) => Expr::For(
+                Expr::For(var, array, body) => Expr::For(
                     var,
-                    Box::new(process_expr(*start, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*end, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*array, lambda_counter, lambda_map)),
                     Box::new(process_expr(*body, lambda_counter, lambda_map)),
                 ),
                 Expr::Index(arr, idx) => Expr::Index(
@@ -409,6 +411,10 @@ impl CodeGen {
                 Expr::ArrayFill(ty, len) => {
                     Expr::ArrayFill(ty, Box::new(process_expr(*len, lambda_counter, lambda_map)))
                 }
+                Expr::Range(start, end) => Expr::Range(
+                    Box::new(process_expr(*start, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*end, lambda_counter, lambda_map)),
+                ),
                 Expr::StructLiteral(name, fields) => Expr::StructLiteral(
                     name,
                     fields
@@ -634,6 +640,15 @@ impl CodeGen {
         for scope in scope_stack.iter().rev() {
             if let Some(v) = scope.get(name) {
                 return Some(v);
+            }
+        }
+        None
+    }
+
+    fn get_var_type(name: &str, type_stack: &Vec<HashMap<String, Type>>) -> Option<Type> {
+        for scope in type_stack.iter().rev() {
+            if let Some(ty) = scope.get(name) {
+                return Some(ty.clone());
             }
         }
         None
@@ -2240,6 +2255,7 @@ impl CodeGen {
 
                 let mut data_desc = cranelift_module::DataDescription::new();
                 let mut bytes = Vec::new();
+
                 let mut str_idx = 0;
                 for elem in elements {
                     match elem {
@@ -2313,7 +2329,7 @@ impl CodeGen {
                     Type::Named(n) if matches!(n.as_str(), "int" | "float" | "string") => 8i64,
                     Type::Named(n) if n == "bool" => 1i64,
                     Type::Named(n) if n == "void" => 0i64,
-                    Type::Array(_) => 8i64,
+                    Type::Array(_, _) => 8i64,
                     _ => 8i64,
                 };
 
@@ -2347,25 +2363,14 @@ impl CodeGen {
                     .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
                 let memset_ref = module.declare_func_in_func(memset_id, builder.func);
                 let zero_val = builder.ins().iconst(types::I32, 0);
+
                 builder
                     .ins()
                     .call(memset_ref, &[mem_ptr, zero_val, total_size]);
 
                 Ok(mem_ptr)
             }
-            Expr::For(var, start, end, body) => {
-                let loop_header = builder.create_block();
-                let loop_body = builder.create_block();
-                let loop_increment = builder.create_block();
-                let loop_exit = builder.create_block();
-
-                loop_stack.push(LoopContext {
-                    header_block: loop_header,
-                    exit_block: loop_exit,
-                    increment_block: Some(loop_increment),
-                    loop_params: Vec::new(),
-                });
-
+            Expr::Range(start, end) => {
                 let start_val = Self::compile_expr(
                     start,
                     builder,
@@ -2393,34 +2398,208 @@ impl CodeGen {
                     structs,
                 )?;
 
-                let loop_slot =
+                let len_val = builder.ins().isub(end_val, start_val);
+
+                let zero = builder.ins().iconst(types::I64, 0);
+                let is_neg =
+                    builder
+                        .ins()
+                        .icmp(ir::condcodes::IntCC::SignedLessThan, len_val, zero);
+                let final_len = builder.ins().select(is_neg, zero, len_val);
+
+                let total_size = builder.ins().imul_imm(final_len, 8);
+
+                let malloc_sig = {
+                    let mut sig = module.make_signature();
+                    sig.call_conv = CallConv::SystemV;
+                    sig.params.push(AbiParam::new(types::I64));
+                    sig.returns.push(AbiParam::new(types::I64));
+                    sig
+                };
+                let malloc_id = module
+                    .declare_function("malloc", Linkage::Import, &malloc_sig)
+                    .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                let malloc_ref = module.declare_func_in_func(malloc_id, builder.func);
+                let mem_ptr = builder.ins().call(malloc_ref, &[total_size]);
+                let mem_ptr = builder.inst_results(mem_ptr)[0];
+
+                let fill_header = builder.create_block();
+                let fill_body = builder.create_block();
+                let fill_exit = builder.create_block();
+
+                let idx_slot =
                     builder.create_sized_stack_slot(cranelift::codegen::ir::StackSlotData::new(
                         cranelift::codegen::ir::StackSlotKind::ExplicitSlot,
                         8,
                         0,
                     ));
-                builder.ins().stack_store(start_val, loop_slot, 0);
+                builder.ins().stack_store(zero, idx_slot, 0);
+
+                builder.ins().jump(fill_header, &[]);
+
+                builder.switch_to_block(fill_header);
+                let current_idx = builder.ins().stack_load(types::I64, idx_slot, 0);
+                let cmp = builder.ins().icmp(
+                    ir::condcodes::IntCC::UnsignedLessThan,
+                    current_idx,
+                    final_len,
+                );
+                let cmp_i64 = builder.ins().uextend(types::I64, cmp);
+                builder.ins().brif(cmp_i64, fill_body, &[], fill_exit, &[]);
+
+                builder.switch_to_block(fill_body);
+
+                let elem_val = builder.ins().iadd(start_val, current_idx);
+
+                let elem_offset = builder.ins().imul_imm(current_idx, 8);
+                let elem_ptr = builder.ins().iadd(mem_ptr, elem_offset);
+                builder
+                    .ins()
+                    .store(ir::MemFlags::new(), elem_val, elem_ptr, 0);
+
+                let next_idx = builder.ins().iadd_imm(current_idx, 1);
+                builder.ins().stack_store(next_idx, idx_slot, 0);
+                builder.ins().jump(fill_header, &[]);
+
+                builder.switch_to_block(fill_exit);
+                builder.seal_block(fill_header);
+                builder.seal_block(fill_body);
+                builder.seal_block(fill_exit);
+
+                Ok(mem_ptr)
+            }
+            Expr::For(var, array, body) => {
+                let loop_header = builder.create_block();
+                let loop_body = builder.create_block();
+                let loop_increment = builder.create_block();
+                let loop_exit = builder.create_block();
+
+                loop_stack.push(LoopContext {
+                    header_block: loop_header,
+                    exit_block: loop_exit,
+                    increment_block: Some(loop_increment),
+                    loop_params: Vec::new(),
+                });
+
+                let array_ptr = Self::compile_expr(
+                    array,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )?;
+
+                let array_len = match array.as_ref() {
+                    Expr::ArrayLiteral(elements) => {
+                        builder.ins().iconst(types::I64, elements.len() as i64)
+                    }
+
+                    Expr::Range(start, end) => {
+                        let start_val = Self::compile_expr(
+                            start,
+                            builder,
+                            scope_stack,
+                            type_stack,
+                            idx,
+                            func_signatures,
+                            module,
+                            str_idx,
+                            loop_stack,
+                            type_map,
+                            structs,
+                        )?;
+                        let end_val = Self::compile_expr(
+                            end,
+                            builder,
+                            scope_stack,
+                            type_stack,
+                            idx,
+                            func_signatures,
+                            module,
+                            str_idx,
+                            loop_stack,
+                            type_map,
+                            structs,
+                        )?;
+                        let len = builder.ins().isub(end_val, start_val);
+                        let zero = builder.ins().iconst(types::I64, 0);
+                        let is_neg =
+                            builder
+                                .ins()
+                                .icmp(ir::condcodes::IntCC::SignedLessThan, len, zero);
+                        builder.ins().select(is_neg, zero, len)
+                    }
+
+                    Expr::Var(name) => {
+                        if let Some(ty) = Self::get_var_type(name, type_stack) {
+                            if let Type::Array(_, len) = ty {
+                                if len > 0 {
+                                    builder.ins().iconst(types::I64, len as i64)
+                                } else {
+                                    builder.ins().iconst(types::I64, 0)
+                                }
+                            } else {
+                                builder.ins().iconst(types::I64, 0)
+                            }
+                        } else {
+                            builder.ins().iconst(types::I64, 0)
+                        }
+                    }
+
+                    _ => builder.ins().iconst(types::I64, 0),
+                };
+
+                let index_slot =
+                    builder.create_sized_stack_slot(cranelift::codegen::ir::StackSlotData::new(
+                        cranelift::codegen::ir::StackSlotKind::ExplicitSlot,
+                        8,
+                        0,
+                    ));
+                let zero = builder.ins().iconst(types::I64, 0);
+                builder.ins().stack_store(zero, index_slot, 0);
+
+                let elem_slot =
+                    builder.create_sized_stack_slot(cranelift::codegen::ir::StackSlotData::new(
+                        cranelift::codegen::ir::StackSlotKind::ExplicitSlot,
+                        8,
+                        0,
+                    ));
 
                 builder.ins().jump(loop_header, &[]);
 
                 builder.switch_to_block(loop_header);
-                let current_val = builder.ins().stack_load(types::I64, loop_slot, 0);
+                let current_idx = builder.ins().stack_load(types::I64, index_slot, 0);
 
                 let cmp = builder.ins().icmp(
                     ir::condcodes::IntCC::UnsignedLessThan,
-                    current_val,
-                    end_val,
+                    current_idx,
+                    array_len,
                 );
                 let cmp_i64 = builder.ins().uextend(types::I64, cmp);
                 builder.ins().brif(cmp_i64, loop_body, &[], loop_exit, &[]);
 
                 builder.switch_to_block(loop_body);
+
+                let elem_offset = builder.ins().imul_imm(current_idx, 8);
+                let elem_ptr = builder.ins().iadd(array_ptr, elem_offset);
+                let elem_val = builder
+                    .ins()
+                    .load(types::I64, ir::MemFlags::new(), elem_ptr, 0);
+                builder.ins().stack_store(elem_val, elem_slot, 0);
+
                 scope_stack.push(HashMap::new());
                 type_stack.push(HashMap::new());
+
                 scope_stack
                     .last_mut()
                     .unwrap()
-                    .insert(var.clone(), Slot::StackSlot(loop_slot));
+                    .insert(var.clone(), Slot::StackSlot(elem_slot));
 
                 Self::compile_expr(
                     body,
@@ -2442,9 +2621,9 @@ impl CodeGen {
                 builder.ins().jump(loop_increment, &[]);
 
                 builder.switch_to_block(loop_increment);
-                let current_val_inc = builder.ins().stack_load(types::I64, loop_slot, 0);
-                let next_val = builder.ins().iadd_imm(current_val_inc, 1);
-                builder.ins().stack_store(next_val, loop_slot, 0);
+                let current_idx_inc = builder.ins().stack_load(types::I64, index_slot, 0);
+                let next_idx = builder.ins().iadd_imm(current_idx_inc, 1);
+                builder.ins().stack_store(next_idx, index_slot, 0);
                 builder.ins().jump(loop_header, &[]);
 
                 loop_stack.pop();
@@ -2872,6 +3051,7 @@ impl CodeGen {
                         type_map,
                         structs,
                     )?;
+
                     let offset = builder.ins().imul_imm(index_val, 8);
                     let element_ptr = builder.ins().iadd(arr_ptr, offset);
                     Ok(element_ptr)
@@ -2957,9 +3137,8 @@ impl CodeGen {
                 Self::find_var_assignments(cond, modified_vars);
                 Self::find_var_assignments(body, modified_vars);
             }
-            Expr::For(_, start, end, body) => {
-                Self::find_var_assignments(start, modified_vars);
-                Self::find_var_assignments(end, modified_vars);
+            Expr::For(_, array, body) => {
+                Self::find_var_assignments(array, modified_vars);
                 Self::find_var_assignments(body, modified_vars);
             }
             Expr::Add(l, r)
@@ -3043,7 +3222,7 @@ impl CodeGen {
 fn get_type(t: &Type, type_map: &HashMap<String, ir::Type>) -> ir::Type {
     return match t {
         Type::Named(name) => *type_map.get(name).unwrap_or(&types::I64),
-        Type::Array(_) => types::I64,
+        Type::Array(_, _) => types::I64,
         Type::Pointer(_) => types::I64,
         Type::Function(_, _) => types::I64,
         Type::TypeVar(_) => types::I64,

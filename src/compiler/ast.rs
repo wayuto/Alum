@@ -9,7 +9,7 @@ pub struct Program {
 
 pub enum Type {
     Named(String),
-    Array(Box<Type>),
+    Array(Box<Type>, usize),
     Pointer(Box<Type>),
     Function(Vec<Box<Type>>, Box<Type>),
     TypeVar(usize),
@@ -22,7 +22,13 @@ impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Type::Named(name) => write!(f, "{}", name),
-            Type::Array(inner) => write!(f, "arr[{}]", inner),
+            Type::Array(inner, len) => {
+                if *len == 0 {
+                    write!(f, "{}[]", inner)
+                } else {
+                    write!(f, "{}[{}]", inner, len)
+                }
+            }
             Type::Pointer(inner) => write!(f, "*{}", inner),
             Type::Function(params, ret) => {
                 let param_str: Vec<String> = params.iter().map(|p| p.to_string()).collect();
@@ -83,7 +89,8 @@ pub enum Expr {
     IndexAssign(Box<Expr>, Box<Expr>),
     ArrayLiteral(Vec<Expr>),
     ArrayFill(Type, Box<Expr>),
-    For(String, Box<Expr>, Box<Expr>, Box<Expr>),
+    Range(Box<Expr>, Box<Expr>),
+    For(String, Box<Expr>, Box<Expr>),
     TypeDef,
     Struct(String, Vec<(String, Type)>),
     StructLiteral(String, Vec<(String, Expr)>),
@@ -441,11 +448,16 @@ impl Expr {
                 len.fmt_with_indent(f, 0)?;
                 write!(f, "]")
             }
-            Expr::For(var, start, end, body) => {
-                write!(f, "{}For(\"{}\" in ", indent_str, var)?;
+            Expr::Range(start, end) => {
+                write!(f, "{}Range(", indent_str)?;
                 start.fmt_with_indent(f, 0)?;
                 write!(f, "..")?;
                 end.fmt_with_indent(f, 0)?;
+                write!(f, ")")
+            }
+            Expr::For(var, array, body) => {
+                write!(f, "{}For(\"{}\" in ", indent_str, var)?;
+                array.fmt_with_indent(f, 0)?;
                 write!(f, "\n{}Body:", indent_str)?;
                 body.fmt_with_indent(f, indent + 1)?;
                 write!(f, "\n{})", indent_str)

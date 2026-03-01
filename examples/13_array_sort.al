@@ -5,19 +5,19 @@ $import "convert.al"
 // Demonstrates bubble sort algorithm
 
 fun main(): int {
-    let numbers: arr[int] = [64, 34, 25, 12, 22, 11, 90, 45]
+    let numbers: int[8] = [64, 34, 25, 12, 22, 11, 90, 45]
     let n: int = 8
     let i: int = 0
     let j: int = 0
     let temp: int = 0
-    
+
     println("Original array:")
     for i in 0..n {
         print(itoa(numbers[i]))
         print(" ")
     }
-    println("\n")
-    
+    println("")
+
     // Bubble sort algorithm
     i = 0
     while i < n - 1 {
@@ -32,13 +32,13 @@ fun main(): int {
         }
         i = i + 1
     }
-    
+
     println("Sorted array:")
     for i in 0..n {
         print(itoa(numbers[i]))
         print(" ")
     }
-    println("\n")
-    
+    println("")
+
     return 0
 }

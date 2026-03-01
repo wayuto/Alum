@@ -118,7 +118,7 @@ impl TypeChecker {
                     ty.clone()
                 }
             }
-            Type::Array(inner) => Type::Array(Box::new(self.resolve_type_var(inner))),
+            Type::Array(inner, len) => Type::Array(Box::new(self.resolve_type_var(inner)), *len),
             Type::Function(params, ret) => Type::Function(
                 params
                     .iter()
@@ -149,7 +149,16 @@ impl TypeChecker {
                 Ok(())
             }
             (Type::Named(n1), Type::Named(n2)) if n1 == n2 => Ok(()),
-            (Type::Array(a1), Type::Array(a2)) => self.unify_types(a1, a2),
+            (Type::Array(a1, len1), Type::Array(a2, len2)) => {
+                if *len1 != 0 && *len2 != 0 && len1 != len2 {
+                    return Err(CheckerError::TypeMismatch {
+                        expected: t1.clone(),
+                        found: t2.clone(),
+                        context: "array length mismatch".to_string(),
+                    });
+                }
+                self.unify_types(a1, a2)
+            }
             (Type::Pointer(p1), Type::Pointer(p2)) => self.unify_types(p1, p2),
             (Type::Function(p1, r1), Type::Function(p2, r2)) => {
                 if p1.len() != p2.len() {
@@ -239,7 +248,7 @@ impl TypeChecker {
                     ty.clone()
                 }
             }
-            Type::Array(inner) => Type::Array(Box::new(self.resolve_type(inner))),
+            Type::Array(inner, len) => Type::Array(Box::new(self.resolve_type(inner)), *len),
             Type::Pointer(inner) => Type::Pointer(Box::new(self.resolve_type(inner))),
             Type::Function(params, ret) => Type::Function(
                 params
@@ -251,6 +260,22 @@ impl TypeChecker {
             Type::TypeVar(_) => self.resolve_type_var(ty),
             Type::Auto => Type::Auto,
             Type::Gen => Type::Gen,
+        }
+    }
+
+    fn resolve_gen_types(&mut self, ty: &Type) -> Type {
+        match ty {
+            Type::Named(n) if n == "gen" => self.new_type_var(),
+            Type::Array(inner, len) => Type::Array(Box::new(self.resolve_gen_types(inner)), *len),
+            Type::Pointer(inner) => Type::Pointer(Box::new(self.resolve_gen_types(inner))),
+            Type::Function(params, ret) => Type::Function(
+                params
+                    .iter()
+                    .map(|p| Box::new(self.resolve_gen_types(p)))
+                    .collect(),
+                Box::new(self.resolve_gen_types(ret)),
+            ),
+            _ => ty.clone(),
         }
     }
 
@@ -315,7 +340,7 @@ impl TypeChecker {
             }
             Expr::StructLiteral(name, _) => Type::Named(name.clone()),
             Expr::ArrayLiteral(_) | Expr::ArrayFill(_, _) => {
-                Type::Array(Box::new(Type::Named("int".to_string())))
+                Type::Array(Box::new(Type::Named("int".to_string())), 0)
             }
             Expr::AddressOf(expr) => {
                 let inner_type = self.get_expr_type(expr);
@@ -680,13 +705,13 @@ impl TypeChecker {
                         for (i, (arg_type, expected_ty)) in
                             arg_types.iter().zip(params.iter()).enumerate()
                         {
-                            self.unify_types(expected_ty, arg_type).map_err(|_| {
-                                CheckerError::TypeMismatch {
+                            if !self.types_compatible(expected_ty, arg_type) {
+                                return Err(CheckerError::TypeMismatch {
                                     expected: *expected_ty.clone(),
                                     found: arg_type.clone(),
                                     context: format!("argument {} of function pointer call", i + 1),
-                                }
-                            })?;
+                                });
+                            }
                         }
 
                         Ok(*ret_type.clone())
@@ -741,19 +766,22 @@ impl TypeChecker {
                 Ok(Type::Named("void".to_string()))
             }
 
-            Expr::For(var, start, end, body) => {
-                let start_type = self.check_expr(start)?;
-                let end_type = self.check_expr(end)?;
+            Expr::For(var, array, body) => {
+                let array_type = self.check_expr(array)?;
 
-                if !Self::is_numeric_type(&start_type) || !Self::is_numeric_type(&end_type) {
-                    return Err(CheckerError::InvalidOperation {
-                        op: "for loop range".to_string(),
-                        type_name: format!("{:?} and {:?}", start_type, end_type),
-                    });
-                }
+                let elem_type = match &array_type {
+                    Type::Array(inner, _) => *inner.clone(),
+                    Type::Named(n) if n == "string" => Type::Named("int".to_string()),
+                    _ => {
+                        return Err(CheckerError::InvalidOperation {
+                            op: "for loop".to_string(),
+                            type_name: format!("{:?}", array_type),
+                        });
+                    }
+                };
 
                 self.push_scope();
-                self.declare_var(var, Type::Named("int".to_string()));
+                self.declare_var(var, elem_type);
                 self.check_expr(body)?;
                 self.pop_scope();
 
@@ -781,7 +809,7 @@ impl TypeChecker {
                 }
 
                 match array_type {
-                    Type::Array(inner) => Ok(*inner),
+                    Type::Array(inner, _) => Ok(*inner),
                     Type::Named(n) if n == "string" => Ok(Type::Named("int".to_string())),
                     _ => Err(CheckerError::InvalidOperation {
                         op: "index".to_string(),
@@ -805,7 +833,7 @@ impl TypeChecker {
                     }
 
                     match array_type {
-                        Type::Array(inner) => {
+                        Type::Array(inner, _) => {
                             if !self.types_compatible(&inner, &value_type) {
                                 return Err(CheckerError::TypeMismatch {
                                     expected: *inner,
@@ -842,11 +870,12 @@ impl TypeChecker {
             }
 
             Expr::ArrayLiteral(elements) => {
+                let len = elements.len();
                 let mut elem_type = Type::Named("int".to_string());
                 for e in elements {
                     elem_type = self.check_expr(e)?;
                 }
-                Ok(Type::Array(Box::new(elem_type)))
+                Ok(Type::Array(Box::new(elem_type), len))
             }
 
             Expr::ArrayFill(elem_type, length) => {
@@ -857,7 +886,33 @@ impl TypeChecker {
                         type_name: format!("{:?}", len_type),
                     });
                 }
-                Ok(Type::Array(Box::new(elem_type.clone())))
+
+                let len = if let Expr::Int(n) = length.as_ref() {
+                    *n as usize
+                } else {
+                    0
+                };
+                Ok(Type::Array(Box::new(elem_type.clone()), len))
+            }
+
+            Expr::Range(start, end) => {
+                let start_type = self.check_expr(start)?;
+                let end_type = self.check_expr(end)?;
+
+                if !Self::is_numeric_type(&start_type) || !Self::is_numeric_type(&end_type) {
+                    return Err(CheckerError::InvalidOperation {
+                        op: "range expression".to_string(),
+                        type_name: format!("{:?} and {:?}", start_type, end_type),
+                    });
+                }
+
+                let len = if let (Expr::Int(s), Expr::Int(e)) = (start.as_ref(), end.as_ref()) {
+                    if *e > *s { (*e - *s) as usize } else { 0 }
+                } else {
+                    0
+                };
+
+                Ok(Type::Array(Box::new(Type::Named("int".to_string())), len))
             }
 
             Expr::FuncDecl(_name, params, _ret_type, body) => {
@@ -940,14 +995,17 @@ impl TypeChecker {
                         )));
                     }
                 };
-                let struct_def = self
+                let fields = self
                     .structs
                     .get(&struct_name)
-                    .ok_or_else(|| CheckerError::UndefinedStruct(struct_name.clone()))?;
+                    .ok_or_else(|| CheckerError::UndefinedStruct(struct_name.clone()))?
+                    .fields
+                    .clone();
 
-                for (name, ty) in &struct_def.fields {
+                for (name, ty) in &fields {
                     if name == field_name {
-                        return Ok(ty.clone());
+                        let resolved_ty = self.resolve_gen_types(ty);
+                        return Ok(resolved_ty);
                     }
                 }
 
@@ -1114,7 +1172,12 @@ impl TypeChecker {
             (Type::Named(n), _) if n == "void" => true,
             (_, Type::Named(n)) if n == "void" => true,
             (Type::Named(a), Type::Named(b)) => a == b,
-            (Type::Array(a), Type::Array(b)) => self.types_compatible(a, b),
+            (Type::Array(a, len1), Type::Array(b, len2)) => {
+                let len_compatible = *len1 == 0 || *len2 == 0 || len1 == len2;
+                len_compatible && self.types_compatible(a, b)
+            }
+
+            (Type::Pointer(a), Type::Array(b, _)) => self.types_compatible(a, b),
             (Type::Pointer(a), Type::Pointer(b)) => self.types_compatible(a, b),
             (Type::Function(exp_params, exp_ret), Type::Function(found_params, found_ret)) => {
                 if exp_params.len() != found_params.len() {
@@ -1136,7 +1199,7 @@ impl TypeChecker {
         match ty {
             Type::Named(_) => Ok(()),
             Type::TypeVar(_) => Ok(()),
-            Type::Array(inner) => self.validate_type(inner),
+            Type::Array(inner, _) => self.validate_type(inner),
             Type::Pointer(inner) => self.validate_type(inner),
             Type::Function(params, ret) => {
                 for param in params {

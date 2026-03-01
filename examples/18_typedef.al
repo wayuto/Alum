@@ -5,7 +5,7 @@ $import "convert.al"
 
 fun main(): int {
     typedef MyInt = int
-    typedef MyArray = arr[int]
+    typedef MyArray = int[5]
 
     let x: MyInt = 42
     print("x = ")

@@ -39,9 +39,8 @@ impl Optimizer {
                 self.optimize_expr(cond);
                 self.optimize_expr(body);
             }
-            Expr::For(_, s, e, body) => {
-                self.optimize_expr(s);
-                self.optimize_expr(e);
+            Expr::For(_, array, body) => {
+                self.optimize_expr(array);
                 self.optimize_expr(body);
             }
             Expr::VarDecl(_, _, v) | Expr::VarAssign(_, v) | Expr::Return(v) => {
@@ -278,9 +277,8 @@ impl Optimizer {
                     *expr = Expr::Block(vec![]);
                 }
             }
-            Expr::For(_, s, e, body) => {
-                self.dce(s);
-                self.dce(e);
+            Expr::For(_, array, body) => {
+                self.dce(array);
                 self.dce(body);
             }
             Expr::FuncDecl(_, _, _, body) => self.dce(body),

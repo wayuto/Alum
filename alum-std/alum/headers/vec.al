@@ -2,7 +2,7 @@ $ifndef ALUM_VEC
 $define ALUM_VEC 1
 
 struct Vec {
-    data: arr[gen],
+    data: gen[],
     len: int,
     capacity: int,
     at: gen(*Vec, int),
