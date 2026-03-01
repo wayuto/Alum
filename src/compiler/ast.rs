@@ -8,21 +8,14 @@ pub struct Program {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 
 pub enum Type {
-
     Named(String),
-
     Array(Box<Type>),
-
     Pointer(Box<Type>),
-
     Function(Vec<Box<Type>>, Box<Type>),
-
     TypeVar(usize),
-
-    Auto,                 // 自动推导类型
-
-    Gen,                  // 泛型类型gen
-
+    Auto,
+    #[allow(dead_code)]
+    Gen,
 }
 
 impl fmt::Display for Type {
