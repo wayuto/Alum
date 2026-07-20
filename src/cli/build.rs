@@ -1,7 +1,4 @@
-use crate::compiler::{
-    codegen::CodeGen, lexer::Lexer, parser::Parser, preprocessor::Preprocessor,
-    visitor::checker::TypeChecker, visitor::optimizer::Optimizer,
-};
+use crate::compiler::{codegen::CodeGen, lexer::Lexer, parser::Parser, preprocessor::Preprocessor, visitor::checker::TypeChecker, visitor::optimizer::Optimizer, CompilerError, SourceMap};
 use std::fs;
 
 pub fn build(
@@ -11,14 +8,16 @@ pub fn build(
     include_paths: Vec<String>,
     preprocess_only: bool,
     verbose: bool,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, CompilerError> {
     let src = fs::read_to_string(&input)?;
 
     if verbose {
         eprintln!("Preprocessing...");
     }
     let mut preprocessor = Preprocessor::new(&src, input.clone(), include_paths);
-    let processed = preprocessor.preprocess()?;
+    let (processed, source_map) = preprocessor
+        .preprocess()
+        .map_err(|e| CompilerError::new(e, src.clone(), input.clone(), SourceMap::new()))?;
 
     if preprocess_only {
         println!("{}", processed);
@@ -31,7 +30,7 @@ pub fn build(
     let lexer = Lexer::new(&processed);
     let mut tokens = Vec::new();
     for token in lexer {
-        tokens.push(token?);
+        tokens.push(token.map_err(|e| CompilerError::new(e, processed.clone(), input.clone(), source_map.clone()))?);
     }
 
     if verbose {
@@ -39,13 +38,17 @@ pub fn build(
     }
     let lexer = Lexer::new(&processed);
     let mut parser = Parser::new(lexer);
-    let mut ast = parser.parse()?;
+    let mut ast = parser
+        .parse()
+        .map_err(|e| CompilerError::new(e, processed.clone(), input.clone(), source_map.clone()))?;
 
     if verbose {
         eprintln!("Type checking...");
     }
     let checker = TypeChecker::new();
-    checker.check(&mut ast)?;
+    checker
+        .check(&mut ast)
+        .map_err(|e| CompilerError::new(e, processed.clone(), input.clone(), source_map.clone()))?;
 
     if print_ast {
         println!("{}", ast);
@@ -62,16 +65,19 @@ pub fn build(
         eprintln!("Generating code...");
     }
     let codegen = CodeGen::new(ast);
-    let object_code = codegen.generate()?;
+    let object_code = codegen
+        .generate()
+        .map_err(|e| CompilerError::new(e, processed.clone(), input.clone(), source_map.clone()))?;
 
     let output_file = if let Some(obj_file) = object {
         obj_file
     } else {
-        if input.ends_with(".al") {
-            input.replace(".al", ".o")
-        } else {
-            format!("{}.o", input)
-        }
+        let input_path = std::path::Path::new(&input);
+        let stem = input_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("output");
+        format!("/tmp/{}.o", stem)
     };
 
     if verbose {

@@ -1,3 +1,4 @@
+use crate::compiler::SourceMap;
 use std::collections::HashMap;
 use std::fs;
 use std::iter::Peekable;
@@ -36,6 +37,17 @@ pub enum PreprocessorError {
 
 impl std::error::Error for PreprocessorError {}
 
+impl PreprocessorError {
+    pub fn span(&self) -> crate::compiler::Span {
+        match self {
+            PreprocessorError::ImportError { row, col, .. }
+            | PreprocessorError::IoError { row, col, .. }
+            | PreprocessorError::ConditionError { row, col, .. }
+            | PreprocessorError::MacroError { row, col, .. } => crate::compiler::Span::new(*row, *col),
+        }
+    }
+}
+
 impl std::fmt::Display for PreprocessorError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -61,6 +73,7 @@ impl std::fmt::Display for PreprocessorError {
 
 pub struct Preprocessor<'a> {
     src: Peekable<Chars<'a>>,
+    source_text: &'a str,
     base_path: String,
     include_paths: Vec<String>,
     row: usize,
@@ -71,7 +84,7 @@ pub struct Preprocessor<'a> {
 }
 
 impl<'a> Preprocessor<'a> {
-    pub fn new(src: &'a str, base_path: String, include_paths: Vec<String>) -> Self {
+    pub fn new(src: &'a str, base_path: String, include_paths: Vec<String>    ) -> Self {
         let mut default_paths = Vec::new();
 
         default_paths.push("/usr/local/include/alum".to_string());
@@ -81,6 +94,7 @@ impl<'a> Preprocessor<'a> {
 
         Self {
             src: src.chars().peekable(),
+            source_text: src,
             base_path,
             include_paths: default_paths,
             row: 1,
@@ -88,6 +102,19 @@ impl<'a> Preprocessor<'a> {
             defines: HashMap::new(),
             condition_stack: Vec::new(),
             skipping: false,
+        }
+    }
+
+    fn emit_char(&self, ch: char, output: &mut String, map: &mut SourceMap) {
+        if ch == '\n' {
+            map.record_line(&self.base_path, self.row);
+        }
+        output.push(ch);
+    }
+
+    fn emit_str(&self, s: &str, output: &mut String, map: &mut SourceMap) {
+        for ch in s.chars() {
+            self.emit_char(ch, output, map);
         }
     }
 
@@ -328,8 +355,10 @@ impl<'a> Preprocessor<'a> {
         None
     }
 
-    pub fn preprocess(&mut self) -> Result<String, PreprocessorError> {
+    pub fn preprocess(&mut self) -> Result<(String, SourceMap), PreprocessorError> {
         let mut output = String::new();
+        let mut source_map = SourceMap::new();
+        source_map.add_file(self.base_path.clone(), self.source_text.to_string());
 
         while self.current() != '\0' {
             if self.current() == '/' {
@@ -340,7 +369,7 @@ impl<'a> Preprocessor<'a> {
                     }
                     continue;
                 }
-                output.push('/');
+                self.emit_char('/', &mut output, &mut source_map);
                 continue;
             }
 
@@ -493,7 +522,8 @@ impl<'a> Preprocessor<'a> {
                             self.include_paths.clone(),
                         );
                         child_pp.defines = self.defines.clone();
-                        let processed_sub = child_pp.preprocess()?;
+                        let (processed_sub, child_map) = child_pp.preprocess()?;
+                        source_map.merge_child(child_map);
                         output.push_str(&processed_sub);
                         self.defines = child_pp.defines;
                     }
@@ -503,16 +533,14 @@ impl<'a> Preprocessor<'a> {
                             continue;
                         }
 
-                        if let Some(macro_def) = self.defines.get(&cmd) {
-                            if macro_def.params.is_empty() {
-                                output.push_str(&macro_def.body);
-                            } else {
-                                output.push('$');
-                                output.push_str(&cmd);
-                            }
+                        let macro_body = self.defines.get(&cmd)
+                            .filter(|m| m.params.is_empty())
+                            .map(|m| m.body.clone());
+                        if let Some(body) = macro_body {
+                            self.emit_str(&body, &mut output, &mut source_map);
                         } else {
-                            output.push('$');
-                            output.push_str(&cmd);
+                            self.emit_char('$', &mut output, &mut source_map);
+                            self.emit_str(&cmd, &mut output, &mut source_map);
                         }
                     }
                 }
@@ -524,9 +552,10 @@ impl<'a> Preprocessor<'a> {
 
                 if self.current().is_ascii_alphabetic() || self.current() == '_' {
                     let ident = self.parse_ident();
-                    output.push_str(&ident);
+                    self.emit_str(&ident, &mut output, &mut source_map);
                 } else {
-                    output.push(self.current());
+                    let ch = self.current();
+                    self.emit_char(ch, &mut output, &mut source_map);
                     self.bump();
                 }
             }
@@ -541,6 +570,6 @@ impl<'a> Preprocessor<'a> {
         }
 
         let expanded_output = self.expand_macros(&output);
-        Ok(expanded_output)
+        Ok((expanded_output, source_map))
     }
 }

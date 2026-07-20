@@ -1,5 +1,6 @@
 use cranelift::codegen::ir;
 use crate::compiler::parser::Type;
+use crate::compiler::Span;
 use std::{
     collections::HashMap,
     fmt::Display,
@@ -14,37 +15,51 @@ pub(crate) enum Slot {
 pub enum CodeGenError {
     UnexpectedExpression {
         found: crate::compiler::parser::Expr,
+        span: Span,
     },
     UndefinedVariable {
         name: String,
+        span: Span,
     },
     #[allow(dead_code)]
     UndefinedFunction {
         name: String,
+        span: Span,
     },
-    ModuleError(String),
+    ModuleError(String, Span),
 }
 
 impl Display for CodeGenError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            CodeGenError::UnexpectedExpression { found } => {
-                write!(f, "Unexpected expression: '{:?}', expected FuncDecl", found)
+            CodeGenError::UnexpectedExpression { found, span } => {
+                write!(f, "Unexpected expression: '{:?}' at {:?}, expected FuncDecl", found, span)
             }
-            CodeGenError::UndefinedVariable { name } => {
-                write!(f, "Undefined variable: '{:?}'", name)
+            CodeGenError::UndefinedVariable { name, span } => {
+                write!(f, "Undefined variable: '{:?}' at {:?}", name, span)
             }
-            CodeGenError::UndefinedFunction { name } => {
-                write!(f, "Undefined function: '{:?}'", name)
+            CodeGenError::UndefinedFunction { name, span } => {
+                write!(f, "Undefined function: '{:?}' at {:?}", name, span)
             }
-            CodeGenError::ModuleError(msg) => {
-                write!(f, "Module error: '{}'", msg)
+            CodeGenError::ModuleError(msg, span) => {
+                write!(f, "Module error: '{}' at {:?}", msg, span)
             }
         }
     }
 }
 
 impl std::error::Error for CodeGenError {}
+
+impl CodeGenError {
+    pub fn span(&self) -> crate::compiler::Span {
+        match self {
+            CodeGenError::UnexpectedExpression { span, .. }
+            | CodeGenError::UndefinedVariable { span, .. }
+            | CodeGenError::UndefinedFunction { span, .. }
+            | CodeGenError::ModuleError(_, span) => *span,
+        }
+    }
+}
 
 #[derive(Clone)]
 pub(crate) struct LoopContext {

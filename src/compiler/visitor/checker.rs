@@ -1,4 +1,5 @@
 use crate::compiler::parser::{Expr, Program, Type};
+use crate::compiler::Span;
 use std::collections::HashMap;
 
 #[derive(Debug)]
@@ -7,24 +8,28 @@ pub enum CheckerError {
         expected: Type,
         found: Type,
         context: String,
+        span: Span,
     },
-    UndefinedVariable(String),
+    UndefinedVariable(String, Span),
     #[allow(dead_code)]
-    UndefinedFunction(String),
-    UndefinedStruct(String),
+    UndefinedFunction(String, Span),
+    UndefinedStruct(String, Span),
     UndefinedField {
         struct_name: String,
         field: String,
+        span: Span,
     },
     ArgCountMismatch {
         expected: usize,
         found: usize,
         func: String,
+        span: Span,
     },
-    NonStructMemberAccess(String),
+    NonStructMemberAccess(String, Span),
     InvalidOperation {
         op: String,
         type_name: String,
+        span: Span,
     },
 }
 
@@ -35,6 +40,7 @@ impl std::fmt::Display for CheckerError {
                 expected,
                 found,
                 context,
+                ..
             } => {
                 write!(
                     f,
@@ -42,22 +48,27 @@ impl std::fmt::Display for CheckerError {
                     context, expected, found
                 )
             }
-            CheckerError::UndefinedVariable(name) => {
+            CheckerError::UndefinedVariable(name, _) => {
                 write!(f, "Undefined variable: {}", name)
             }
-            CheckerError::UndefinedFunction(name) => {
+            CheckerError::UndefinedFunction(name, _) => {
                 write!(f, "Undefined function: {}", name)
             }
-            CheckerError::UndefinedStruct(name) => {
+            CheckerError::UndefinedStruct(name, _) => {
                 write!(f, "Undefined struct: {}", name)
             }
-            CheckerError::UndefinedField { struct_name, field } => {
+            CheckerError::UndefinedField {
+                struct_name,
+                field,
+                ..
+            } => {
                 write!(f, "Struct {} has no field {}", struct_name, field)
             }
             CheckerError::ArgCountMismatch {
                 expected,
                 found,
                 func,
+                ..
             } => {
                 write!(
                     f,
@@ -65,10 +76,10 @@ impl std::fmt::Display for CheckerError {
                     func, expected, found
                 )
             }
-            CheckerError::NonStructMemberAccess(type_name) => {
+            CheckerError::NonStructMemberAccess(type_name, _) => {
                 write!(f, "Cannot access member on non-struct type: {}", type_name)
             }
-            CheckerError::InvalidOperation { op, type_name } => {
+            CheckerError::InvalidOperation { op, type_name, .. } => {
                 write!(f, "Invalid operation '{}' on type {}", op, type_name)
             }
         }
@@ -76,6 +87,21 @@ impl std::fmt::Display for CheckerError {
 }
 
 impl std::error::Error for CheckerError {}
+
+impl CheckerError {
+    pub fn span(&self) -> crate::compiler::Span {
+        match self {
+            CheckerError::TypeMismatch { span, .. }
+            | CheckerError::UndefinedField { span, .. }
+            | CheckerError::ArgCountMismatch { span, .. }
+            | CheckerError::InvalidOperation { span, .. } => *span,
+            CheckerError::UndefinedVariable(_, s)
+            | CheckerError::UndefinedFunction(_, s)
+            | CheckerError::UndefinedStruct(_, s)
+            | CheckerError::NonStructMemberAccess(_, s) => *s,
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 struct StructDef {
@@ -155,6 +181,7 @@ impl TypeChecker {
                         expected: t1.clone(),
                         found: t2.clone(),
                         context: "array length mismatch".to_string(),
+                        span: Span::new(0, 0),
                     });
                 }
                 self.unify_types(a1, a2)
@@ -166,6 +193,7 @@ impl TypeChecker {
                         expected: t1.clone(),
                         found: t2.clone(),
                         context: "function type unification".to_string(),
+                        span: Span::new(0, 0),
                     });
                 }
                 for (param1, param2) in p1.iter().zip(p2.iter()) {
@@ -179,6 +207,7 @@ impl TypeChecker {
                 expected: t1,
                 found: t2,
                 context: "type unification".to_string(),
+                span: Span::new(0, 0),
             }),
         }
     }
@@ -186,17 +215,17 @@ impl TypeChecker {
     pub fn check(mut self, program: &mut Program) -> Result<(), CheckerError> {
         for expr in &program.body {
             match expr {
-                Expr::FuncDecl(name, params, ret_type, _) => {
+                Expr::FuncDecl(name, params, ret_type, _, _) => {
                     let param_types: Vec<Type> = params.iter().map(|(_, t)| t.clone()).collect();
                     self.functions
                         .insert(name.clone(), (param_types, ret_type.clone()));
                 }
-                Expr::Extern(name, params, ret_type) => {
+                Expr::Extern(name, params, ret_type, _) => {
                     let param_types: Vec<Type> = params.iter().map(|(_, t)| t.clone()).collect();
                     self.functions
                         .insert(name.clone(), (param_types, ret_type.clone()));
                 }
-                Expr::Struct(name, fields) => {
+                Expr::Struct(name, fields, _) => {
                     self.structs.insert(
                         name.clone(),
                         StructDef {
@@ -281,46 +310,46 @@ impl TypeChecker {
 
     fn get_expr_type(&self, expr: &Expr) -> Type {
         match expr {
-            Expr::Int(_) => Type::Named("int".to_string()),
-            Expr::Float(_) => Type::Named("float".to_string()),
-            Expr::Bool(_) => Type::Named("bool".to_string()),
-            Expr::String(_) => Type::Named("string".to_string()),
-            Expr::Nil => Type::Named("void".to_string()),
-            Expr::Var(name) => self
+            Expr::Int(_, _) => Type::Named("int".to_string()),
+            Expr::Float(_, _) => Type::Named("float".to_string()),
+            Expr::Bool(_, _) => Type::Named("bool".to_string()),
+            Expr::String(_, _) => Type::Named("string".to_string()),
+            Expr::Nil(_) => Type::Named("void".to_string()),
+            Expr::Var(name, _) => self
                 .lookup_var(name)
                 .unwrap_or(Type::Named("int".to_string())),
-            Expr::FAdd(_, _) | Expr::FSub(_, _) | Expr::FMul(_, _) | Expr::FDiv(_, _) => {
+            Expr::FAdd(_, _, _) | Expr::FSub(_, _, _) | Expr::FMul(_, _, _) | Expr::FDiv(_, _, _) => {
                 Type::Named("float".to_string())
             }
-            Expr::Add(_, _)
-            | Expr::Sub(_, _)
-            | Expr::Mul(_, _)
-            | Expr::Div(_, _)
-            | Expr::Mod(_, _) => Type::Named("int".to_string()),
-            Expr::FEq(_, _)
-            | Expr::FNe(_, _)
-            | Expr::FLt(_, _)
-            | Expr::FLe(_, _)
-            | Expr::FGt(_, _)
-            | Expr::FGe(_, _) => Type::Named("bool".to_string()),
-            Expr::Eq(_, _)
-            | Expr::Ne(_, _)
-            | Expr::Lt(_, _)
-            | Expr::Le(_, _)
-            | Expr::Gt(_, _)
-            | Expr::Ge(_, _) => Type::Named("bool".to_string()),
-            Expr::And(_, _) | Expr::Or(_, _) | Expr::Not(_) => Type::Named("bool".to_string()),
-            Expr::StrCat(_, _) => Type::Named("string".to_string()),
-            Expr::Call(callee, _) => {
-                if let Expr::Var(name) = callee.as_ref() {
+            Expr::Add(_, _, _)
+            | Expr::Sub(_, _, _)
+            | Expr::Mul(_, _, _)
+            | Expr::Div(_, _, _)
+            | Expr::Mod(_, _, _) => Type::Named("int".to_string()),
+            Expr::FEq(_, _, _)
+            | Expr::FNe(_, _, _)
+            | Expr::FLt(_, _, _)
+            | Expr::FLe(_, _, _)
+            | Expr::FGt(_, _, _)
+            | Expr::FGe(_, _, _) => Type::Named("bool".to_string()),
+            Expr::Eq(_, _, _)
+            | Expr::Ne(_, _, _)
+            | Expr::Lt(_, _, _)
+            | Expr::Le(_, _, _)
+            | Expr::Gt(_, _, _)
+            | Expr::Ge(_, _, _) => Type::Named("bool".to_string()),
+            Expr::And(_, _, _) | Expr::Or(_, _, _) | Expr::Not(_, _) => Type::Named("bool".to_string()),
+            Expr::StrCat(_, _, _) => Type::Named("string".to_string()),
+            Expr::Call(callee, _, _) => {
+                if let Expr::Var(name, _) = callee.as_ref() {
                     if let Some((_, ret_type)) = self.functions.get(name) {
                         return ret_type.clone();
                     }
                 }
                 Type::Named("int".to_string())
             }
-            Expr::Index(_, _) => Type::Named("int".to_string()),
-            Expr::MemberAccess(obj, field_name) => {
+            Expr::Index(_, _, _) => Type::Named("int".to_string()),
+            Expr::MemberAccess(obj, field_name, _) => {
                 let obj_type = self.get_expr_type(obj);
                 let inner_type = match obj_type {
                     Type::Pointer(inner) => *inner,
@@ -338,22 +367,22 @@ impl TypeChecker {
                 }
                 Type::Named("int".to_string())
             }
-            Expr::StructLiteral(name, _) => Type::Named(name.clone()),
-            Expr::ArrayLiteral(_) | Expr::ArrayFill(_, _) => {
+            Expr::StructLiteral(name, _, _) => Type::Named(name.clone()),
+            Expr::ArrayLiteral(_, _) | Expr::ArrayFill(_, _, _) => {
                 Type::Array(Box::new(Type::Named("int".to_string())), 0)
             }
-            Expr::AddressOf(expr) => {
+            Expr::AddressOf(expr, _) => {
                 let inner_type = self.get_expr_type(expr);
                 Type::Pointer(Box::new(inner_type))
             }
-            Expr::Deref(expr) => {
+            Expr::Deref(expr, _) => {
                 let ptr_type = self.get_expr_type(expr);
                 match ptr_type {
                     Type::Pointer(inner) => *inner,
                     _ => Type::Named("int".to_string()),
                 }
             }
-            Expr::DerefAssign(_, _) => Type::Named("void".to_string()),
+            Expr::DerefAssign(_, _, _) => Type::Named("void".to_string()),
             _ => Type::Named("int".to_string()),
         }
     }
@@ -375,14 +404,15 @@ impl TypeChecker {
     }
 
     fn check_expr(&mut self, expr: &mut Expr) -> Result<Type, CheckerError> {
+        let span = expr.span();
         match expr {
-            Expr::Int(_) => Ok(Type::Named("int".to_string())),
-            Expr::Float(_) => Ok(Type::Named("float".to_string())),
-            Expr::Bool(_) => Ok(Type::Named("bool".to_string())),
-            Expr::String(_) => Ok(Type::Named("string".to_string())),
-            Expr::Nil => Ok(Type::Named("void".to_string())),
+            Expr::Int(_, _) => Ok(Type::Named("int".to_string())),
+            Expr::Float(_, _) => Ok(Type::Named("float".to_string())),
+            Expr::Bool(_, _) => Ok(Type::Named("bool".to_string())),
+            Expr::String(_, _) => Ok(Type::Named("string".to_string())),
+            Expr::Nil(_) => Ok(Type::Named("void".to_string())),
 
-            Expr::Var(name) => {
+            Expr::Var(name, _) => {
                 if let Some(ty) = self.lookup_var(name) {
                     let resolved_ty = self.resolve_type(&ty);
 
@@ -422,10 +452,10 @@ impl TypeChecker {
                     ));
                 }
 
-                Err(CheckerError::UndefinedVariable(name.clone()))
+                Err(CheckerError::UndefinedVariable(name.clone(), span))
             }
 
-            Expr::VarDecl(name, ty, value) => {
+            Expr::VarDecl(name, ty, value, _) => {
                 let resolved_ty = self.resolve_type(ty);
                 let value_type = self.check_expr(value)?;
 
@@ -440,6 +470,7 @@ impl TypeChecker {
                         expected: actual_ty.clone(),
                         found: value_type,
                         context: format!("variable declaration '{}'", name),
+                        span: span,
                     });
                 }
 
@@ -447,10 +478,10 @@ impl TypeChecker {
                 Ok(actual_ty)
             }
 
-            Expr::VarAssign(name, value) => {
+            Expr::VarAssign(name, value, _) => {
                 let var_type = self
                     .lookup_var(name)
-                    .ok_or_else(|| CheckerError::UndefinedVariable(name.clone()))?;
+                    .ok_or_else(|| CheckerError::UndefinedVariable(name.clone(), span))?;
                 let value_type = self.check_expr(value)?;
 
                 self.unify_types(&var_type, &value_type).map_err(|_| {
@@ -458,16 +489,17 @@ impl TypeChecker {
                         expected: var_type.clone(),
                         found: value_type,
                         context: format!("assignment to '{}'", name),
+                        span: span,
                     }
                 })?;
 
                 Ok(var_type)
             }
 
-            Expr::Add(lhs, rhs)
-            | Expr::Sub(lhs, rhs)
-            | Expr::Mul(lhs, rhs)
-            | Expr::Div(lhs, rhs) => {
+            Expr::Add(lhs, rhs, _)
+            | Expr::Sub(lhs, rhs, _)
+            | Expr::Mul(lhs, rhs, _)
+            | Expr::Div(lhs, rhs, _) => {
                 let lhs_type = self.check_expr(lhs)?;
                 let rhs_type = self.check_expr(rhs)?;
 
@@ -498,17 +530,18 @@ impl TypeChecker {
                                 rhs_type.clone()
                             },
                             context: "string concatenation".to_string(),
+                            span: span,
                         });
                     }
 
                     let (l, r) = match expr {
-                        Expr::Add(l, r) => (l.clone(), r.clone()),
-                        Expr::Sub(_, _) => unreachable!(),
-                        Expr::Mul(_, _) => unreachable!(),
-                        Expr::Div(_, _) => unreachable!(),
+                        Expr::Add(l, r, _) => (l.clone(), r.clone()),
+                        Expr::Sub(_, _, _) => unreachable!(),
+                        Expr::Mul(_, _, _) => unreachable!(),
+                        Expr::Div(_, _, _) => unreachable!(),
                         _ => unreachable!(),
                     };
-                    *expr = Expr::StrCat(l, r);
+                    *expr = Expr::StrCat(l, r, Span::new(0, 0));
                     return Ok(Type::Named("string".to_string()));
                 }
 
@@ -517,6 +550,7 @@ impl TypeChecker {
                         return Err(CheckerError::InvalidOperation {
                             op: "arithmetic".to_string(),
                             type_name: format!("{:?} and {:?}", lhs_type, rhs_type),
+                            span: span,
                         });
                     }
 
@@ -536,17 +570,17 @@ impl TypeChecker {
                     }
 
                     let (l, r) = match expr {
-                        Expr::Add(l, r) => (l.clone(), r.clone()),
-                        Expr::Sub(l, r) => (l.clone(), r.clone()),
-                        Expr::Mul(l, r) => (l.clone(), r.clone()),
-                        Expr::Div(l, r) => (l.clone(), r.clone()),
+                        Expr::Add(l, r, _) => (l.clone(), r.clone()),
+                        Expr::Sub(l, r, _) => (l.clone(), r.clone()),
+                        Expr::Mul(l, r, _) => (l.clone(), r.clone()),
+                        Expr::Div(l, r, _) => (l.clone(), r.clone()),
                         _ => unreachable!(),
                     };
                     *expr = match expr {
-                        Expr::Add(_, _) => Expr::FAdd(l, r),
-                        Expr::Sub(_, _) => Expr::FSub(l, r),
-                        Expr::Mul(_, _) => Expr::FMul(l, r),
-                        Expr::Div(_, _) => Expr::FDiv(l, r),
+                        Expr::Add(_, _, _) => Expr::FAdd(l, r, Span::new(0, 0)),
+                        Expr::Sub(_, _, _) => Expr::FSub(l, r, Span::new(0, 0)),
+                        Expr::Mul(_, _, _) => Expr::FMul(l, r, Span::new(0, 0)),
+                        Expr::Div(_, _, _) => Expr::FDiv(l, r, Span::new(0, 0)),
                         _ => unreachable!(),
                     };
                     return Ok(Type::Named("float".to_string()));
@@ -556,6 +590,7 @@ impl TypeChecker {
                     return Err(CheckerError::InvalidOperation {
                         op: "arithmetic".to_string(),
                         type_name: format!("{:?} and {:?}", lhs_type, rhs_type),
+                        span: span,
                     });
                 }
 
@@ -577,7 +612,7 @@ impl TypeChecker {
                 Ok(Type::Named("int".to_string()))
             }
 
-            Expr::Mod(lhs, rhs) => {
+            Expr::Mod(lhs, rhs, _) => {
                 let lhs_type = self.check_expr(lhs)?;
                 let rhs_type = self.check_expr(rhs)?;
 
@@ -585,6 +620,7 @@ impl TypeChecker {
                     return Err(CheckerError::InvalidOperation {
                         op: "modulo".to_string(),
                         type_name: "float".to_string(),
+                        span: span,
                     });
                 }
 
@@ -592,18 +628,19 @@ impl TypeChecker {
                     return Err(CheckerError::InvalidOperation {
                         op: "modulo".to_string(),
                         type_name: format!("{:?} and {:?}", lhs_type, rhs_type),
+                        span: span,
                     });
                 }
 
                 Ok(Type::Named("int".to_string()))
             }
 
-            Expr::Eq(lhs, rhs)
-            | Expr::Ne(lhs, rhs)
-            | Expr::Lt(lhs, rhs)
-            | Expr::Le(lhs, rhs)
-            | Expr::Gt(lhs, rhs)
-            | Expr::Ge(lhs, rhs) => {
+            Expr::Eq(lhs, rhs, _)
+            | Expr::Ne(lhs, rhs, _)
+            | Expr::Lt(lhs, rhs, _)
+            | Expr::Le(lhs, rhs, _)
+            | Expr::Gt(lhs, rhs, _)
+            | Expr::Ge(lhs, rhs, _) => {
                 let lhs_type = self.check_expr(lhs)?;
                 let rhs_type = self.check_expr(rhs)?;
 
@@ -612,38 +649,40 @@ impl TypeChecker {
                         return Err(CheckerError::InvalidOperation {
                             op: "comparison".to_string(),
                             type_name: format!("{:?} and {:?}", lhs_type, rhs_type),
+                            span: span,
                         });
                     }
 
                     let (l, r) = match expr {
-                        Expr::Eq(l, r) => (l.clone(), r.clone()),
-                        Expr::Ne(l, r) => (l.clone(), r.clone()),
-                        Expr::Lt(l, r) => (l.clone(), r.clone()),
-                        Expr::Le(l, r) => (l.clone(), r.clone()),
-                        Expr::Gt(l, r) => (l.clone(), r.clone()),
-                        Expr::Ge(l, r) => (l.clone(), r.clone()),
+                        Expr::Eq(l, r, _) => (l.clone(), r.clone()),
+                        Expr::Ne(l, r, _) => (l.clone(), r.clone()),
+                        Expr::Lt(l, r, _) => (l.clone(), r.clone()),
+                        Expr::Le(l, r, _) => (l.clone(), r.clone()),
+                        Expr::Gt(l, r, _) => (l.clone(), r.clone()),
+                        Expr::Ge(l, r, _) => (l.clone(), r.clone()),
                         _ => unreachable!(),
                     };
                     *expr = match expr {
-                        Expr::Eq(_, _) => Expr::FEq(l, r),
-                        Expr::Ne(_, _) => Expr::FNe(l, r),
-                        Expr::Lt(_, _) => Expr::FLt(l, r),
-                        Expr::Le(_, _) => Expr::FLe(l, r),
-                        Expr::Gt(_, _) => Expr::FGt(l, r),
-                        Expr::Ge(_, _) => Expr::FGe(l, r),
+                        Expr::Eq(_, _, _) => Expr::FEq(l, r, Span::new(0, 0)),
+                        Expr::Ne(_, _, _) => Expr::FNe(l, r, Span::new(0, 0)),
+                        Expr::Lt(_, _, _) => Expr::FLt(l, r, Span::new(0, 0)),
+                        Expr::Le(_, _, _) => Expr::FLe(l, r, Span::new(0, 0)),
+                        Expr::Gt(_, _, _) => Expr::FGt(l, r, Span::new(0, 0)),
+                        Expr::Ge(_, _, _) => Expr::FGe(l, r, Span::new(0, 0)),
                         _ => unreachable!(),
                     };
                 } else if !Self::is_numeric_type(&lhs_type) || !Self::is_numeric_type(&rhs_type) {
                     return Err(CheckerError::InvalidOperation {
                         op: "comparison".to_string(),
                         type_name: format!("{:?} and {:?}", lhs_type, rhs_type),
+                        span: span,
                     });
                 }
 
                 Ok(Type::Named("bool".to_string()))
             }
 
-            Expr::And(lhs, rhs) | Expr::Or(lhs, rhs) => {
+            Expr::And(lhs, rhs, _) | Expr::Or(lhs, rhs, _) => {
                 let lhs_type = self.check_expr(lhs)?;
                 let rhs_type = self.check_expr(rhs)?;
 
@@ -651,24 +690,26 @@ impl TypeChecker {
                     return Err(CheckerError::InvalidOperation {
                         op: "logical".to_string(),
                         type_name: format!("{:?} and {:?}", lhs_type, rhs_type),
+                        span: span,
                     });
                 }
 
                 Ok(Type::Named("bool".to_string()))
             }
 
-            Expr::Not(e) => {
+            Expr::Not(e, _) => {
                 let ty = self.check_expr(e)?;
                 if !Self::is_bool_type(&ty) {
                     return Err(CheckerError::InvalidOperation {
                         op: "not".to_string(),
                         type_name: format!("{:?}", ty),
+                        span: span,
                     });
                 }
                 Ok(Type::Named("bool".to_string()))
             }
 
-            Expr::Call(callee, args) => {
+            Expr::Call(callee, args, _) => {
                 let callee_type = self.check_expr(callee)?;
                 let arg_types: Result<Vec<Type>, CheckerError> =
                     args.iter_mut().map(|arg| self.check_expr(arg)).collect();
@@ -699,6 +740,7 @@ impl TypeChecker {
                                 expected: params.len(),
                                 found: args.len(),
                                 func: "function pointer".to_string(),
+                                span: span,
                             });
                         }
 
@@ -710,6 +752,7 @@ impl TypeChecker {
                                     expected: *expected_ty.clone(),
                                     found: arg_type.clone(),
                                     context: format!("argument {} of function pointer call", i + 1),
+                                    span: span,
                                 });
                             }
                         }
@@ -720,19 +763,21 @@ impl TypeChecker {
                         expected: Type::Function(vec![], Box::new(Type::Named("void".to_string()))),
                         found: callee_type,
                         context: "callee is not a function type".to_string(),
+                        span: span,
                     }),
                 }
             }
 
-            Expr::Return(value) => self.check_expr(value),
+            Expr::Return(value, _) => self.check_expr(value),
 
-            Expr::If(cond, then_branch, else_branch) => {
+            Expr::If(cond, then_branch, else_branch, _) => {
                 let cond_type = self.check_expr(cond)?;
                 if !Self::is_bool_type(&cond_type) {
                     return Err(CheckerError::TypeMismatch {
                         expected: Type::Named("bool".to_string()),
                         found: cond_type,
                         context: "if condition".to_string(),
+                        span: span,
                     });
                 }
 
@@ -749,13 +794,14 @@ impl TypeChecker {
                 Ok(Type::Named("void".to_string()))
             }
 
-            Expr::While(cond, body) => {
+            Expr::While(cond, body, _) => {
                 let cond_type = self.check_expr(cond)?;
                 if !Self::is_bool_type(&cond_type) {
                     return Err(CheckerError::TypeMismatch {
                         expected: Type::Named("bool".to_string()),
                         found: cond_type,
                         context: "while condition".to_string(),
+                        span: span,
                     });
                 }
 
@@ -766,7 +812,7 @@ impl TypeChecker {
                 Ok(Type::Named("void".to_string()))
             }
 
-            Expr::For(var, array, body) => {
+            Expr::For(var, array, body, _) => {
                 let array_type = self.check_expr(array)?;
 
                 let elem_type = match &array_type {
@@ -776,6 +822,7 @@ impl TypeChecker {
                         return Err(CheckerError::InvalidOperation {
                             op: "for loop".to_string(),
                             type_name: format!("{:?}", array_type),
+                            span: span,
                         });
                     }
                 };
@@ -788,7 +835,7 @@ impl TypeChecker {
                 Ok(Type::Named("void".to_string()))
             }
 
-            Expr::Block(body) => {
+            Expr::Block(body, _) => {
                 self.push_scope();
                 for e in body {
                     self.check_expr(e)?;
@@ -797,7 +844,7 @@ impl TypeChecker {
                 Ok(Type::Named("void".to_string()))
             }
 
-            Expr::Index(array, index) => {
+            Expr::Index(array, index, _) => {
                 let array_type = self.check_expr(array)?;
                 let index_type = self.check_expr(index)?;
 
@@ -805,6 +852,7 @@ impl TypeChecker {
                     return Err(CheckerError::InvalidOperation {
                         op: "array index".to_string(),
                         type_name: format!("{:?}", index_type),
+                        span: span,
                     });
                 }
 
@@ -814,14 +862,15 @@ impl TypeChecker {
                     _ => Err(CheckerError::InvalidOperation {
                         op: "index".to_string(),
                         type_name: format!("{:?}", array_type),
+                        span: span,
                     }),
                 }
             }
 
-            Expr::IndexAssign(array_index, value) => {
+            Expr::IndexAssign(array_index, value, _) => {
                 let value_type = self.check_expr(value)?;
 
-                if let Expr::Index(array, index) = array_index.as_mut() {
+                if let Expr::Index(array, index, _) = array_index.as_mut() {
                     let array_type = self.get_expr_type(array);
                     let index_type = self.check_expr(index)?;
 
@@ -829,6 +878,7 @@ impl TypeChecker {
                         return Err(CheckerError::InvalidOperation {
                             op: "array index".to_string(),
                             type_name: format!("{:?}", index_type),
+                            span: span,
                         });
                     }
 
@@ -839,6 +889,7 @@ impl TypeChecker {
                                     expected: *inner,
                                     found: value_type,
                                     context: "array assignment".to_string(),
+                                    span: span,
                                 });
                             }
                         }
@@ -849,6 +900,7 @@ impl TypeChecker {
                                     expected: Type::Named("int".to_string()),
                                     found: value_type,
                                     context: "string assignment".to_string(),
+                                    span: span,
                                 });
                             }
                         }
@@ -856,6 +908,7 @@ impl TypeChecker {
                             return Err(CheckerError::InvalidOperation {
                                 op: "index assignment".to_string(),
                                 type_name: format!("{:?}", array_type),
+                                span: span,
                             });
                         }
                     }
@@ -865,11 +918,12 @@ impl TypeChecker {
                     Err(CheckerError::InvalidOperation {
                         op: "index assignment".to_string(),
                         type_name: "non-index expression".to_string(),
+                        span: span,
                     })
                 }
             }
 
-            Expr::ArrayLiteral(elements) => {
+            Expr::ArrayLiteral(elements, _) => {
                 let len = elements.len();
                 let mut elem_type = Type::Named("int".to_string());
                 for e in elements {
@@ -878,16 +932,17 @@ impl TypeChecker {
                 Ok(Type::Array(Box::new(elem_type), len))
             }
 
-            Expr::ArrayFill(elem_type, length) => {
+            Expr::ArrayFill(elem_type, length, _) => {
                 let len_type = self.check_expr(length)?;
                 if !Self::is_numeric_type(&len_type) {
                     return Err(CheckerError::InvalidOperation {
                         op: "array fill".to_string(),
                         type_name: format!("{:?}", len_type),
+                        span: span,
                     });
                 }
 
-                let len = if let Expr::Int(n) = length.as_ref() {
+                let len = if let Expr::Int(n, _) = length.as_ref() {
                     *n as usize
                 } else {
                     0
@@ -895,7 +950,7 @@ impl TypeChecker {
                 Ok(Type::Array(Box::new(elem_type.clone()), len))
             }
 
-            Expr::Range(start, end) => {
+            Expr::Range(start, end, _) => {
                 let start_type = self.check_expr(start)?;
                 let end_type = self.check_expr(end)?;
 
@@ -903,10 +958,11 @@ impl TypeChecker {
                     return Err(CheckerError::InvalidOperation {
                         op: "range expression".to_string(),
                         type_name: format!("{:?} and {:?}", start_type, end_type),
+                        span: span,
                     });
                 }
 
-                let len = if let (Expr::Int(s), Expr::Int(e)) = (start.as_ref(), end.as_ref()) {
+                let len = if let (Expr::Int(s, _), Expr::Int(e, _)) = (start.as_ref(), end.as_ref()) {
                     if *e > *s { (*e - *s) as usize } else { 0 }
                 } else {
                     0
@@ -915,7 +971,7 @@ impl TypeChecker {
                 Ok(Type::Array(Box::new(Type::Named("int".to_string())), len))
             }
 
-            Expr::FuncDecl(_name, params, _ret_type, body) => {
+            Expr::FuncDecl(_name, params, _ret_type, body, _) => {
                 self.push_scope();
                 for (param_name, param_type) in params {
                     let actual_param_type = if matches!(param_type, Type::Named(n) if n == "gen") {
@@ -931,24 +987,24 @@ impl TypeChecker {
                 Ok(Type::Named("void".to_string()))
             }
 
-            Expr::Extern(_, _, _) => Ok(Type::Named("void".to_string())),
+            Expr::Extern(_, _, _, _) => Ok(Type::Named("void".to_string())),
 
-            Expr::Break | Expr::Continue => Ok(Type::Named("void".to_string())),
+            Expr::Break(_) | Expr::Continue(_) => Ok(Type::Named("void".to_string())),
 
-            Expr::TypeDef => Ok(Type::Named("void".to_string())),
+            Expr::TypeDef(_) => Ok(Type::Named("void".to_string())),
 
-            Expr::Struct(_name, fields) => {
+            Expr::Struct(_name, fields, _) => {
                 for (_, field_ty) in fields {
                     self.validate_type(field_ty)?;
                 }
                 Ok(Type::Named("void".to_string()))
             }
 
-            Expr::StructLiteral(name, field_values) => {
+            Expr::StructLiteral(name, field_values, _) => {
                 let struct_def = self
                     .structs
                     .get(name)
-                    .ok_or_else(|| CheckerError::UndefinedStruct(name.clone()))?
+                    .ok_or_else(|| CheckerError::UndefinedStruct(name.clone(), span))?
                     .clone();
 
                 for (field_name, expected_ty) in &struct_def.fields {
@@ -966,6 +1022,7 @@ impl TypeChecker {
                                 expected: expected_ty.clone(),
                                 found: expr_type,
                                 context: format!("struct '{}' field '{}'", name, field_name),
+                                span: span,
                             });
                         }
                     }
@@ -974,7 +1031,7 @@ impl TypeChecker {
                 Ok(Type::Named(name.clone()))
             }
 
-            Expr::MemberAccess(obj, field_name) => {
+            Expr::MemberAccess(obj, field_name, _) => {
                 let obj_type = self.check_expr(obj)?;
                 let struct_name = match &obj_type {
                     Type::Named(name) => name.clone(),
@@ -985,20 +1042,20 @@ impl TypeChecker {
                             return Err(CheckerError::NonStructMemberAccess(format!(
                                 "{:?}",
                                 obj_type
-                            )));
+                            ), span));
                         }
                     }
                     _ => {
                         return Err(CheckerError::NonStructMemberAccess(format!(
                             "{:?}",
                             obj_type
-                        )));
+                        ), span));
                     }
                 };
                 let fields = self
                     .structs
                     .get(&struct_name)
-                    .ok_or_else(|| CheckerError::UndefinedStruct(struct_name.clone()))?
+                    .ok_or_else(|| CheckerError::UndefinedStruct(struct_name.clone(), span))?
                     .fields
                     .clone();
 
@@ -1012,10 +1069,11 @@ impl TypeChecker {
                 Err(CheckerError::UndefinedField {
                     struct_name,
                     field: field_name.clone(),
+                    span: span,
                 })
             }
 
-            Expr::MemberAssign(obj, field_name, value) => {
+            Expr::MemberAssign(obj, field_name, value, _) => {
                 let obj_type = self.check_expr(obj)?;
                 let value_type = self.check_expr(value)?;
 
@@ -1024,7 +1082,7 @@ impl TypeChecker {
                         let struct_def = self
                             .structs
                             .get(struct_name)
-                            .ok_or_else(|| CheckerError::UndefinedStruct(struct_name.clone()))?;
+                            .ok_or_else(|| CheckerError::UndefinedStruct(struct_name.clone(), span))?;
 
                         for (name, ty) in &struct_def.fields {
                             if name == field_name {
@@ -1036,6 +1094,7 @@ impl TypeChecker {
                                             "struct '{}' field '{}' assignment",
                                             struct_name, field_name
                                         ),
+                                        span: span,
                                     });
                                 }
                                 return Ok(Type::Named("void".to_string()));
@@ -1045,12 +1104,13 @@ impl TypeChecker {
                         Err(CheckerError::UndefinedField {
                             struct_name: struct_name.clone(),
                             field: field_name.clone(),
+                            span: span,
                         })
                     }
                     Type::Pointer(inner) => {
                         if let Type::Named(struct_name) = &**inner {
                             let struct_def = self.structs.get(struct_name).ok_or_else(|| {
-                                CheckerError::UndefinedStruct(struct_name.clone())
+                                CheckerError::UndefinedStruct(struct_name.clone(), span)
                             })?;
 
                             for (name, ty) in &struct_def.fields {
@@ -1063,6 +1123,7 @@ impl TypeChecker {
                                                 "struct '{}' field '{}' assignment",
                                                 struct_name, field_name
                                             ),
+                                            span: span,
                                         });
                                     }
                                     return Ok(Type::Named("void".to_string()));
@@ -1072,45 +1133,46 @@ impl TypeChecker {
                             Err(CheckerError::UndefinedField {
                                 struct_name: struct_name.clone(),
                                 field: field_name.clone(),
+                                span: span,
                             })
                         } else {
                             Err(CheckerError::NonStructMemberAccess(format!(
                                 "{:?}",
                                 obj_type
-                            )))
+                            ), span))
                         }
                     }
                     _ => Err(CheckerError::NonStructMemberAccess(format!(
                         "{:?}",
                         obj_type
-                    ))),
+                    ), span)),
                 }
             }
 
-            Expr::FAdd(lhs, rhs)
-            | Expr::FSub(lhs, rhs)
-            | Expr::FMul(lhs, rhs)
-            | Expr::FDiv(lhs, rhs) => {
+            Expr::FAdd(lhs, rhs, _)
+            | Expr::FSub(lhs, rhs, _)
+            | Expr::FMul(lhs, rhs, _)
+            | Expr::FDiv(lhs, rhs, _) => {
                 self.check_expr(lhs)?;
                 self.check_expr(rhs)?;
                 Ok(Type::Named("float".to_string()))
             }
-            Expr::FEq(lhs, rhs)
-            | Expr::FNe(lhs, rhs)
-            | Expr::FLt(lhs, rhs)
-            | Expr::FLe(lhs, rhs)
-            | Expr::FGt(lhs, rhs)
-            | Expr::FGe(lhs, rhs) => {
+            Expr::FEq(lhs, rhs, _)
+            | Expr::FNe(lhs, rhs, _)
+            | Expr::FLt(lhs, rhs, _)
+            | Expr::FLe(lhs, rhs, _)
+            | Expr::FGt(lhs, rhs, _)
+            | Expr::FGe(lhs, rhs, _) => {
                 self.check_expr(lhs)?;
                 self.check_expr(rhs)?;
                 Ok(Type::Named("bool".to_string()))
             }
-            Expr::StrCat(lhs, rhs) => {
+            Expr::StrCat(lhs, rhs, _) => {
                 self.check_expr(lhs)?;
                 self.check_expr(rhs)?;
                 Ok(Type::Named("string".to_string()))
             }
-            Expr::Lambda(params, body, ret_type) => {
+            Expr::Lambda(params, body, ret_type, _) => {
                 self.push_scope();
                 for (param_name, param_type) in params.iter() {
                     self.declare_var(param_name, param_type.clone());
@@ -1123,21 +1185,22 @@ impl TypeChecker {
                     Box::new(ret_type.clone()),
                 ))
             }
-            Expr::AddressOf(expr) => {
+            Expr::AddressOf(expr, _) => {
                 let inner_type = self.check_expr(expr)?;
                 Ok(Type::Pointer(Box::new(inner_type)))
             }
-            Expr::Deref(expr) => {
+            Expr::Deref(expr, _) => {
                 let ptr_type = self.check_expr(expr)?;
                 match ptr_type {
                     Type::Pointer(inner) => Ok(*inner),
                     _ => Err(CheckerError::InvalidOperation {
                         op: "dereference".to_string(),
                         type_name: format!("{:?}", ptr_type),
+                        span: span,
                     }),
                 }
             }
-            Expr::DerefAssign(ptr, val) => {
+            Expr::DerefAssign(ptr, val, _) => {
                 let ptr_type = self.check_expr(ptr)?;
                 let val_type = self.check_expr(val)?;
                 match ptr_type {
@@ -1147,6 +1210,7 @@ impl TypeChecker {
                                 expected: *inner,
                                 found: val_type,
                                 context: "dereference assignment".to_string(),
+                                span: span,
                             });
                         }
                         Ok(Type::Named("void".to_string()))
@@ -1154,6 +1218,7 @@ impl TypeChecker {
                     _ => Err(CheckerError::InvalidOperation {
                         op: "dereference assignment".to_string(),
                         type_name: format!("{:?}", ptr_type),
+                        span: span,
                     }),
                 }
             }

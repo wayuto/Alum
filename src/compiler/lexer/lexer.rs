@@ -1,4 +1,4 @@
-use crate::compiler::lexer::Token;
+use crate::compiler::{lexer::Token, Span};
 use std::{fmt::Display, str::Chars};
 
 #[derive(Debug, Clone)]
@@ -49,6 +49,16 @@ impl Display for LexerError {
 }
 
 impl std::error::Error for LexerError {}
+
+impl LexerError {
+    pub fn span(&self) -> crate::compiler::Span {
+        match self {
+            LexerError::InvalidNumber { line, col }
+            | LexerError::UnexpectedChar { line, col, .. }
+            | LexerError::UnclosedQuote { line, col } => crate::compiler::Span::new(*line, *col),
+        }
+    }
+}
 
 pub struct Lexer<'a> {
     chars: Chars<'a>,
@@ -204,10 +214,12 @@ impl<'a> Lexer<'a> {
         Ok(s)
     }
 
-    fn next_token(&mut self) -> Result<Token, LexerError> {
+    fn next_token(&mut self) -> Result<(Token, Span), LexerError> {
         self.sw();
+        let line = self.line;
+        let col = self.col;
         let c = match self.current {
-            None => return Ok(Token::EOF),
+            None => return Ok((Token::EOF, Span::new(line, col))),
             Some(ch) => ch,
         };
 
@@ -413,12 +425,12 @@ impl<'a> Lexer<'a> {
             }
         };
 
-        Ok(tok)
+        Ok((tok, Span::new(line, col)))
     }
 }
 
 impl<'a> Iterator for Lexer<'a> {
-    type Item = Result<Token, LexerError>;
+    type Item = Result<(Token, Span), LexerError>;
     fn next(&mut self) -> Option<Self::Item> {
         self.sw();
         match self.current {

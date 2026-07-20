@@ -6,7 +6,11 @@ use cli::{Cli, build, exec_run};
 
 fn main() {
     if let Err(e) = run() {
-        eprintln!("Error: {}", e);
+        if let Some(ce) = e.downcast_ref::<compiler::CompilerError>() {
+            eprint!("{}", ce.diagnose());
+        } else {
+            eprintln!("Error: {}", e);
+        }
         std::process::exit(1);
     }
 }

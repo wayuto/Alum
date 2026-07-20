@@ -1,5 +1,6 @@
 use super::types::{CodeGenError, LoopContext, Slot, StructDef, StructField, get_type};
 use crate::compiler::parser::{Expr, Program, Type};
+use crate::compiler::Span;
 use cranelift::{
     codegen::{ir, settings},
     prelude::{
@@ -135,202 +136,202 @@ impl CodeGen {
             lambda_map: &mut std::collections::HashMap<String, Expr>,
         ) -> Expr {
             match expr {
-                Expr::Lambda(params, body, ret_type) => {
+                Expr::Lambda(params, body, ret_type, _) => {
                     let lambda_name = format!("_lambda_{}", lambda_counter);
                     *lambda_counter += 1;
 
-                    let lambda_func = Expr::FuncDecl(lambda_name.clone(), params, ret_type, body);
+                    let lambda_func = Expr::FuncDecl(lambda_name.clone(), params, ret_type, body, Span::new(0, 0));
                     lambda_map.insert(lambda_name.clone(), lambda_func);
 
-                    Expr::Var(lambda_name)
+                    Expr::Var(lambda_name, Span::new(0, 0))
                 }
-                Expr::Block(body) => Expr::Block(
+                Expr::Block(body, _) => Expr::Block(
                     body.into_iter()
                         .map(|e| process_expr(e, lambda_counter, lambda_map))
                         .collect(),
-                ),
-                Expr::Add(l, r) => Expr::Add(
+                    Span::new(0, 0)),
+                Expr::Add(l, r, _) => Expr::Add(
                     Box::new(process_expr(*l, lambda_counter, lambda_map)),
                     Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                ),
-                Expr::Sub(l, r) => Expr::Sub(
+                    Span::new(0, 0)),
+                Expr::Sub(l, r, _) => Expr::Sub(
                     Box::new(process_expr(*l, lambda_counter, lambda_map)),
                     Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                ),
-                Expr::Mul(l, r) => Expr::Mul(
+                    Span::new(0, 0)),
+                Expr::Mul(l, r, _) => Expr::Mul(
                     Box::new(process_expr(*l, lambda_counter, lambda_map)),
                     Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                ),
-                Expr::Div(l, r) => Expr::Div(
+                    Span::new(0, 0)),
+                Expr::Div(l, r, _) => Expr::Div(
                     Box::new(process_expr(*l, lambda_counter, lambda_map)),
                     Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                ),
-                Expr::Mod(l, r) => Expr::Mod(
+                    Span::new(0, 0)),
+                Expr::Mod(l, r, _) => Expr::Mod(
                     Box::new(process_expr(*l, lambda_counter, lambda_map)),
                     Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                ),
-                Expr::FAdd(l, r) => Expr::FAdd(
+                    Span::new(0, 0)),
+                Expr::FAdd(l, r, _) => Expr::FAdd(
                     Box::new(process_expr(*l, lambda_counter, lambda_map)),
                     Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                ),
-                Expr::FSub(l, r) => Expr::FSub(
+                    Span::new(0, 0)),
+                Expr::FSub(l, r, _) => Expr::FSub(
                     Box::new(process_expr(*l, lambda_counter, lambda_map)),
                     Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                ),
-                Expr::FMul(l, r) => Expr::FMul(
+                    Span::new(0, 0)),
+                Expr::FMul(l, r, _) => Expr::FMul(
                     Box::new(process_expr(*l, lambda_counter, lambda_map)),
                     Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                ),
-                Expr::FDiv(l, r) => Expr::FDiv(
+                    Span::new(0, 0)),
+                Expr::FDiv(l, r, _) => Expr::FDiv(
                     Box::new(process_expr(*l, lambda_counter, lambda_map)),
                     Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                ),
-                Expr::Eq(l, r) => Expr::Eq(
+                    Span::new(0, 0)),
+                Expr::Eq(l, r, _) => Expr::Eq(
                     Box::new(process_expr(*l, lambda_counter, lambda_map)),
                     Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                ),
-                Expr::Ne(l, r) => Expr::Ne(
+                    Span::new(0, 0)),
+                Expr::Ne(l, r, _) => Expr::Ne(
                     Box::new(process_expr(*l, lambda_counter, lambda_map)),
                     Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                ),
-                Expr::Lt(l, r) => Expr::Lt(
+                    Span::new(0, 0)),
+                Expr::Lt(l, r, _) => Expr::Lt(
                     Box::new(process_expr(*l, lambda_counter, lambda_map)),
                     Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                ),
-                Expr::Le(l, r) => Expr::Le(
+                    Span::new(0, 0)),
+                Expr::Le(l, r, _) => Expr::Le(
                     Box::new(process_expr(*l, lambda_counter, lambda_map)),
                     Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                ),
-                Expr::Gt(l, r) => Expr::Gt(
+                    Span::new(0, 0)),
+                Expr::Gt(l, r, _) => Expr::Gt(
                     Box::new(process_expr(*l, lambda_counter, lambda_map)),
                     Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                ),
-                Expr::Ge(l, r) => Expr::Ge(
+                    Span::new(0, 0)),
+                Expr::Ge(l, r, _) => Expr::Ge(
                     Box::new(process_expr(*l, lambda_counter, lambda_map)),
                     Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                ),
-                Expr::FEq(l, r) => Expr::FEq(
+                    Span::new(0, 0)),
+                Expr::FEq(l, r, _) => Expr::FEq(
                     Box::new(process_expr(*l, lambda_counter, lambda_map)),
                     Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                ),
-                Expr::FNe(l, r) => Expr::FNe(
+                    Span::new(0, 0)),
+                Expr::FNe(l, r, _) => Expr::FNe(
                     Box::new(process_expr(*l, lambda_counter, lambda_map)),
                     Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                ),
-                Expr::FLt(l, r) => Expr::FLt(
+                    Span::new(0, 0)),
+                Expr::FLt(l, r, _) => Expr::FLt(
                     Box::new(process_expr(*l, lambda_counter, lambda_map)),
                     Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                ),
-                Expr::FLe(l, r) => Expr::FLe(
+                    Span::new(0, 0)),
+                Expr::FLe(l, r, _) => Expr::FLe(
                     Box::new(process_expr(*l, lambda_counter, lambda_map)),
                     Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                ),
-                Expr::FGt(l, r) => Expr::FGt(
+                    Span::new(0, 0)),
+                Expr::FGt(l, r, _) => Expr::FGt(
                     Box::new(process_expr(*l, lambda_counter, lambda_map)),
                     Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                ),
-                Expr::FGe(l, r) => Expr::FGe(
+                    Span::new(0, 0)),
+                Expr::FGe(l, r, _) => Expr::FGe(
                     Box::new(process_expr(*l, lambda_counter, lambda_map)),
                     Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                ),
-                Expr::And(l, r) => Expr::And(
+                    Span::new(0, 0)),
+                Expr::And(l, r, _) => Expr::And(
                     Box::new(process_expr(*l, lambda_counter, lambda_map)),
                     Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                ),
-                Expr::Or(l, r) => Expr::Or(
+                    Span::new(0, 0)),
+                Expr::Or(l, r, _) => Expr::Or(
                     Box::new(process_expr(*l, lambda_counter, lambda_map)),
                     Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                ),
-                Expr::Not(e) => Expr::Not(Box::new(process_expr(*e, lambda_counter, lambda_map))),
-                Expr::StrCat(l, r) => Expr::StrCat(
+                    Span::new(0, 0)),
+                Expr::Not(e, _) => Expr::Not(Box::new(process_expr(*e, lambda_counter, lambda_map)), Span::new(0, 0)),
+                Expr::StrCat(l, r, _) => Expr::StrCat(
                     Box::new(process_expr(*l, lambda_counter, lambda_map)),
                     Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                ),
-                Expr::VarDecl(name, ty, val) => Expr::VarDecl(
+                    Span::new(0, 0)),
+                Expr::VarDecl(name, ty, val, _) => Expr::VarDecl(
                     name,
                     ty,
                     Box::new(process_expr(*val, lambda_counter, lambda_map)),
-                ),
-                Expr::VarAssign(name, val) => Expr::VarAssign(
+                    Span::new(0, 0)),
+                Expr::VarAssign(name, val, _) => Expr::VarAssign(
                     name,
                     Box::new(process_expr(*val, lambda_counter, lambda_map)),
-                ),
-                Expr::Call(func, args) => Expr::Call(
+                    Span::new(0, 0)),
+                Expr::Call(func, args, _) => Expr::Call(
                     Box::new(process_expr(*func, lambda_counter, lambda_map)),
                     args.into_iter()
                         .map(|a| process_expr(a, lambda_counter, lambda_map))
                         .collect(),
-                ),
-                Expr::Return(e) => {
-                    Expr::Return(Box::new(process_expr(*e, lambda_counter, lambda_map)))
+                    Span::new(0, 0)),
+                Expr::Return(e, _) => {
+                    Expr::Return(Box::new(process_expr(*e, lambda_counter, lambda_map)), Span::new(0, 0))
                 }
-                Expr::If(cond, then_branch, else_branch) => Expr::If(
+                Expr::If(cond, then_branch, else_branch, _) => Expr::If(
                     Box::new(process_expr(*cond, lambda_counter, lambda_map)),
                     Box::new(process_expr(*then_branch, lambda_counter, lambda_map)),
                     else_branch.map(|e| Box::new(process_expr(*e, lambda_counter, lambda_map))),
-                ),
-                Expr::While(cond, body) => Expr::While(
+                    Span::new(0, 0)),
+                Expr::While(cond, body, _) => Expr::While(
                     Box::new(process_expr(*cond, lambda_counter, lambda_map)),
                     Box::new(process_expr(*body, lambda_counter, lambda_map)),
-                ),
-                Expr::For(var, array, body) => Expr::For(
+                    Span::new(0, 0)),
+                Expr::For(var, array, body, _) => Expr::For(
                     var,
                     Box::new(process_expr(*array, lambda_counter, lambda_map)),
                     Box::new(process_expr(*body, lambda_counter, lambda_map)),
-                ),
-                Expr::Index(arr, idx) => Expr::Index(
+                    Span::new(0, 0)),
+                Expr::Index(arr, idx, _) => Expr::Index(
                     Box::new(process_expr(*arr, lambda_counter, lambda_map)),
                     Box::new(process_expr(*idx, lambda_counter, lambda_map)),
-                ),
-                Expr::IndexAssign(arr, val) => Expr::IndexAssign(
+                    Span::new(0, 0)),
+                Expr::IndexAssign(arr, val, _) => Expr::IndexAssign(
                     Box::new(process_expr(*arr, lambda_counter, lambda_map)),
                     Box::new(process_expr(*val, lambda_counter, lambda_map)),
-                ),
-                Expr::ArrayLiteral(elements) => Expr::ArrayLiteral(
+                    Span::new(0, 0)),
+                Expr::ArrayLiteral(elements, _) => Expr::ArrayLiteral(
                     elements
                         .into_iter()
                         .map(|e| process_expr(e, lambda_counter, lambda_map))
                         .collect(),
-                ),
-                Expr::ArrayFill(ty, len) => {
-                    Expr::ArrayFill(ty, Box::new(process_expr(*len, lambda_counter, lambda_map)))
+                    Span::new(0, 0)),
+                Expr::ArrayFill(ty, len, _) => {
+                    Expr::ArrayFill(ty, Box::new(process_expr(*len, lambda_counter, lambda_map)), Span::new(0, 0))
                 }
-                Expr::Range(start, end) => Expr::Range(
+                Expr::Range(start, end, _) => Expr::Range(
                     Box::new(process_expr(*start, lambda_counter, lambda_map)),
                     Box::new(process_expr(*end, lambda_counter, lambda_map)),
-                ),
-                Expr::StructLiteral(name, fields) => Expr::StructLiteral(
+                    Span::new(0, 0)),
+                Expr::StructLiteral(name, fields, _) => Expr::StructLiteral(
                     name,
                     fields
                         .into_iter()
                         .map(|(n, e)| (n, process_expr(e, lambda_counter, lambda_map)))
                         .collect(),
-                ),
-                Expr::MemberAccess(obj, field) => Expr::MemberAccess(
+                    Span::new(0, 0)),
+                Expr::MemberAccess(obj, field, _) => Expr::MemberAccess(
                     Box::new(process_expr(*obj, lambda_counter, lambda_map)),
                     field,
-                ),
-                Expr::MemberAssign(obj, field, val) => Expr::MemberAssign(
+                    Span::new(0, 0)),
+                Expr::MemberAssign(obj, field, val, _) => Expr::MemberAssign(
                     Box::new(process_expr(*obj, lambda_counter, lambda_map)),
                     field,
                     Box::new(process_expr(*val, lambda_counter, lambda_map)),
-                ),
-                Expr::AddressOf(expr) => {
-                    Expr::AddressOf(Box::new(process_expr(*expr, lambda_counter, lambda_map)))
+                    Span::new(0, 0)),
+                Expr::AddressOf(expr, _) => {
+                    Expr::AddressOf(Box::new(process_expr(*expr, lambda_counter, lambda_map)), Span::new(0, 0))
                 }
-                Expr::Deref(expr) => {
-                    Expr::Deref(Box::new(process_expr(*expr, lambda_counter, lambda_map)))
+                Expr::Deref(expr, _) => {
+                    Expr::Deref(Box::new(process_expr(*expr, lambda_counter, lambda_map)), Span::new(0, 0))
                 }
-                Expr::DerefAssign(ptr, val) => Expr::DerefAssign(
+                Expr::DerefAssign(ptr, val, _) => Expr::DerefAssign(
                     Box::new(process_expr(*ptr, lambda_counter, lambda_map)),
                     Box::new(process_expr(*val, lambda_counter, lambda_map)),
-                ),
-                Expr::FuncDecl(name, params, ret_type, body) => Expr::FuncDecl(
+                    Span::new(0, 0)),
+                Expr::FuncDecl(name, params, ret_type, body, _) => Expr::FuncDecl(
                     name,
                     params,
                     ret_type,
                     Box::new(process_expr(*body, lambda_counter, lambda_map)),
-                ),
+                    Span::new(0, 0)),
                 _ => expr,
             }
         }
@@ -351,7 +352,7 @@ impl CodeGen {
 
         for expr in self.ast.body.clone() {
             match expr {
-                Expr::FuncDecl(name, params, ret_type, _body) => {
+                Expr::FuncDecl(name, params, ret_type, _body, _) => {
                     let mut sig = self.module.make_signature();
                     sig.call_conv = CallConv::SystemV;
                     for (_, t) in params {
@@ -368,7 +369,7 @@ impl CodeGen {
                         .unwrap();
                     self.func_signatures.insert(name, (func_id, sig));
                 }
-                Expr::Extern(name, params, ret_type) => {
+                Expr::Extern(name, params, ret_type, _) => {
                     let mut sig = self.module.make_signature();
                     sig.call_conv = CallConv::SystemV;
                     for (_, t) in params {
@@ -385,8 +386,8 @@ impl CodeGen {
                         .unwrap();
                     self.func_signatures.insert(name, (func_id, sig));
                 }
-                Expr::TypeDef => {}
-                Expr::Struct(name, fields) => {
+                Expr::TypeDef(_) => {}
+                Expr::Struct(name, fields, _) => {
                     let mut offset = 0i64;
                     let mut max_align = 1i64;
                     let mut struct_fields = Vec::new();
@@ -426,26 +427,32 @@ impl CodeGen {
                         },
                     );
                 }
-                expr => return Err(CodeGenError::UnexpectedExpression { found: expr }),
+                expr => {
+                    let span = expr.span();
+                    return Err(CodeGenError::UnexpectedExpression { found: expr, span });
+                }
             }
         }
         let mut str_idx = 0u32;
         for expr in self.ast.body.clone() {
             match expr {
-                Expr::FuncDecl(name, params, ret_type, body) => {
+                Expr::FuncDecl(name, params, ret_type, body, _) => {
                     self.compile_func(name, params, ret_type, body, &mut str_idx)?;
                 }
-                Expr::Extern(_, _, _) => {}
-                Expr::TypeDef => {}
-                Expr::Struct(_, _) => {}
-                expr => return Err(CodeGenError::UnexpectedExpression { found: expr }),
+                Expr::Extern(_, _, _, _) => {}
+                Expr::TypeDef(_) => {}
+                Expr::Struct(_, _, _) => {}
+                expr => {
+                    let span = expr.span();
+                    return Err(CodeGenError::UnexpectedExpression { found: expr, span });
+                }
             }
         }
 
         let product = self.module.finish();
         let object_code = product
             .emit()
-            .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+            .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
         Ok(object_code.to_vec())
     }
 
@@ -514,7 +521,7 @@ impl CodeGen {
             .map_err(|e| {
                 eprintln!("Verification error for function '{}':", name);
                 eprintln!("Function IR:\n{}", new_ctx.func.display());
-                CodeGenError::ModuleError(format!("{}: {}", name, e))
+                CodeGenError::ModuleError(format!("{}: {}", name, e), Span::new(0, 0))
             })?;
 
         Ok(())
@@ -522,99 +529,99 @@ impl CodeGen {
 
     pub(crate) fn find_var_assignments(expr: &Expr, modified_vars: &mut HashSet<String>) {
         match expr {
-            Expr::Block(body) => {
+            Expr::Block(body, _) => {
                 for e in body {
                     Self::find_var_assignments(e, modified_vars);
                 }
             }
-            Expr::VarAssign(name, _) => {
+            Expr::VarAssign(name, _, _) => {
                 modified_vars.insert(name.clone());
             }
-            Expr::If(cond, t, e) => {
+            Expr::If(cond, t, e, _) => {
                 Self::find_var_assignments(cond, modified_vars);
                 Self::find_var_assignments(t, modified_vars);
                 if let Some(e) = e {
                     Self::find_var_assignments(e, modified_vars);
                 }
             }
-            Expr::While(cond, body) => {
+            Expr::While(cond, body, _) => {
                 Self::find_var_assignments(cond, modified_vars);
                 Self::find_var_assignments(body, modified_vars);
             }
-            Expr::For(_, array, body) => {
+            Expr::For(_, array, body, _) => {
                 Self::find_var_assignments(array, modified_vars);
                 Self::find_var_assignments(body, modified_vars);
             }
-            Expr::Add(l, r)
-            | Expr::Sub(l, r)
-            | Expr::Mul(l, r)
-            | Expr::Div(l, r)
-            | Expr::Mod(l, r)
-            | Expr::FAdd(l, r)
-            | Expr::FSub(l, r)
-            | Expr::FMul(l, r)
-            | Expr::FDiv(l, r)
-            | Expr::Eq(l, r)
-            | Expr::Ne(l, r)
-            | Expr::Lt(l, r)
-            | Expr::Le(l, r)
-            | Expr::Gt(l, r)
-            | Expr::Ge(l, r)
-            | Expr::FEq(l, r)
-            | Expr::FNe(l, r)
-            | Expr::FLt(l, r)
-            | Expr::FLe(l, r)
-            | Expr::FGt(l, r)
-            | Expr::FGe(l, r)
-            | Expr::And(l, r)
-            | Expr::Or(l, r)
-            | Expr::StrCat(l, r) => {
+            Expr::Add(l, r, _)
+            | Expr::Sub(l, r, _)
+            | Expr::Mul(l, r, _)
+            | Expr::Div(l, r, _)
+            | Expr::Mod(l, r, _)
+            | Expr::FAdd(l, r, _)
+            | Expr::FSub(l, r, _)
+            | Expr::FMul(l, r, _)
+            | Expr::FDiv(l, r, _)
+            | Expr::Eq(l, r, _)
+            | Expr::Ne(l, r, _)
+            | Expr::Lt(l, r, _)
+            | Expr::Le(l, r, _)
+            | Expr::Gt(l, r, _)
+            | Expr::Ge(l, r, _)
+            | Expr::FEq(l, r, _)
+            | Expr::FNe(l, r, _)
+            | Expr::FLt(l, r, _)
+            | Expr::FLe(l, r, _)
+            | Expr::FGt(l, r, _)
+            | Expr::FGe(l, r, _)
+            | Expr::And(l, r, _)
+            | Expr::Or(l, r, _)
+            | Expr::StrCat(l, r, _) => {
                 Self::find_var_assignments(l, modified_vars);
                 Self::find_var_assignments(r, modified_vars);
             }
-            Expr::Not(e) | Expr::Return(e) => {
+            Expr::Not(e, _) | Expr::Return(e, _) => {
                 Self::find_var_assignments(e, modified_vars);
             }
-            Expr::Call(func, args) => {
+            Expr::Call(func, args, _) => {
                 Self::find_var_assignments(func, modified_vars);
                 for a in args {
                     Self::find_var_assignments(a, modified_vars);
                 }
             }
-            Expr::Index(arr, idx) => {
+            Expr::Index(arr, idx, _) => {
                 Self::find_var_assignments(arr, modified_vars);
                 Self::find_var_assignments(idx, modified_vars);
             }
-            Expr::IndexAssign(arr, _) => {
+            Expr::IndexAssign(arr, _, _) => {
                 Self::find_var_assignments(arr, modified_vars);
             }
-            Expr::ArrayLiteral(elements) => {
+            Expr::ArrayLiteral(elements, _) => {
                 for e in elements {
                     Self::find_var_assignments(e, modified_vars);
                 }
             }
-            Expr::ArrayFill(_, len) => {
+            Expr::ArrayFill(_, len, _) => {
                 Self::find_var_assignments(len, modified_vars);
             }
-            Expr::StructLiteral(_, fields) => {
+            Expr::StructLiteral(_, fields, _) => {
                 for (_, f) in fields {
                     Self::find_var_assignments(f, modified_vars);
                 }
             }
-            Expr::MemberAccess(obj, _) => {
+            Expr::MemberAccess(obj, _, _) => {
                 Self::find_var_assignments(obj, modified_vars);
             }
-            Expr::MemberAssign(obj, _, val) => {
+            Expr::MemberAssign(obj, _, val, _) => {
                 Self::find_var_assignments(obj, modified_vars);
                 Self::find_var_assignments(val, modified_vars);
             }
-            Expr::AddressOf(expr) => {
+            Expr::AddressOf(expr, _) => {
                 Self::find_var_assignments(expr, modified_vars);
             }
-            Expr::Deref(expr) => {
+            Expr::Deref(expr, _) => {
                 Self::find_var_assignments(expr, modified_vars);
             }
-            Expr::DerefAssign(ptr, val) => {
+            Expr::DerefAssign(ptr, val, _) => {
                 Self::find_var_assignments(ptr, modified_vars);
                 Self::find_var_assignments(val, modified_vars);
             }
@@ -643,12 +650,12 @@ impl CodeGen {
 
     fn get_expr_type(expr: &Expr, type_stack: &Vec<HashMap<String, Type>>) -> Type {
         match expr {
-            Expr::Int(_) => Type::Named("int".to_string()),
-            Expr::Float(_) => Type::Named("float".to_string()),
-            Expr::Bool(_) => Type::Named("bool".to_string()),
-            Expr::String(_) => Type::Named("string".to_string()),
-            Expr::Nil => Type::Named("void".to_string()),
-            Expr::Var(name) => {
+            Expr::Int(_, _) => Type::Named("int".to_string()),
+            Expr::Float(_, _) => Type::Named("float".to_string()),
+            Expr::Bool(_, _) => Type::Named("bool".to_string()),
+            Expr::String(_, _) => Type::Named("string".to_string()),
+            Expr::Nil(_) => Type::Named("void".to_string()),
+            Expr::Var(name, _) => {
                 for scope in type_stack.iter().rev() {
                     if let Some(ty) = scope.get(name) {
                         return ty.clone();
@@ -662,30 +669,30 @@ impl CodeGen {
 
     fn has_return(expr: &Expr) -> bool {
         match expr {
-            Expr::Return(_) => true,
-            Expr::Block(body) => body.last().map_or(false, |e| Self::has_return(e)),
-            Expr::If(_, then_branch, else_branch) => {
+            Expr::Return(_, _) => true,
+            Expr::Block(body, _) => body.last().map_or(false, |e| Self::has_return(e)),
+            Expr::If(_, then_branch, else_branch, _) => {
                 Self::has_return(then_branch)
                     && else_branch.as_ref().map_or(false, |e| Self::has_return(e))
             }
-            Expr::While(_, body) => Self::has_return(body),
-            Expr::For(_, _, body) => Self::has_return(body),
+            Expr::While(_, body, _) => Self::has_return(body),
+            Expr::For(_, _, body, _) => Self::has_return(body),
             _ => false,
         }
     }
 
     fn has_break_or_continue(expr: &Expr) -> bool {
         match expr {
-            Expr::Break | Expr::Continue => true,
-            Expr::Block(body) => body.iter().any(|e| Self::has_break_or_continue(e)),
-            Expr::If(_, then_branch, else_branch) => {
+            Expr::Break(_) | Expr::Continue(_) => true,
+            Expr::Block(body, _) => body.iter().any(|e| Self::has_break_or_continue(e)),
+            Expr::If(_, then_branch, else_branch, _) => {
                 Self::has_break_or_continue(then_branch)
                     || else_branch
                         .as_ref()
                         .map_or(false, |e| Self::has_break_or_continue(e))
             }
-            Expr::While(_, body) => Self::has_break_or_continue(body),
-            Expr::For(_, _, body) => Self::has_break_or_continue(body),
+            Expr::While(_, body, _) => Self::has_break_or_continue(body),
+            Expr::For(_, _, body, _) => Self::has_break_or_continue(body),
             _ => false,
         }
     }
@@ -704,7 +711,7 @@ impl CodeGen {
         structs: &HashMap<String, StructDef>,
     ) -> Result<Value, CodeGenError> {
         match expr {
-            Expr::Block(body) => {
+            Expr::Block(body, _) => {
                 scope_stack.push(HashMap::new());
                 type_stack.push(HashMap::new());
                 let result = if body.len() > 1 {
@@ -756,10 +763,10 @@ impl CodeGen {
                 type_stack.pop();
                 result
             }
-            Expr::Int(i) => Ok(builder.ins().iconst(types::I64, *i as i64)),
-            Expr::Float(f) => Ok(builder.ins().f64const(*f)),
-            Expr::Bool(b) => Ok(builder.ins().iconst(types::I8, *b as i64)),
-            Expr::String(s) => {
+            Expr::Int(i, _) => Ok(builder.ins().iconst(types::I64, *i as i64)),
+            Expr::Float(f, _) => Ok(builder.ins().f64const(*f)),
+            Expr::Bool(b, _) => Ok(builder.ins().iconst(types::I8, *b as i64)),
+            Expr::String(s, _) => {
                 let data_id = module
                     .declare_data(
                         &format!("str_{}", str_idx),
@@ -767,7 +774,7 @@ impl CodeGen {
                         true,
                         false,
                     )
-                    .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                    .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
 
                 let mut data_desc = cranelift_module::DataDescription::new();
                 let mut bytes = s.as_bytes().to_vec();
@@ -775,16 +782,16 @@ impl CodeGen {
                 data_desc.define(bytes.into());
                 module
                     .define_data(data_id, &data_desc)
-                    .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                    .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
 
                 let global_value = module.declare_data_in_func(data_id, builder.func);
                 let ptr = builder.ins().global_value(types::I64, global_value);
                 *str_idx += 1;
                 Ok(ptr)
             }
-            Expr::Nil => Ok(builder.ins().iconst(types::I64, 0)),
+            Expr::Nil(_) => Ok(builder.ins().iconst(types::I64, 0)),
 
-            Expr::Add(lhs, rhs) => {
+            Expr::Add(lhs, rhs, _) => {
                 let lhs_type = Self::get_expr_type(lhs, type_stack);
                 let rhs_type = Self::get_expr_type(rhs, type_stack);
                 let is_string = matches!(lhs_type, Type::Named(ref n) if n == "string")
@@ -827,7 +834,7 @@ impl CodeGen {
                     };
                     let strlen_id = module
                         .declare_function("strlen", Linkage::Import, &strlen_sig)
-                        .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                        .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
                     let strlen_ref = module.declare_func_in_func(strlen_id, builder.func);
 
                     let lhs_len = builder.ins().call(strlen_ref, &[lhs_ptr]);
@@ -847,7 +854,7 @@ impl CodeGen {
                     };
                     let calloc_id = module
                         .declare_function("malloc", Linkage::Import, &calloc_sig)
-                        .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                        .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
                     let calloc_ref = module.declare_func_in_func(calloc_id, builder.func);
                     let result_ptr = builder.ins().call(calloc_ref, &[alloc_size]);
                     let result_ptr = builder.inst_results(result_ptr)[0];
@@ -863,7 +870,7 @@ impl CodeGen {
                     };
                     let memset_id = module
                         .declare_function("memset", Linkage::Import, &memset_sig)
-                        .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                        .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
                     let memset_ref = module.declare_func_in_func(memset_id, builder.func);
                     let zero_i32 = builder.ins().iconst(types::I32, 0);
                     builder
@@ -880,7 +887,7 @@ impl CodeGen {
                     };
                     let strcpy_id = module
                         .declare_function("strcpy", Linkage::Import, &strcpy_sig)
-                        .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                        .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
                     let strcpy_ref = module.declare_func_in_func(strcpy_id, builder.func);
                     builder.ins().call(strcpy_ref, &[result_ptr, lhs_ptr]);
 
@@ -894,7 +901,7 @@ impl CodeGen {
                     };
                     let strcat_id = module
                         .declare_function("strcat", Linkage::Import, &strcat_sig)
-                        .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                        .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
                     let strcat_ref = module.declare_func_in_func(strcat_id, builder.func);
                     builder.ins().call(strcat_ref, &[result_ptr, rhs_ptr]);
 
@@ -929,7 +936,7 @@ impl CodeGen {
                     Ok(builder.ins().iadd(lhs, rhs))
                 }
             }
-            Expr::Sub(lhs, rhs) => {
+            Expr::Sub(lhs, rhs, _) => {
                 let lhs = Self::compile_expr(
                     lhs,
                     builder,
@@ -958,7 +965,7 @@ impl CodeGen {
                 )?;
                 Ok(builder.ins().isub(lhs, rhs))
             }
-            Expr::Mul(lhs, rhs) => {
+            Expr::Mul(lhs, rhs, _) => {
                 let lhs = Self::compile_expr(
                     lhs,
                     builder,
@@ -987,7 +994,7 @@ impl CodeGen {
                 )?;
                 Ok(builder.ins().imul(lhs, rhs))
             }
-            Expr::Div(lhs, rhs) => {
+            Expr::Div(lhs, rhs, _) => {
                 let lhs = Self::compile_expr(
                     lhs,
                     builder,
@@ -1016,7 +1023,7 @@ impl CodeGen {
                 )?;
                 Ok(builder.ins().sdiv(lhs, rhs))
             }
-            Expr::Mod(lhs, rhs) => {
+            Expr::Mod(lhs, rhs, _) => {
                 let lhs = Self::compile_expr(
                     lhs,
                     builder,
@@ -1046,7 +1053,7 @@ impl CodeGen {
                 Ok(builder.ins().srem(lhs, rhs))
             }
 
-            Expr::FAdd(lhs, rhs) => {
+            Expr::FAdd(lhs, rhs, _) => {
                 let lhs = Self::compile_expr(
                     lhs,
                     builder,
@@ -1075,7 +1082,7 @@ impl CodeGen {
                 )?;
                 Ok(builder.ins().fadd(lhs, rhs))
             }
-            Expr::FSub(lhs, rhs) => {
+            Expr::FSub(lhs, rhs, _) => {
                 let lhs = Self::compile_expr(
                     lhs,
                     builder,
@@ -1104,7 +1111,7 @@ impl CodeGen {
                 )?;
                 Ok(builder.ins().fsub(lhs, rhs))
             }
-            Expr::FMul(lhs, rhs) => {
+            Expr::FMul(lhs, rhs, _) => {
                 let lhs = Self::compile_expr(
                     lhs,
                     builder,
@@ -1133,7 +1140,7 @@ impl CodeGen {
                 )?;
                 Ok(builder.ins().fmul(lhs, rhs))
             }
-            Expr::FDiv(lhs, rhs) => {
+            Expr::FDiv(lhs, rhs, _) => {
                 let lhs = Self::compile_expr(
                     lhs,
                     builder,
@@ -1163,7 +1170,7 @@ impl CodeGen {
                 Ok(builder.ins().fdiv(lhs, rhs))
             }
 
-            Expr::Eq(lhs, rhs) => {
+            Expr::Eq(lhs, rhs, _) => {
                 let lhs = Self::compile_expr(
                     lhs,
                     builder,
@@ -1192,7 +1199,7 @@ impl CodeGen {
                 )?;
                 Ok(builder.ins().icmp(ir::condcodes::IntCC::Equal, lhs, rhs))
             }
-            Expr::Ne(lhs, rhs) => {
+            Expr::Ne(lhs, rhs, _) => {
                 let lhs = Self::compile_expr(
                     lhs,
                     builder,
@@ -1221,7 +1228,7 @@ impl CodeGen {
                 )?;
                 Ok(builder.ins().icmp(ir::condcodes::IntCC::NotEqual, lhs, rhs))
             }
-            Expr::Lt(lhs, rhs) => {
+            Expr::Lt(lhs, rhs, _) => {
                 let lhs = Self::compile_expr(
                     lhs,
                     builder,
@@ -1252,7 +1259,7 @@ impl CodeGen {
                     .ins()
                     .icmp(ir::condcodes::IntCC::SignedLessThan, lhs, rhs))
             }
-            Expr::Le(lhs, rhs) => {
+            Expr::Le(lhs, rhs, _) => {
                 let lhs = Self::compile_expr(
                     lhs,
                     builder,
@@ -1283,7 +1290,7 @@ impl CodeGen {
                     .ins()
                     .icmp(ir::condcodes::IntCC::SignedLessThanOrEqual, lhs, rhs))
             }
-            Expr::Gt(lhs, rhs) => {
+            Expr::Gt(lhs, rhs, _) => {
                 let lhs = Self::compile_expr(
                     lhs,
                     builder,
@@ -1314,7 +1321,7 @@ impl CodeGen {
                     .ins()
                     .icmp(ir::condcodes::IntCC::SignedGreaterThan, lhs, rhs))
             }
-            Expr::Ge(lhs, rhs) => {
+            Expr::Ge(lhs, rhs, _) => {
                 let lhs = Self::compile_expr(
                     lhs,
                     builder,
@@ -1346,7 +1353,7 @@ impl CodeGen {
                     .icmp(ir::condcodes::IntCC::SignedGreaterThanOrEqual, lhs, rhs))
             }
 
-            Expr::FEq(lhs, rhs) => {
+            Expr::FEq(lhs, rhs, _) => {
                 let lhs = Self::compile_expr(
                     lhs,
                     builder,
@@ -1375,7 +1382,7 @@ impl CodeGen {
                 )?;
                 Ok(builder.ins().fcmp(ir::condcodes::FloatCC::Equal, lhs, rhs))
             }
-            Expr::FNe(lhs, rhs) => {
+            Expr::FNe(lhs, rhs, _) => {
                 let lhs = Self::compile_expr(
                     lhs,
                     builder,
@@ -1406,7 +1413,7 @@ impl CodeGen {
                     .ins()
                     .fcmp(ir::condcodes::FloatCC::NotEqual, lhs, rhs))
             }
-            Expr::FLt(lhs, rhs) => {
+            Expr::FLt(lhs, rhs, _) => {
                 let lhs = Self::compile_expr(
                     lhs,
                     builder,
@@ -1437,7 +1444,7 @@ impl CodeGen {
                     .ins()
                     .fcmp(ir::condcodes::FloatCC::LessThan, lhs, rhs))
             }
-            Expr::FLe(lhs, rhs) => {
+            Expr::FLe(lhs, rhs, _) => {
                 let lhs = Self::compile_expr(
                     lhs,
                     builder,
@@ -1468,7 +1475,7 @@ impl CodeGen {
                     .ins()
                     .fcmp(ir::condcodes::FloatCC::LessThanOrEqual, lhs, rhs))
             }
-            Expr::FGt(lhs, rhs) => {
+            Expr::FGt(lhs, rhs, _) => {
                 let lhs = Self::compile_expr(
                     lhs,
                     builder,
@@ -1499,7 +1506,7 @@ impl CodeGen {
                     .ins()
                     .fcmp(ir::condcodes::FloatCC::GreaterThan, lhs, rhs))
             }
-            Expr::FGe(lhs, rhs) => {
+            Expr::FGe(lhs, rhs, _) => {
                 let lhs = Self::compile_expr(
                     lhs,
                     builder,
@@ -1531,7 +1538,7 @@ impl CodeGen {
                     .fcmp(ir::condcodes::FloatCC::GreaterThanOrEqual, lhs, rhs))
             }
 
-            Expr::StrCat(lhs, rhs) => {
+            Expr::StrCat(lhs, rhs, _) => {
                 let lhs_ptr = Self::compile_expr(
                     lhs,
                     builder,
@@ -1568,7 +1575,7 @@ impl CodeGen {
                 };
                 let strlen_id = module
                     .declare_function("strlen", Linkage::Import, &strlen_sig)
-                    .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                    .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
                 let strlen_ref = module.declare_func_in_func(strlen_id, builder.func);
 
                 let lhs_len = builder.ins().call(strlen_ref, &[lhs_ptr]);
@@ -1588,7 +1595,7 @@ impl CodeGen {
                 };
                 let malloc_id = module
                     .declare_function("malloc", Linkage::Import, &malloc_sig)
-                    .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                    .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
                 let malloc_ref = module.declare_func_in_func(malloc_id, builder.func);
                 let result_ptr = builder.ins().call(malloc_ref, &[alloc_size]);
                 let result_ptr = builder.inst_results(result_ptr)[0];
@@ -1604,7 +1611,7 @@ impl CodeGen {
                 };
                 let memset_id = module
                     .declare_function("memset", Linkage::Import, &memset_sig)
-                    .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                    .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
                 let memset_ref = module.declare_func_in_func(memset_id, builder.func);
                 let zero_i32 = builder.ins().iconst(types::I32, 0);
                 builder
@@ -1621,7 +1628,7 @@ impl CodeGen {
                 };
                 let strcpy_id = module
                     .declare_function("strcpy", Linkage::Import, &strcpy_sig)
-                    .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                    .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
                 let strcpy_ref = module.declare_func_in_func(strcpy_id, builder.func);
                 builder.ins().call(strcpy_ref, &[result_ptr, lhs_ptr]);
 
@@ -1635,13 +1642,13 @@ impl CodeGen {
                 };
                 let strcat_id = module
                     .declare_function("strcat", Linkage::Import, &strcat_sig)
-                    .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                    .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
                 let strcat_ref = module.declare_func_in_func(strcat_id, builder.func);
                 builder.ins().call(strcat_ref, &[result_ptr, rhs_ptr]);
 
                 Ok(result_ptr)
             }
-            Expr::And(lhs, rhs) => {
+            Expr::And(lhs, rhs, _) => {
                 let lhs_val = Self::compile_expr(
                     lhs,
                     builder,
@@ -1670,7 +1677,7 @@ impl CodeGen {
                 )?;
                 Ok(builder.ins().band(lhs_val, rhs_val))
             }
-            Expr::Or(lhs, rhs) => {
+            Expr::Or(lhs, rhs, _) => {
                 let lhs_val = Self::compile_expr(
                     lhs,
                     builder,
@@ -1699,7 +1706,7 @@ impl CodeGen {
                 )?;
                 Ok(builder.ins().bor(lhs_val, rhs_val))
             }
-            Expr::Not(expr) => {
+            Expr::Not(expr, _) => {
                 let val = Self::compile_expr(
                     expr,
                     builder,
@@ -1716,7 +1723,7 @@ impl CodeGen {
                 let one = builder.ins().iconst(types::I8, 1);
                 Ok(builder.ins().bxor(val, one))
             }
-            Expr::VarDecl(name, ty, value) => {
+            Expr::VarDecl(name, ty, value, _) => {
                 let val = Self::compile_expr(
                     &**value,
                     builder,
@@ -1734,10 +1741,10 @@ impl CodeGen {
                 let decl_type = if let Type::Named(n) = ty {
                     if n == "gen" {
                         match &**value {
-                            Expr::Int(_) => Type::Named("int".to_string()),
-                            Expr::Float(_) => Type::Named("float".to_string()),
-                            Expr::Bool(_) => Type::Named("bool".to_string()),
-                            Expr::String(_) => Type::Named("string".to_string()),
+                            Expr::Int(_, _) => Type::Named("int".to_string()),
+                            Expr::Float(_, _) => Type::Named("float".to_string()),
+                            Expr::Bool(_, _) => Type::Named("bool".to_string()),
+                            Expr::String(_, _) => Type::Named("string".to_string()),
                             _ => Type::Named("int".to_string()),
                         }
                     } else {
@@ -1767,7 +1774,7 @@ impl CodeGen {
                 Ok(Value::from_u32(0))
             }
 
-            Expr::VarAssign(name, val) => {
+            Expr::VarAssign(name, val, _) => {
                 let val = Self::compile_expr(
                     &**val,
                     builder,
@@ -1782,7 +1789,7 @@ impl CodeGen {
                     structs,
                 )?;
                 let slot = Self::lookup_var(name, scope_stack)
-                    .ok_or_else(|| CodeGenError::UndefinedVariable { name: name.clone() })?;
+                    .ok_or_else(|| CodeGenError::UndefinedVariable { name: name.clone(), span: Span::new(0, 0) })?;
                 match slot {
                     Slot::StackSlot(s) => {
                         builder.ins().stack_store(val, *s, 0);
@@ -1790,7 +1797,7 @@ impl CodeGen {
                 }
                 Ok(val)
             }
-            Expr::Var(name) => {
+            Expr::Var(name, var_span) => {
                 if let Some(slot) = Self::lookup_var(name, scope_stack) {
                     return match slot {
                         Slot::StackSlot(s) => {
@@ -1825,9 +1832,9 @@ impl CodeGen {
                     return Ok(addr);
                 }
 
-                Err(CodeGenError::UndefinedVariable { name: name.clone() })
+                Err(CodeGenError::UndefinedVariable { name: name.clone(), span: *var_span })
             }
-            Expr::Call(callee, args) => {
+            Expr::Call(callee, args, _) => {
                 let arg_values: Result<Vec<Value>, CodeGenError> = args
                     .iter()
                     .map(|a| {
@@ -1849,7 +1856,7 @@ impl CodeGen {
 
                 let arg_values = arg_values?;
 
-                if let Expr::Var(name) = &**callee {
+                if let Expr::Var(name, _) = &**callee {
                     if let Some((func_id, _)) = func_signatures.get(name) {
                         let func_ref = module.declare_func_in_func(*func_id, builder.func);
                         let call = builder.ins().call(func_ref, &arg_values);
@@ -1910,7 +1917,7 @@ impl CodeGen {
                     Ok(results[0])
                 }
             }
-            Expr::Return(value) => {
+            Expr::Return(value, _) => {
                 let val = Self::compile_expr(
                     &**value,
                     builder,
@@ -1927,7 +1934,7 @@ impl CodeGen {
                 builder.ins().return_(&[val]);
                 Ok(Value::from_u32(0))
             }
-            Expr::If(cond, then_branch, else_branch) => {
+            Expr::If(cond, then_branch, else_branch, _) => {
                 let cond_val = Self::compile_expr(
                     cond,
                     builder,
@@ -2075,7 +2082,7 @@ impl CodeGen {
                     Ok(then_val)
                 }
             }
-            Expr::While(cond, body) => {
+            Expr::While(cond, body, _) => {
                 let loop_header = builder.create_block();
                 let loop_body = builder.create_block();
                 let loop_exit = builder.create_block();
@@ -2187,7 +2194,7 @@ impl CodeGen {
 
                 Ok(builder.ins().iconst(types::I64, 0))
             }
-            Expr::Index(array, index) => {
+            Expr::Index(array, index, _) => {
                 let array_ptr = Self::compile_expr(
                     array,
                     builder,
@@ -2224,8 +2231,8 @@ impl CodeGen {
                         .load(types::I64, ir::MemFlags::trusted(), element_ptr, 0);
                 Ok(element)
             }
-            Expr::IndexAssign(array_index, value) => {
-                if let Expr::Index(array, index) = &**array_index {
+            Expr::IndexAssign(array_index, value, _) => {
+                if let Expr::Index(array, index, _) = &**array_index {
                     let array_ptr = Self::compile_expr(
                         array,
                         builder,
@@ -2276,10 +2283,11 @@ impl CodeGen {
                 } else {
                     Err(CodeGenError::UnexpectedExpression {
                         found: (**array_index).clone(),
+                        span: array_index.span(),
                     })
                 }
             }
-            Expr::ArrayLiteral(elements) => {
+            Expr::ArrayLiteral(elements, _) => {
                 let data_id = module
                     .declare_data(
                         &format!("array_{}", idx),
@@ -2287,7 +2295,7 @@ impl CodeGen {
                         true,
                         false,
                     )
-                    .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                    .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
 
                 let mut data_desc = cranelift_module::DataDescription::new();
                 let mut bytes = Vec::new();
@@ -2295,19 +2303,19 @@ impl CodeGen {
                 let mut str_idx = 0;
                 for elem in elements {
                     match elem {
-                        Expr::Int(n) => {
+                        Expr::Int(n, _) => {
                             let val = *n as i64;
                             bytes.extend_from_slice(&val.to_le_bytes());
                         }
-                        Expr::Float(f) => {
+                        Expr::Float(f, _) => {
                             let val = f.to_bits();
                             bytes.extend_from_slice(&val.to_le_bytes());
                         }
-                        Expr::Bool(b) => {
+                        Expr::Bool(b, _) => {
                             let val = *b as i64;
                             bytes.extend_from_slice(&val.to_le_bytes());
                         }
-                        Expr::String(s) => {
+                        Expr::String(s, _) => {
                             let str_data_id = module
                                 .declare_data(
                                     &format!("array_str_{}_{}", idx, str_idx),
@@ -2315,24 +2323,25 @@ impl CodeGen {
                                     true,
                                     false,
                                 )
-                                .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                                .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
                             let mut str_data_desc = cranelift_module::DataDescription::new();
                             let mut str_bytes = s.as_bytes().to_vec();
                             str_bytes.push(0);
                             str_data_desc.define(str_bytes.into());
                             module
                                 .define_data(str_data_id, &str_data_desc)
-                                .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                                .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
 
                             bytes.extend_from_slice(&[0u8; 8]);
                             str_idx += 1;
                         }
-                        Expr::Nil => {
+                        Expr::Nil(_) => {
                             bytes.extend_from_slice(&[0u8; 8]);
                         }
                         _ => {
                             return Err(CodeGenError::ModuleError(
                                 "Array literals currently only support int, float, bool, string, and nil constants".to_string(),
+                                Span::new(0, 0),
                             ));
                         }
                     }
@@ -2340,13 +2349,13 @@ impl CodeGen {
                 data_desc.define(bytes.into());
                 module
                     .define_data(data_id, &data_desc)
-                    .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                    .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
 
                 let global_value = module.declare_data_in_func(data_id, builder.func);
                 let ptr = builder.ins().global_value(types::I64, global_value);
                 Ok(ptr)
             }
-            Expr::ArrayFill(elem_type, length) => {
+            Expr::ArrayFill(elem_type, length, _) => {
                 let length_val = Self::compile_expr(
                     length,
                     builder,
@@ -2380,7 +2389,7 @@ impl CodeGen {
                 };
                 let malloc_id = module
                     .declare_function("malloc", Linkage::Import, &malloc_sig)
-                    .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                    .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
                 let malloc_ref = module.declare_func_in_func(malloc_id, builder.func);
                 let mem_ptr = builder.ins().call(malloc_ref, &[total_size]);
                 let mem_ptr = builder.inst_results(mem_ptr)[0];
@@ -2396,7 +2405,7 @@ impl CodeGen {
                 };
                 let memset_id = module
                     .declare_function("memset", Linkage::Import, &memset_sig)
-                    .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                    .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
                 let memset_ref = module.declare_func_in_func(memset_id, builder.func);
                 let zero_val = builder.ins().iconst(types::I32, 0);
 
@@ -2406,7 +2415,7 @@ impl CodeGen {
 
                 Ok(mem_ptr)
             }
-            Expr::Range(start, end) => {
+            Expr::Range(start, end, _) => {
                 let start_val = Self::compile_expr(
                     start,
                     builder,
@@ -2454,7 +2463,7 @@ impl CodeGen {
                 };
                 let malloc_id = module
                     .declare_function("malloc", Linkage::Import, &malloc_sig)
-                    .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                    .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
                 let malloc_ref = module.declare_func_in_func(malloc_id, builder.func);
                 let mem_ptr = builder.ins().call(malloc_ref, &[total_size]);
                 let mem_ptr = builder.inst_results(mem_ptr)[0];
@@ -2504,7 +2513,7 @@ impl CodeGen {
 
                 Ok(mem_ptr)
             }
-            Expr::For(var, array, body) => {
+            Expr::For(var, array, body, _) => {
                 let loop_header = builder.create_block();
                 let loop_body = builder.create_block();
                 let loop_increment = builder.create_block();
@@ -2532,11 +2541,11 @@ impl CodeGen {
                 )?;
 
                 let array_len = match array.as_ref() {
-                    Expr::ArrayLiteral(elements) => {
+                    Expr::ArrayLiteral(elements, _) => {
                         builder.ins().iconst(types::I64, elements.len() as i64)
                     }
 
-                    Expr::Range(start, end) => {
+                    Expr::Range(start, end, _) => {
                         let start_val = Self::compile_expr(
                             start,
                             builder,
@@ -2572,7 +2581,7 @@ impl CodeGen {
                         builder.ins().select(is_neg, zero, len)
                     }
 
-                    Expr::Var(name) => {
+                    Expr::Var(name, _) => {
                         if let Some(ty) = Self::get_var_type(name, type_stack) {
                             if let Type::Array(_, len) = ty {
                                 if len > 0 {
@@ -2673,17 +2682,18 @@ impl CodeGen {
 
                 Ok(builder.ins().iconst(types::I64, 0))
             }
-            Expr::Break => {
+            Expr::Break(_) => {
                 if let Some(loop_ctx) = loop_stack.last() {
                     builder.ins().jump(loop_ctx.exit_block, &[]);
                     Ok(Value::from_u32(0))
                 } else {
                     Err(CodeGenError::ModuleError(
                         "break statement outside of loop".to_string(),
+                        Span::new(0, 0),
                     ))
                 }
             }
-            Expr::Continue => {
+            Expr::Continue(_) => {
                 if let Some(loop_ctx) = loop_stack.last() {
                     if let Some(inc_block) = loop_ctx.increment_block {
                         builder.ins().jump(inc_block, &[]);
@@ -2722,17 +2732,18 @@ impl CodeGen {
                 } else {
                     Err(CodeGenError::ModuleError(
                         "continue statement outside of loop".to_string(),
+                        Span::new(0, 0),
                     ))
                 }
             }
-            Expr::TypeDef => Ok(Value::from_u32(0)),
-            Expr::Struct(name, fields) => {
+            Expr::TypeDef(_) => Ok(Value::from_u32(0)),
+            Expr::Struct(name, fields, _) => {
                 let _ = (name, fields);
                 Ok(Value::from_u32(0))
             }
-            Expr::StructLiteral(name, field_values) => {
+            Expr::StructLiteral(name, field_values, _) => {
                 let struct_def = structs.get(name).ok_or_else(|| {
-                    CodeGenError::ModuleError(format!("Undefined struct type: {}", name))
+                    CodeGenError::ModuleError(format!("Undefined struct type: {}", name), Span::new(0, 0))
                 })?;
 
                 let struct_size = struct_def.size;
@@ -2746,7 +2757,7 @@ impl CodeGen {
                 };
                 let malloc_id = module
                     .declare_function("malloc", Linkage::Import, &malloc_sig)
-                    .map_err(|e| CodeGenError::ModuleError(e.to_string()))?;
+                    .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
                 let malloc_ref = module.declare_func_in_func(malloc_id, builder.func);
                 let size_val = builder.ins().iconst(types::I64, struct_size);
                 let mem_ptr = builder.ins().call(malloc_ref, &[size_val]);
@@ -2786,7 +2797,7 @@ impl CodeGen {
 
                 Ok(mem_ptr)
             }
-            Expr::MemberAccess(obj, field_name) => {
+            Expr::MemberAccess(obj, field_name, _) => {
                 let obj_ptr = Self::compile_expr(
                     obj,
                     builder,
@@ -2802,7 +2813,7 @@ impl CodeGen {
                 )?;
 
                 let (struct_name, is_pointer) = match &**obj {
-                    Expr::Var(name) => {
+                    Expr::Var(name, _) => {
                         let mut found_type = None;
                         for scope in type_stack.iter().rev() {
                             if let Some(ty) = scope.get(name) {
@@ -2818,12 +2829,14 @@ impl CodeGen {
                                 } else {
                                     return Err(CodeGenError::ModuleError(
                                         "Pointer to non-struct type".to_string(),
+                                        Span::new(0, 0),
                                     ));
                                 }
                             }
                             _ => {
                                 return Err(CodeGenError::ModuleError(
                                     "Member access on non-struct type".to_string(),
+                                    Span::new(0, 0),
                                 ));
                             }
                         }
@@ -2831,6 +2844,7 @@ impl CodeGen {
                     _ => {
                         return Err(CodeGenError::ModuleError(
                             "Member access only supported on variables".to_string(),
+                            Span::new(0, 0),
                         ));
                     }
                 };
@@ -2844,7 +2858,7 @@ impl CodeGen {
                 };
 
                 let struct_def = structs.get(&struct_name).ok_or_else(|| {
-                    CodeGenError::ModuleError(format!("Undefined struct type: {}", struct_name))
+                    CodeGenError::ModuleError(format!("Undefined struct type: {}", struct_name), Span::new(0, 0))
                 })?;
 
                 let field_info = struct_def.fields.iter().find(|f| &f.name == field_name);
@@ -2859,10 +2873,10 @@ impl CodeGen {
                     Err(CodeGenError::ModuleError(format!(
                         "Struct {} has no field {}",
                         struct_name, field_name
-                    )))
+                    ), Span::new(0, 0)))
                 }
             }
-            Expr::MemberAssign(obj, field_name, value) => {
+            Expr::MemberAssign(obj, field_name, value, _) => {
                 let obj_ptr = Self::compile_expr(
                     obj,
                     builder,
@@ -2878,7 +2892,7 @@ impl CodeGen {
                 )?;
 
                 let (struct_name, is_pointer) = match &**obj {
-                    Expr::Var(name) => {
+                    Expr::Var(name, _) => {
                         let mut found_type = None;
                         for scope in type_stack.iter().rev() {
                             if let Some(ty) = scope.get(name) {
@@ -2894,12 +2908,14 @@ impl CodeGen {
                                 } else {
                                     return Err(CodeGenError::ModuleError(
                                         "Pointer to non-struct type".to_string(),
+                                        Span::new(0, 0),
                                     ));
                                 }
                             }
                             _ => {
                                 return Err(CodeGenError::ModuleError(
                                     "Member assign on non-struct type".to_string(),
+                                    Span::new(0, 0),
                                 ));
                             }
                         }
@@ -2907,6 +2923,7 @@ impl CodeGen {
                     _ => {
                         return Err(CodeGenError::ModuleError(
                             "Member assign only supported on variables".to_string(),
+                            Span::new(0, 0),
                         ));
                     }
                 };
@@ -2920,7 +2937,7 @@ impl CodeGen {
                 };
 
                 let struct_def = structs.get(&struct_name).ok_or_else(|| {
-                    CodeGenError::ModuleError(format!("Undefined struct type: {}", struct_name))
+                    CodeGenError::ModuleError(format!("Undefined struct type: {}", struct_name), Span::new(0, 0))
                 })?;
 
                 let field_info = struct_def.fields.iter().find(|f| &f.name == field_name);
@@ -2948,11 +2965,11 @@ impl CodeGen {
                     Err(CodeGenError::ModuleError(format!(
                         "Struct {} has no field {}",
                         struct_name, field_name
-                    )))
+                    ), Span::new(0, 0)))
                 }
             }
-            Expr::AddressOf(expr) => match &**expr {
-                Expr::Var(name) => {
+            Expr::AddressOf(expr, _) => match &**expr {
+                Expr::Var(name, _) => {
                     if let Some(slot) = Self::lookup_var(name, scope_stack) {
                         match slot {
                             Slot::StackSlot(s) => Ok(builder.ins().stack_addr(types::I64, *s, 0)),
@@ -2961,10 +2978,10 @@ impl CodeGen {
                         Err(CodeGenError::ModuleError(format!(
                             "Undefined variable: {}",
                             name
-                        )))
+                        ), Span::new(0, 0)))
                     }
                 }
-                Expr::MemberAccess(obj, field_name) => {
+                Expr::MemberAccess(obj, field_name, _) => {
                     let obj_ptr = Self::compile_expr(
                         obj,
                         builder,
@@ -2980,7 +2997,7 @@ impl CodeGen {
                     )?;
 
                     let struct_name = match &**obj {
-                        Expr::Var(name) => {
+                        Expr::Var(name, _) => {
                             let mut found_type = None;
                             for scope in type_stack.iter().rev() {
                                 if let Some(ty) = scope.get(name) {
@@ -2995,6 +3012,7 @@ impl CodeGen {
                                     } else {
                                         return Err(CodeGenError::ModuleError(
                                             "Pointer to non-struct type".to_string(),
+                                            Span::new(0, 0),
                                         ));
                                     }
                                 }
@@ -3002,12 +3020,13 @@ impl CodeGen {
                                 _ => {
                                     return Err(CodeGenError::ModuleError(
                                         "Member access on non-struct type".to_string(),
+                                        Span::new(0, 0),
                                     ));
                                 }
                             }
                         }
-                        Expr::Deref(inner) => match &**inner {
-                            Expr::Var(name) => {
+                        Expr::Deref(inner, _) => match &**inner {
+                            Expr::Var(name, _) => {
                                 let mut found_type = None;
                                 for scope in type_stack.iter().rev() {
                                     if let Some(ty) = scope.get(name) {
@@ -3022,12 +3041,14 @@ impl CodeGen {
                                         } else {
                                             return Err(CodeGenError::ModuleError(
                                                 "Deref of non-pointer type".to_string(),
+                                                Span::new(0, 0),
                                             ));
                                         }
                                     }
                                     _ => {
                                         return Err(CodeGenError::ModuleError(
                                             "Member access on non-struct type".to_string(),
+                                            Span::new(0, 0),
                                         ));
                                     }
                                 }
@@ -3035,18 +3056,20 @@ impl CodeGen {
                             _ => {
                                 return Err(CodeGenError::ModuleError(
                                     "Member access on non-struct type".to_string(),
+                                    Span::new(0, 0),
                                 ));
                             }
                         },
                         _ => {
                             return Err(CodeGenError::ModuleError(
                                 "Member access only supported on variables".to_string(),
+                                Span::new(0, 0),
                             ));
                         }
                     };
 
                     let struct_def = structs.get(&struct_name).ok_or_else(|| {
-                        CodeGenError::ModuleError(format!("Undefined struct type: {}", struct_name))
+                        CodeGenError::ModuleError(format!("Undefined struct type: {}", struct_name), Span::new(0, 0))
                     })?;
 
                     let field_info = struct_def.fields.iter().find(|f| &f.name == field_name);
@@ -3057,10 +3080,10 @@ impl CodeGen {
                         Err(CodeGenError::ModuleError(format!(
                             "Struct {} has no field {}",
                             struct_name, field_name
-                        )))
+                        ), Span::new(0, 0)))
                     }
                 }
-                Expr::Index(arr, index_expr) => {
+                Expr::Index(arr, index_expr, _) => {
                     let arr_ptr = Self::compile_expr(
                         arr,
                         builder,
@@ -3095,9 +3118,10 @@ impl CodeGen {
                 _ => Err(CodeGenError::ModuleError(
                     "AddressOf only supported on variables, member access, or array index"
                         .to_string(),
+                    Span::new(0, 0),
                 )),
             },
-            Expr::Deref(expr) => {
+            Expr::Deref(expr, _) => {
                 let ptr = Self::compile_expr(
                     expr,
                     builder,
@@ -3116,7 +3140,7 @@ impl CodeGen {
                     .load(types::I64, ir::MemFlags::trusted(), ptr, 0);
                 Ok(value)
             }
-            Expr::DerefAssign(ptr_expr, val_expr) => {
+            Expr::DerefAssign(ptr_expr, val_expr, _) => {
                 let ptr = Self::compile_expr(
                     ptr_expr,
                     builder,
@@ -3148,6 +3172,7 @@ impl CodeGen {
             }
             _ => Err(CodeGenError::UnexpectedExpression {
                 found: expr.clone(),
+                span: expr.span(),
             }),
         }
     }
