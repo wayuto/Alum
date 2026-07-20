@@ -1,4 +1,5 @@
-use crate::compiler::ast::{Expr, Program, Type};
+use super::types::{CodeGenError, LoopContext, Slot, StructDef, StructField, get_type};
+use crate::compiler::parser::{Expr, Program, Type};
 use cranelift::{
     codegen::{ir, settings},
     prelude::{
@@ -10,89 +11,21 @@ use cranelift::{
 };
 use cranelift_module::{FuncId, Linkage, Module};
 use cranelift_object::{ObjectBuilder, ObjectModule};
-use std::{
-    collections::{HashMap, HashSet},
-    fmt::Display,
-};
-
-#[derive(Debug, Clone, Copy)]
-enum Slot {
-    StackSlot(ir::StackSlot),
-}
-
-#[derive(Debug)]
-pub enum CodeGenError {
-    UnexpectedExpression {
-        found: Expr,
-    },
-    UndefinedVariable {
-        name: String,
-    },
-    #[allow(dead_code)]
-    UndefinedFunction {
-        name: String,
-    },
-    ModuleError(String),
-}
-
-impl Display for CodeGenError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CodeGenError::UnexpectedExpression { found } => {
-                write!(f, "Unexpected expression: '{:?}', expected FuncDecl", found)
-            }
-            CodeGenError::UndefinedVariable { name } => {
-                write!(f, "Undefined variable: '{:?}'", name)
-            }
-            CodeGenError::UndefinedFunction { name } => {
-                write!(f, "Undefined function: '{:?}'", name)
-            }
-            CodeGenError::ModuleError(msg) => {
-                write!(f, "Module error: '{}'", msg)
-            }
-        }
-    }
-}
-
-impl std::error::Error for CodeGenError {}
-
-#[derive(Clone)]
-struct LoopContext {
-    header_block: ir::Block,
-    exit_block: ir::Block,
-    increment_block: Option<ir::Block>,
-    #[allow(dead_code)]
-    loop_params: Vec<(String, Slot)>,
-}
-
-#[derive(Clone, Debug)]
-struct StructField {
-    name: String,
-    ty: Type,
-    offset: i64,
-}
-
-#[derive(Clone, Debug)]
-struct StructDef {
-    fields: Vec<StructField>,
-    size: i64,
-    #[allow(dead_code)]
-    align: i64,
-}
+use std::collections::{HashMap, HashSet};
 
 pub struct CodeGen {
-    ast: Program,
-    module: ObjectModule,
-    builder_context: FunctionBuilderContext,
-    func_signatures: HashMap<String, (FuncId, Signature)>,
-    loop_stack: Vec<LoopContext>,
-    type_map: HashMap<String, ir::Type>,
-    structs: HashMap<String, StructDef>,
-    lambda_counter: u32,
+    pub ast: Program,
+    pub module: ObjectModule,
+    pub builder_context: FunctionBuilderContext,
+    pub func_signatures: HashMap<String, (FuncId, Signature)>,
+    pub loop_stack: Vec<LoopContext>,
+    pub type_map: HashMap<String, ir::Type>,
+    pub structs: HashMap<String, StructDef>,
+    pub lambda_counter: u32,
 }
 
 impl CodeGen {
-    fn get_type_size(
+    pub(crate) fn get_type_size(
         ty: &Type,
         _type_map: &HashMap<String, ir::Type>,
         structs: &HashMap<String, StructDef>,
@@ -152,55 +85,6 @@ impl CodeGen {
             Type::TypeVar(_) => 8,
             Type::Auto => 8,
             Type::Gen => 8,
-        }
-    }
-
-    fn get_expr_type(expr: &Expr, type_stack: &Vec<HashMap<String, Type>>) -> Type {
-        match expr {
-            Expr::Int(_) => Type::Named("int".to_string()),
-            Expr::Float(_) => Type::Named("float".to_string()),
-            Expr::Bool(_) => Type::Named("bool".to_string()),
-            Expr::String(_) => Type::Named("string".to_string()),
-            Expr::Nil => Type::Named("void".to_string()),
-            Expr::Var(name) => {
-                for scope in type_stack.iter().rev() {
-                    if let Some(ty) = scope.get(name) {
-                        return ty.clone();
-                    }
-                }
-                Type::Named("int".to_string())
-            }
-            _ => Type::Named("int".to_string()),
-        }
-    }
-
-    fn has_return(expr: &Expr) -> bool {
-        match expr {
-            Expr::Return(_) => true,
-            Expr::Block(body) => body.last().map_or(false, |e| Self::has_return(e)),
-            Expr::If(_, then_branch, else_branch) => {
-                Self::has_return(then_branch)
-                    && else_branch.as_ref().map_or(false, |e| Self::has_return(e))
-            }
-            Expr::While(_, body) => Self::has_return(body),
-            Expr::For(_, _, body) => Self::has_return(body),
-            _ => false,
-        }
-    }
-
-    fn has_break_or_continue(expr: &Expr) -> bool {
-        match expr {
-            Expr::Break | Expr::Continue => true,
-            Expr::Block(body) => body.iter().any(|e| Self::has_break_or_continue(e)),
-            Expr::If(_, then_branch, else_branch) => {
-                Self::has_break_or_continue(then_branch)
-                    || else_branch
-                        .as_ref()
-                        .map_or(false, |e| Self::has_break_or_continue(e))
-            }
-            Expr::While(_, body) => Self::has_break_or_continue(body),
-            Expr::For(_, _, body) => Self::has_break_or_continue(body),
-            _ => false,
         }
     }
 
@@ -636,6 +520,109 @@ impl CodeGen {
         Ok(())
     }
 
+    pub(crate) fn find_var_assignments(expr: &Expr, modified_vars: &mut HashSet<String>) {
+        match expr {
+            Expr::Block(body) => {
+                for e in body {
+                    Self::find_var_assignments(e, modified_vars);
+                }
+            }
+            Expr::VarAssign(name, _) => {
+                modified_vars.insert(name.clone());
+            }
+            Expr::If(cond, t, e) => {
+                Self::find_var_assignments(cond, modified_vars);
+                Self::find_var_assignments(t, modified_vars);
+                if let Some(e) = e {
+                    Self::find_var_assignments(e, modified_vars);
+                }
+            }
+            Expr::While(cond, body) => {
+                Self::find_var_assignments(cond, modified_vars);
+                Self::find_var_assignments(body, modified_vars);
+            }
+            Expr::For(_, array, body) => {
+                Self::find_var_assignments(array, modified_vars);
+                Self::find_var_assignments(body, modified_vars);
+            }
+            Expr::Add(l, r)
+            | Expr::Sub(l, r)
+            | Expr::Mul(l, r)
+            | Expr::Div(l, r)
+            | Expr::Mod(l, r)
+            | Expr::FAdd(l, r)
+            | Expr::FSub(l, r)
+            | Expr::FMul(l, r)
+            | Expr::FDiv(l, r)
+            | Expr::Eq(l, r)
+            | Expr::Ne(l, r)
+            | Expr::Lt(l, r)
+            | Expr::Le(l, r)
+            | Expr::Gt(l, r)
+            | Expr::Ge(l, r)
+            | Expr::FEq(l, r)
+            | Expr::FNe(l, r)
+            | Expr::FLt(l, r)
+            | Expr::FLe(l, r)
+            | Expr::FGt(l, r)
+            | Expr::FGe(l, r)
+            | Expr::And(l, r)
+            | Expr::Or(l, r)
+            | Expr::StrCat(l, r) => {
+                Self::find_var_assignments(l, modified_vars);
+                Self::find_var_assignments(r, modified_vars);
+            }
+            Expr::Not(e) | Expr::Return(e) => {
+                Self::find_var_assignments(e, modified_vars);
+            }
+            Expr::Call(func, args) => {
+                Self::find_var_assignments(func, modified_vars);
+                for a in args {
+                    Self::find_var_assignments(a, modified_vars);
+                }
+            }
+            Expr::Index(arr, idx) => {
+                Self::find_var_assignments(arr, modified_vars);
+                Self::find_var_assignments(idx, modified_vars);
+            }
+            Expr::IndexAssign(arr, _) => {
+                Self::find_var_assignments(arr, modified_vars);
+            }
+            Expr::ArrayLiteral(elements) => {
+                for e in elements {
+                    Self::find_var_assignments(e, modified_vars);
+                }
+            }
+            Expr::ArrayFill(_, len) => {
+                Self::find_var_assignments(len, modified_vars);
+            }
+            Expr::StructLiteral(_, fields) => {
+                for (_, f) in fields {
+                    Self::find_var_assignments(f, modified_vars);
+                }
+            }
+            Expr::MemberAccess(obj, _) => {
+                Self::find_var_assignments(obj, modified_vars);
+            }
+            Expr::MemberAssign(obj, _, val) => {
+                Self::find_var_assignments(obj, modified_vars);
+                Self::find_var_assignments(val, modified_vars);
+            }
+            Expr::AddressOf(expr) => {
+                Self::find_var_assignments(expr, modified_vars);
+            }
+            Expr::Deref(expr) => {
+                Self::find_var_assignments(expr, modified_vars);
+            }
+            Expr::DerefAssign(ptr, val) => {
+                Self::find_var_assignments(ptr, modified_vars);
+                Self::find_var_assignments(val, modified_vars);
+            }
+            _ => {}
+        }
+    }
+}
+impl CodeGen {
     fn lookup_var<'a>(name: &str, scope_stack: &'a Vec<HashMap<String, Slot>>) -> Option<&'a Slot> {
         for scope in scope_stack.iter().rev() {
             if let Some(v) = scope.get(name) {
@@ -654,7 +641,56 @@ impl CodeGen {
         None
     }
 
-    fn compile_expr(
+    fn get_expr_type(expr: &Expr, type_stack: &Vec<HashMap<String, Type>>) -> Type {
+        match expr {
+            Expr::Int(_) => Type::Named("int".to_string()),
+            Expr::Float(_) => Type::Named("float".to_string()),
+            Expr::Bool(_) => Type::Named("bool".to_string()),
+            Expr::String(_) => Type::Named("string".to_string()),
+            Expr::Nil => Type::Named("void".to_string()),
+            Expr::Var(name) => {
+                for scope in type_stack.iter().rev() {
+                    if let Some(ty) = scope.get(name) {
+                        return ty.clone();
+                    }
+                }
+                Type::Named("int".to_string())
+            }
+            _ => Type::Named("int".to_string()),
+        }
+    }
+
+    fn has_return(expr: &Expr) -> bool {
+        match expr {
+            Expr::Return(_) => true,
+            Expr::Block(body) => body.last().map_or(false, |e| Self::has_return(e)),
+            Expr::If(_, then_branch, else_branch) => {
+                Self::has_return(then_branch)
+                    && else_branch.as_ref().map_or(false, |e| Self::has_return(e))
+            }
+            Expr::While(_, body) => Self::has_return(body),
+            Expr::For(_, _, body) => Self::has_return(body),
+            _ => false,
+        }
+    }
+
+    fn has_break_or_continue(expr: &Expr) -> bool {
+        match expr {
+            Expr::Break | Expr::Continue => true,
+            Expr::Block(body) => body.iter().any(|e| Self::has_break_or_continue(e)),
+            Expr::If(_, then_branch, else_branch) => {
+                Self::has_break_or_continue(then_branch)
+                    || else_branch
+                        .as_ref()
+                        .map_or(false, |e| Self::has_break_or_continue(e))
+            }
+            Expr::While(_, body) => Self::has_break_or_continue(body),
+            Expr::For(_, _, body) => Self::has_break_or_continue(body),
+            _ => false,
+        }
+    }
+
+    pub(crate) fn compile_expr(
         expr: &Expr,
         builder: &mut FunctionBuilder,
         scope_stack: &mut Vec<HashMap<String, Slot>>,
@@ -3115,118 +3151,4 @@ impl CodeGen {
             }),
         }
     }
-
-    fn find_var_assignments(expr: &Expr, modified_vars: &mut HashSet<String>) {
-        match expr {
-            Expr::Block(body) => {
-                for e in body {
-                    Self::find_var_assignments(e, modified_vars);
-                }
-            }
-            Expr::VarAssign(name, _) => {
-                modified_vars.insert(name.clone());
-            }
-            Expr::If(cond, t, e) => {
-                Self::find_var_assignments(cond, modified_vars);
-                Self::find_var_assignments(t, modified_vars);
-                if let Some(e) = e {
-                    Self::find_var_assignments(e, modified_vars);
-                }
-            }
-            Expr::While(cond, body) => {
-                Self::find_var_assignments(cond, modified_vars);
-                Self::find_var_assignments(body, modified_vars);
-            }
-            Expr::For(_, array, body) => {
-                Self::find_var_assignments(array, modified_vars);
-                Self::find_var_assignments(body, modified_vars);
-            }
-            Expr::Add(l, r)
-            | Expr::Sub(l, r)
-            | Expr::Mul(l, r)
-            | Expr::Div(l, r)
-            | Expr::Mod(l, r)
-            | Expr::FAdd(l, r)
-            | Expr::FSub(l, r)
-            | Expr::FMul(l, r)
-            | Expr::FDiv(l, r)
-            | Expr::Eq(l, r)
-            | Expr::Ne(l, r)
-            | Expr::Lt(l, r)
-            | Expr::Le(l, r)
-            | Expr::Gt(l, r)
-            | Expr::Ge(l, r)
-            | Expr::FEq(l, r)
-            | Expr::FNe(l, r)
-            | Expr::FLt(l, r)
-            | Expr::FLe(l, r)
-            | Expr::FGt(l, r)
-            | Expr::FGe(l, r)
-            | Expr::And(l, r)
-            | Expr::Or(l, r)
-            | Expr::StrCat(l, r) => {
-                Self::find_var_assignments(l, modified_vars);
-                Self::find_var_assignments(r, modified_vars);
-            }
-            Expr::Not(e) | Expr::Return(e) => {
-                Self::find_var_assignments(e, modified_vars);
-            }
-            Expr::Call(func, args) => {
-                Self::find_var_assignments(func, modified_vars);
-                for a in args {
-                    Self::find_var_assignments(a, modified_vars);
-                }
-            }
-            Expr::Index(arr, idx) => {
-                Self::find_var_assignments(arr, modified_vars);
-                Self::find_var_assignments(idx, modified_vars);
-            }
-            Expr::IndexAssign(arr, _) => {
-                Self::find_var_assignments(arr, modified_vars);
-            }
-            Expr::ArrayLiteral(elements) => {
-                for e in elements {
-                    Self::find_var_assignments(e, modified_vars);
-                }
-            }
-            Expr::ArrayFill(_, len) => {
-                Self::find_var_assignments(len, modified_vars);
-            }
-            Expr::StructLiteral(_, fields) => {
-                for (_, f) in fields {
-                    Self::find_var_assignments(f, modified_vars);
-                }
-            }
-            Expr::MemberAccess(obj, _) => {
-                Self::find_var_assignments(obj, modified_vars);
-            }
-            Expr::MemberAssign(obj, _, val) => {
-                Self::find_var_assignments(obj, modified_vars);
-                Self::find_var_assignments(val, modified_vars);
-            }
-            Expr::AddressOf(expr) => {
-                Self::find_var_assignments(expr, modified_vars);
-            }
-            Expr::Deref(expr) => {
-                Self::find_var_assignments(expr, modified_vars);
-            }
-            Expr::DerefAssign(ptr, val) => {
-                Self::find_var_assignments(ptr, modified_vars);
-                Self::find_var_assignments(val, modified_vars);
-            }
-            _ => {}
-        }
-    }
-}
-
-fn get_type(t: &Type, type_map: &HashMap<String, ir::Type>) -> ir::Type {
-    return match t {
-        Type::Named(name) => *type_map.get(name).unwrap_or(&types::I64),
-        Type::Array(_, _) => types::I64,
-        Type::Pointer(_) => types::I64,
-        Type::Function(_, _) => types::I64,
-        Type::TypeVar(_) => types::I64,
-        Type::Auto => types::I64,
-        Type::Gen => types::I64,
-    };
 }

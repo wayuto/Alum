@@ -1,3 +1,4 @@
+use crate::compiler::lexer::Token;
 use std::{fmt::Display, str::Chars};
 
 #[derive(Debug, Clone)]
@@ -48,61 +49,6 @@ impl Display for LexerError {
 }
 
 impl std::error::Error for LexerError {}
-
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub enum Token {
-    INT(isize),
-    FLOAT(f64),
-    BOOL(bool),
-    STRING(String),
-    NIL,
-    PLUS,
-    MINUS,
-    STAR,
-    SLASH,
-    PERCENT,
-    DOT,
-    DOTDOT,
-    CEQ,
-    NE,
-    LT,
-    LE,
-    GT,
-    GE,
-    AND,
-    OR,
-    LAND,
-    LOR,
-    XOR,
-    NOT,
-    LPAREN,
-    RPAREN,
-    LBRACE,
-    RBRACE,
-    LBRACKET,
-    RBRACKET,
-    EQ,
-    COLON,
-    COMMA,
-    SEMICOLON,
-    LET,
-    FUN,
-    FOR,
-    IN,
-    EXTERN,
-    RET,
-    IF,
-    ELSE,
-    WHILE,
-    BREAK,
-    CONTINUE,
-    TYPEDEF,
-    STRUCT,
-    TYPE(String),
-    IDENT(String),
-    LAMBDA,
-    EOF,
-}
 
 pub struct Lexer<'a> {
     chars: Chars<'a>,

@@ -1,4 +1,4 @@
-use crate::compiler::ast::{Expr, Program};
+use crate::compiler::parser::{Expr, Program};
 
 pub struct Optimizer {}
 

@@ -1,4 +1,4 @@
-use crate::compiler::ast::{Expr, Program, Type};
+use crate::compiler::parser::{Expr, Program, Type};
 use std::collections::HashMap;
 
 #[derive(Debug)]

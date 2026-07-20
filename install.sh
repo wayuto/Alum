@@ -28,7 +28,6 @@ mkdir -p merged_objs
 cd merged_objs
 ar x ../libalum_std.a
 
-# 检查 alum 目标库是否存在
 if [ -f "$LOCATION/alum-std/alum/target/libalum.a" ]; then
     ar x "$LOCATION/alum-std/alum/target/libalum.a"
 fi

@@ -1,7 +1,5 @@
-use crate::compiler::{
-    ast::{Expr, Program, Type},
-    lexer::{Lexer, LexerError, Token},
-};
+use crate::compiler::lexer::{Lexer, LexerError, Token};
+use crate::compiler::parser::{Expr, Program, Type};
 use std::collections::HashMap;
 use std::{fmt::Display, iter::Peekable};
 
