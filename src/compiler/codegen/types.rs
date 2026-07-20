@@ -1,10 +1,7 @@
-use cranelift::codegen::ir;
-use crate::compiler::parser::Type;
 use crate::compiler::Span;
-use std::{
-    collections::HashMap,
-    fmt::Display,
-};
+use crate::compiler::parser::Type;
+use cranelift::codegen::ir;
+use std::{collections::HashMap, fmt::Display};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Slot {
@@ -33,7 +30,11 @@ impl Display for CodeGenError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             CodeGenError::UnexpectedExpression { found, span } => {
-                write!(f, "Unexpected expression: '{:?}' at {:?}, expected FuncDecl", found, span)
+                write!(
+                    f,
+                    "Unexpected expression: '{:?}' at {:?}, expected FuncDecl",
+                    found, span
+                )
             }
             CodeGenError::UndefinedVariable { name, span } => {
                 write!(f, "Undefined variable: '{:?}' at {:?}", name, span)

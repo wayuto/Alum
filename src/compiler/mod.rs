@@ -7,4 +7,4 @@ pub mod span;
 pub mod visitor;
 
 pub use error::CompilerError;
-pub use span::{Span, SourceMap};
+pub use span::{SourceMap, Span};

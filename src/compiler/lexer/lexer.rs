@@ -1,4 +1,4 @@
-use crate::compiler::{lexer::Token, Span};
+use crate::compiler::{Span, lexer::Token};
 use std::{fmt::Display, str::Chars};
 
 #[derive(Debug, Clone)]
@@ -353,6 +353,10 @@ impl<'a> Lexer<'a> {
                 self.bump();
                 Token::SEMICOLON
             }
+            '\\' => {
+                self.bump();
+                Token::LAMBDA
+            }
             '\'' => {
                 self.bump();
                 Token::STRING(self.lex_string('\'')?)
@@ -409,7 +413,6 @@ impl<'a> Lexer<'a> {
                     "continue" => Token::CONTINUE,
                     "typedef" => Token::TYPEDEF,
                     "struct" => Token::STRUCT,
-                    "lamb" => Token::LAMBDA,
                     _ => Token::IDENT(ident),
                 }
             }

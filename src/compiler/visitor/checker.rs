@@ -1,5 +1,5 @@
-use crate::compiler::parser::{Expr, Program, Type};
 use crate::compiler::Span;
+use crate::compiler::parser::{Expr, Program, Type};
 use std::collections::HashMap;
 
 #[derive(Debug)]
@@ -58,9 +58,7 @@ impl std::fmt::Display for CheckerError {
                 write!(f, "Undefined struct: {}", name)
             }
             CheckerError::UndefinedField {
-                struct_name,
-                field,
-                ..
+                struct_name, field, ..
             } => {
                 write!(f, "Struct {} has no field {}", struct_name, field)
             }
@@ -318,9 +316,10 @@ impl TypeChecker {
             Expr::Var(name, _) => self
                 .lookup_var(name)
                 .unwrap_or(Type::Named("int".to_string())),
-            Expr::FAdd(_, _, _) | Expr::FSub(_, _, _) | Expr::FMul(_, _, _) | Expr::FDiv(_, _, _) => {
-                Type::Named("float".to_string())
-            }
+            Expr::FAdd(_, _, _)
+            | Expr::FSub(_, _, _)
+            | Expr::FMul(_, _, _)
+            | Expr::FDiv(_, _, _) => Type::Named("float".to_string()),
             Expr::Add(_, _, _)
             | Expr::Sub(_, _, _)
             | Expr::Mul(_, _, _)
@@ -338,7 +337,9 @@ impl TypeChecker {
             | Expr::Le(_, _, _)
             | Expr::Gt(_, _, _)
             | Expr::Ge(_, _, _) => Type::Named("bool".to_string()),
-            Expr::And(_, _, _) | Expr::Or(_, _, _) | Expr::Not(_, _) => Type::Named("bool".to_string()),
+            Expr::And(_, _, _) | Expr::Or(_, _, _) | Expr::Not(_, _) => {
+                Type::Named("bool".to_string())
+            }
             Expr::StrCat(_, _, _) => Type::Named("string".to_string()),
             Expr::Call(callee, _, _) => {
                 if let Expr::Var(name, _) = callee.as_ref() {
@@ -962,7 +963,8 @@ impl TypeChecker {
                     });
                 }
 
-                let len = if let (Expr::Int(s, _), Expr::Int(e, _)) = (start.as_ref(), end.as_ref()) {
+                let len = if let (Expr::Int(s, _), Expr::Int(e, _)) = (start.as_ref(), end.as_ref())
+                {
                     if *e > *s { (*e - *s) as usize } else { 0 }
                 } else {
                     0
@@ -1039,17 +1041,17 @@ impl TypeChecker {
                         if let Type::Named(ref name) = **inner {
                             name.clone()
                         } else {
-                            return Err(CheckerError::NonStructMemberAccess(format!(
-                                "{:?}",
-                                obj_type
-                            ), span));
+                            return Err(CheckerError::NonStructMemberAccess(
+                                format!("{:?}", obj_type),
+                                span,
+                            ));
                         }
                     }
                     _ => {
-                        return Err(CheckerError::NonStructMemberAccess(format!(
-                            "{:?}",
-                            obj_type
-                        ), span));
+                        return Err(CheckerError::NonStructMemberAccess(
+                            format!("{:?}", obj_type),
+                            span,
+                        ));
                     }
                 };
                 let fields = self
@@ -1079,10 +1081,9 @@ impl TypeChecker {
 
                 match &obj_type {
                     Type::Named(struct_name) => {
-                        let struct_def = self
-                            .structs
-                            .get(struct_name)
-                            .ok_or_else(|| CheckerError::UndefinedStruct(struct_name.clone(), span))?;
+                        let struct_def = self.structs.get(struct_name).ok_or_else(|| {
+                            CheckerError::UndefinedStruct(struct_name.clone(), span)
+                        })?;
 
                         for (name, ty) in &struct_def.fields {
                             if name == field_name {
@@ -1136,16 +1137,16 @@ impl TypeChecker {
                                 span: span,
                             })
                         } else {
-                            Err(CheckerError::NonStructMemberAccess(format!(
-                                "{:?}",
-                                obj_type
-                            ), span))
+                            Err(CheckerError::NonStructMemberAccess(
+                                format!("{:?}", obj_type),
+                                span,
+                            ))
                         }
                     }
-                    _ => Err(CheckerError::NonStructMemberAccess(format!(
-                        "{:?}",
-                        obj_type
-                    ), span)),
+                    _ => Err(CheckerError::NonStructMemberAccess(
+                        format!("{:?}", obj_type),
+                        span,
+                    )),
                 }
             }
 

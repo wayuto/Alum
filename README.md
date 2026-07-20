@@ -408,7 +408,7 @@ fun apply_function(f: fun(int): int, value: int): int {
 
 fun main(): int {
     // Define a lambda
-    let square: int(int): int = lamb(x: int): int {
+    let square: int(int): int = \(x: int): int {
         return x * x
     }
 
@@ -416,7 +416,7 @@ fun main(): int {
     println(itoa(result))  // Output: 25
 
     // Use lambda directly
-    let double: int(int): int = lamb(x: int): int {
+    let double: int(int): int = \(x: int): int {
         return x * 2
     }
     let doubled: int = double(10)
@@ -426,7 +426,7 @@ fun main(): int {
 }
 ```
 
-Lambda syntax: `lamb(param: type, ...): return_type body`
+Lambda syntax: `\(param: type, ...): return_type body`
 
 ### Any Type (Generic Programming)
 

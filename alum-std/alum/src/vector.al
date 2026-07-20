@@ -5,11 +5,11 @@ fun vec_new(): Vec {
         data: [gen; 0],
         len: 0,
         capacity: 0,
-		at: lamb(v: *Vec, i: int): gen {
+		at: \(v: *Vec, i: int): gen {
 			if i >= v.len || i < 0 return nil
 			return v.data[i]
 		},
-		push: lamb(v: *Vec, elem: gen): void {
+		push: \(v: *Vec, elem: gen): void {
 			if v.len >= v.capacity {
 				let new_capacity: int = if v.capacity == 0 {
 					4
@@ -26,13 +26,13 @@ fun vec_new(): Vec {
 			v.data[v.len] = elem
 			v.len = v.len + 1
 		},
-		pop: lamb(v: *Vec): gen {
+		pop: \(v: *Vec): gen {
 			if v.len == 0 return nil
 			v.len = v.len - 1
 			let elem: gen = v.data[v.len]
 			return elem
 		},
-		clear: lamb(v: *Vec): void {
+		clear: \(v: *Vec): void {
 			v.len = 0
 			v.capacity = 0
 			v.data = [gen; 0]

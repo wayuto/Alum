@@ -159,7 +159,7 @@
                 },
                 {
                     "name": "keyword.declaration.lambda.alum",
-                    "match": "\\blamb\\b"
+                    "match": "\\\\\\("
                 },
                 {
                     "name": "constant.language.boolean.alum",
@@ -324,14 +324,11 @@
             "patterns": [
                 {
                     "name": "meta.lambda.alum",
-                    "begin": "(\\blamb)\\s*(\\()",
-                    "end": "(\\))\\s*(:)\\s*([\\w\\[\\]]+)\\s*(\\{)",
+                    "begin": "(\\\\\\()",
+                    "end": "(\\))\\s*(:)\\s*([\\w\\[\\]]+)",
                     "beginCaptures": {
                         "1": {
                             "name": "keyword.declaration.lambda.alum"
-                        },
-                        "2": {
-                            "name": "punctuation.definition.parameters.begin.alum"
                         }
                     },
                     "endCaptures": {
@@ -347,9 +344,6 @@
                                     "include": "#types"
                                 }
                             ]
-                        },
-                        "4": {
-                            "name": "punctuation.definition.block.begin.alum"
                         }
                     },
                     "patterns": [

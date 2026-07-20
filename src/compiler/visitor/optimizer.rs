@@ -1,5 +1,5 @@
-use crate::compiler::parser::{Expr, Program};
 use crate::compiler::Span;
+use crate::compiler::parser::{Expr, Program};
 
 pub struct Optimizer {}
 
@@ -360,7 +360,11 @@ impl Optimizer {
 
     fn is_pure(&self, expr: &Expr) -> bool {
         match expr {
-            Expr::Int(_, _) | Expr::Float(_, _) | Expr::Bool(_, _) | Expr::String(_, _) | Expr::Nil(_) => true,
+            Expr::Int(_, _)
+            | Expr::Float(_, _)
+            | Expr::Bool(_, _)
+            | Expr::String(_, _)
+            | Expr::Nil(_) => true,
             Expr::Add(l, r, _)
             | Expr::Sub(l, r, _)
             | Expr::Mul(l, r, _)

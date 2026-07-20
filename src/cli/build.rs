@@ -1,4 +1,7 @@
-use crate::compiler::{codegen::CodeGen, lexer::Lexer, parser::Parser, preprocessor::Preprocessor, visitor::checker::TypeChecker, visitor::optimizer::Optimizer, CompilerError, SourceMap};
+use crate::compiler::{
+    CompilerError, SourceMap, codegen::CodeGen, lexer::Lexer, parser::Parser,
+    preprocessor::Preprocessor, visitor::checker::TypeChecker, visitor::optimizer::Optimizer,
+};
 use std::fs;
 
 pub fn build(
@@ -30,7 +33,9 @@ pub fn build(
     let lexer = Lexer::new(&processed);
     let mut tokens = Vec::new();
     for token in lexer {
-        tokens.push(token.map_err(|e| CompilerError::new(e, processed.clone(), input.clone(), source_map.clone()))?);
+        tokens.push(token.map_err(|e| {
+            CompilerError::new(e, processed.clone(), input.clone(), source_map.clone())
+        })?);
     }
 
     if verbose {

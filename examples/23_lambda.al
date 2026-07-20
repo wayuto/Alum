@@ -4,7 +4,7 @@ $import "convert.al"
 // Lambda function example
 
 fun main(): int {
-    let f: int(int) = lamb(n: int): int {
+    let f: int(int) = \(n: int): int {
         return n + 1
     }
 

@@ -1,4 +1,8 @@
-use crate::compiler::{lexer::{Lexer, LexerError, Token}, parser::{Expr, Program, Type}, Span};
+use crate::compiler::{
+    Span,
+    lexer::{Lexer, LexerError, Token},
+    parser::{Expr, Program, Type},
+};
 use std::collections::HashMap;
 use std::{fmt::Display, iter::Peekable};
 
@@ -15,11 +19,23 @@ pub enum ParserError {
 impl Display for ParserError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ParserError::UnexpectedToken { expected, found, span } => {
+            ParserError::UnexpectedToken {
+                expected,
+                found,
+                span,
+            } => {
                 if let Some(exp) = expected {
-                    write!(f, "at {}:{}: Expected '{:?}', found '{:?}'", span.line, span.col, exp, found)
+                    write!(
+                        f,
+                        "at {}:{}: Expected '{:?}', found '{:?}'",
+                        span.line, span.col, exp, found
+                    )
                 } else {
-                    write!(f, "at {}:{}: Unexpected token: '{:?}'", span.line, span.col, found)
+                    write!(
+                        f,
+                        "at {}:{}: Unexpected token: '{:?}'",
+                        span.line, span.col, found
+                    )
                 }
             }
             ParserError::LexerError(le) => write!(f, "{}", le),
@@ -180,7 +196,12 @@ impl<'a> Parser<'a> {
                         }
                         _ => None,
                     };
-                    Ok(Expr::If(Box::new(cond), Box::new(then_branch), else_branch, Span::new(0, 0)))
+                    Ok(Expr::If(
+                        Box::new(cond),
+                        Box::new(then_branch),
+                        else_branch,
+                        Span::new(0, 0),
+                    ))
                 }
                 Ok((Token::WHILE, _)) => {
                     self.next()?;
@@ -217,7 +238,12 @@ impl<'a> Parser<'a> {
 
                     let body = self.expr()?;
 
-                    Ok(Expr::For(var_name, Box::new(array_expr), Box::new(body), span))
+                    Ok(Expr::For(
+                        var_name,
+                        Box::new(array_expr),
+                        Box::new(body),
+                        span,
+                    ))
                 }
                 Ok((Token::STRUCT, _)) => {
                     self.next()?;
@@ -294,7 +320,12 @@ impl<'a> Parser<'a> {
                             }
                             Expr::MemberAccess(_, _, _) => {
                                 if let Expr::MemberAccess(obj, field, _) = expr {
-                                    Ok(Expr::MemberAssign(obj, field, Box::new(val), Span::new(0, 0)))
+                                    Ok(Expr::MemberAssign(
+                                        obj,
+                                        field,
+                                        Box::new(val),
+                                        Span::new(0, 0),
+                                    ))
                                 } else {
                                     unreachable!()
                                 }
@@ -306,7 +337,11 @@ impl<'a> Parser<'a> {
                                     unreachable!()
                                 }
                             }
-                            _ => Ok(Expr::IndexAssign(Box::new(expr), Box::new(val), Span::new(0, 0))),
+                            _ => Ok(Expr::IndexAssign(
+                                Box::new(expr),
+                                Box::new(val),
+                                Span::new(0, 0),
+                            )),
                         };
                     }
                     Ok(expr)
@@ -707,12 +742,20 @@ impl<'a> Parser<'a> {
                 Ok((Token::MINUS, span)) => {
                     self.next()?;
                     let operand = self.factor()?;
-                    return Ok(Expr::Sub(Box::new(Expr::Int(0, span)), Box::new(operand), span));
+                    return Ok(Expr::Sub(
+                        Box::new(Expr::Int(0, span)),
+                        Box::new(operand),
+                        span,
+                    ));
                 }
                 Ok((Token::PLUS, span)) => {
                     self.next()?;
                     let operand = self.factor()?;
-                    return Ok(Expr::Add(Box::new(Expr::Int(0, span)), Box::new(operand), span));
+                    return Ok(Expr::Add(
+                        Box::new(Expr::Int(0, span)),
+                        Box::new(operand),
+                        span,
+                    ));
                 }
                 Ok((Token::NOT, span)) => {
                     self.next()?;

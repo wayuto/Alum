@@ -43,7 +43,9 @@ impl PreprocessorError {
             PreprocessorError::ImportError { row, col, .. }
             | PreprocessorError::IoError { row, col, .. }
             | PreprocessorError::ConditionError { row, col, .. }
-            | PreprocessorError::MacroError { row, col, .. } => crate::compiler::Span::new(*row, *col),
+            | PreprocessorError::MacroError { row, col, .. } => {
+                crate::compiler::Span::new(*row, *col)
+            }
         }
     }
 }
@@ -84,7 +86,7 @@ pub struct Preprocessor<'a> {
 }
 
 impl<'a> Preprocessor<'a> {
-    pub fn new(src: &'a str, base_path: String, include_paths: Vec<String>    ) -> Self {
+    pub fn new(src: &'a str, base_path: String, include_paths: Vec<String>) -> Self {
         let mut default_paths = Vec::new();
 
         default_paths.push("/usr/local/include/alum".to_string());
@@ -533,7 +535,9 @@ impl<'a> Preprocessor<'a> {
                             continue;
                         }
 
-                        let macro_body = self.defines.get(&cmd)
+                        let macro_body = self
+                            .defines
+                            .get(&cmd)
                             .filter(|m| m.params.is_empty())
                             .map(|m| m.body.clone());
                         if let Some(body) = macro_body {
