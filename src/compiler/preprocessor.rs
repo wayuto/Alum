@@ -423,11 +423,21 @@ impl<'a> Preprocessor<'a> {
                         );
                     }
                     "ifdef" => {
+                        if self.skipping {
+                            self.condition_stack.push(false);
+                            self.skip_until_newline();
+                            continue;
+                        }
                         let condition_met = self.check_condition(false);
                         self.condition_stack.push(condition_met);
                         self.skipping = !condition_met;
                     }
                     "ifndef" => {
+                        if self.skipping {
+                            self.condition_stack.push(false);
+                            self.skip_until_newline();
+                            continue;
+                        }
                         let condition_met = self.check_condition(true);
                         self.condition_stack.push(condition_met);
                         self.skipping = !condition_met;
