@@ -1,5 +1,7 @@
 use crate::{string::strlen, syscall};
 
+const BUFFER_SIZE: usize = 1024;
+
 #[inline(never)]
 #[unsafe(no_mangle)]
 pub extern "C" fn write(fd: usize, buffer: *const u8, n: usize) -> isize {
@@ -26,7 +28,7 @@ pub extern "C" fn println(fmt: *const u8) -> isize {
     write(1, fmt, len) + write(1, b"\n".as_ptr(), 1)
 }
 
-static mut BUFFER: [u8; 1024] = [0; 1024];
+static mut BUFFER: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
 
 #[inline(never)]
 #[unsafe(no_mangle)]
@@ -87,7 +89,7 @@ pub extern "C" fn fclose(fd: isize) -> isize {
 pub extern "C" fn fread(fd: isize) -> *const u8 {
     let buffer = &raw mut BUFFER;
 
-    syscall(0, fd, buffer as isize, 1024);
+    syscall(0, fd, buffer as isize, BUFFER_SIZE as isize);
     buffer as *const u8
 }
 

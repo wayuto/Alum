@@ -682,8 +682,7 @@ impl CodeGen {
             _ => {}
         }
     }
-}
-impl CodeGen {
+
     fn lookup_var<'a>(name: &str, scope_stack: &'a Vec<HashMap<String, Slot>>) -> Option<&'a Slot> {
         for scope in scope_stack.iter().rev() {
             if let Some(v) = scope.get(name) {
@@ -751,6 +750,95 @@ impl CodeGen {
         }
     }
 
+    fn compile_string_concat(
+        lhs_ptr: Value,
+        rhs_ptr: Value,
+        builder: &mut FunctionBuilder,
+        module: &mut ObjectModule,
+    ) -> Result<Value, CodeGenError> {
+        let strlen_sig = {
+            let mut sig = module.make_signature();
+            sig.call_conv = CallConv::SystemV;
+            sig.params.push(AbiParam::new(types::I64));
+            sig.returns.push(AbiParam::new(types::I64));
+            sig
+        };
+        let strlen_id = module
+            .declare_function("strlen", Linkage::Import, &strlen_sig)
+            .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
+        let strlen_ref = module.declare_func_in_func(strlen_id, builder.func);
+
+        let lhs_len = builder.ins().call(strlen_ref, &[lhs_ptr]);
+        let lhs_len = builder.inst_results(lhs_len)[0];
+        let rhs_len = builder.ins().call(strlen_ref, &[rhs_ptr]);
+        let rhs_len = builder.inst_results(rhs_len)[0];
+
+        let total_len = builder.ins().iadd(lhs_len, rhs_len);
+        let alloc_size = builder.ins().iadd_imm(total_len, 1);
+
+        let malloc_sig = {
+            let mut sig = module.make_signature();
+            sig.call_conv = CallConv::SystemV;
+            sig.params.push(AbiParam::new(types::I64));
+            sig.returns.push(AbiParam::new(types::I64));
+            sig
+        };
+        let malloc_id = module
+            .declare_function("malloc", Linkage::Import, &malloc_sig)
+            .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
+        let malloc_ref = module.declare_func_in_func(malloc_id, builder.func);
+        let result_ptr = builder.ins().call(malloc_ref, &[alloc_size]);
+        let result_ptr = builder.inst_results(result_ptr)[0];
+
+        let memset_sig = {
+            let mut sig = module.make_signature();
+            sig.call_conv = CallConv::SystemV;
+            sig.params.push(AbiParam::new(types::I64));
+            sig.params.push(AbiParam::new(types::I32));
+            sig.params.push(AbiParam::new(types::I64));
+            sig.returns.push(AbiParam::new(types::I64));
+            sig
+        };
+        let memset_id = module
+            .declare_function("memset", Linkage::Import, &memset_sig)
+            .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
+        let memset_ref = module.declare_func_in_func(memset_id, builder.func);
+        let zero_i32 = builder.ins().iconst(types::I32, 0);
+        builder
+            .ins()
+            .call(memset_ref, &[result_ptr, zero_i32, alloc_size]);
+
+        let strcpy_sig = {
+            let mut sig = module.make_signature();
+            sig.call_conv = CallConv::SystemV;
+            sig.params.push(AbiParam::new(types::I64));
+            sig.params.push(AbiParam::new(types::I64));
+            sig.returns.push(AbiParam::new(types::I64));
+            sig
+        };
+        let strcpy_id = module
+            .declare_function("strcpy", Linkage::Import, &strcpy_sig)
+            .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
+        let strcpy_ref = module.declare_func_in_func(strcpy_id, builder.func);
+        builder.ins().call(strcpy_ref, &[result_ptr, lhs_ptr]);
+
+        let strcat_sig = {
+            let mut sig = module.make_signature();
+            sig.call_conv = CallConv::SystemV;
+            sig.params.push(AbiParam::new(types::I64));
+            sig.params.push(AbiParam::new(types::I64));
+            sig.returns.push(AbiParam::new(types::I64));
+            sig
+        };
+        let strcat_id = module
+            .declare_function("strcat", Linkage::Import, &strcat_sig)
+            .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
+        let strcat_ref = module.declare_func_in_func(strcat_id, builder.func);
+        builder.ins().call(strcat_ref, &[result_ptr, rhs_ptr]);
+
+        Ok(result_ptr)
+    }
+
     pub(crate) fn compile_expr(
         expr: &Expr,
         builder: &mut FunctionBuilder,
@@ -764,6 +852,24 @@ impl CodeGen {
         type_map: &HashMap<String, ir::Type>,
         structs: &HashMap<String, StructDef>,
     ) -> Result<Value, CodeGenError> {
+        macro_rules! compile_sub {
+            ($e:expr) => {
+                Self::compile_expr(
+                    $e,
+                    builder,
+                    scope_stack,
+                    type_stack,
+                    idx,
+                    func_signatures,
+                    module,
+                    str_idx,
+                    loop_stack,
+                    type_map,
+                    structs,
+                )
+            };
+        }
+
         match expr {
             Expr::Block(body, _) => {
                 scope_stack.push(HashMap::new());
@@ -771,47 +877,11 @@ impl CodeGen {
                 let result = if body.len() > 1 {
                     let (last, body) = body.split_last().unwrap();
                     for expr in body {
-                        Self::compile_expr(
-                            expr,
-                            builder,
-                            scope_stack,
-                            type_stack,
-                            idx,
-                            func_signatures,
-                            module,
-                            str_idx,
-                            loop_stack,
-                            type_map,
-                            structs,
-                        )?;
+                        compile_sub!(expr)?;
                     }
-                    Self::compile_expr(
-                        last,
-                        builder,
-                        scope_stack,
-                        type_stack,
-                        idx,
-                        func_signatures,
-                        module,
-                        str_idx,
-                        loop_stack,
-                        type_map,
-                        structs,
-                    )
+                    compile_sub!(last)
                 } else {
-                    Self::compile_expr(
-                        body.last().unwrap(),
-                        builder,
-                        scope_stack,
-                        type_stack,
-                        idx,
-                        func_signatures,
-                        module,
-                        str_idx,
-                        loop_stack,
-                        type_map,
-                        structs,
-                    )
+                    compile_sub!(body.last().unwrap())
                 };
                 scope_stack.pop();
                 type_stack.pop();
@@ -852,945 +922,159 @@ impl CodeGen {
                     || matches!(rhs_type, Type::Named(ref n) if n == "string");
 
                 if is_string {
-                    let lhs_ptr = Self::compile_expr(
-                        lhs,
-                        builder,
-                        scope_stack,
-                        type_stack,
-                        idx,
-                        func_signatures,
-                        module,
-                        str_idx,
-                        loop_stack,
-                        type_map,
-                        structs,
-                    )?;
-                    let rhs_ptr = Self::compile_expr(
-                        rhs,
-                        builder,
-                        scope_stack,
-                        type_stack,
-                        idx,
-                        func_signatures,
-                        module,
-                        str_idx,
-                        loop_stack,
-                        type_map,
-                        structs,
-                    )?;
-
-                    let strlen_sig = {
-                        let mut sig = module.make_signature();
-                        sig.call_conv = CallConv::SystemV;
-                        sig.params.push(AbiParam::new(types::I64));
-                        sig.returns.push(AbiParam::new(types::I64));
-                        sig
-                    };
-                    let strlen_id = module
-                        .declare_function("strlen", Linkage::Import, &strlen_sig)
-                        .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
-                    let strlen_ref = module.declare_func_in_func(strlen_id, builder.func);
-
-                    let lhs_len = builder.ins().call(strlen_ref, &[lhs_ptr]);
-                    let lhs_len = builder.inst_results(lhs_len)[0];
-                    let rhs_len = builder.ins().call(strlen_ref, &[rhs_ptr]);
-                    let rhs_len = builder.inst_results(rhs_len)[0];
-
-                    let total_len = builder.ins().iadd(lhs_len, rhs_len);
-                    let alloc_size = builder.ins().iadd_imm(total_len, 1);
-
-                    let calloc_sig = {
-                        let mut sig = module.make_signature();
-                        sig.call_conv = CallConv::SystemV;
-                        sig.params.push(AbiParam::new(types::I64));
-                        sig.returns.push(AbiParam::new(types::I64));
-                        sig
-                    };
-                    let calloc_id = module
-                        .declare_function("malloc", Linkage::Import, &calloc_sig)
-                        .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
-                    let calloc_ref = module.declare_func_in_func(calloc_id, builder.func);
-                    let result_ptr = builder.ins().call(calloc_ref, &[alloc_size]);
-                    let result_ptr = builder.inst_results(result_ptr)[0];
-
-                    let memset_sig = {
-                        let mut sig = module.make_signature();
-                        sig.call_conv = CallConv::SystemV;
-                        sig.params.push(AbiParam::new(types::I64));
-                        sig.params.push(AbiParam::new(types::I32));
-                        sig.params.push(AbiParam::new(types::I64));
-                        sig.returns.push(AbiParam::new(types::I64));
-                        sig
-                    };
-                    let memset_id = module
-                        .declare_function("memset", Linkage::Import, &memset_sig)
-                        .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
-                    let memset_ref = module.declare_func_in_func(memset_id, builder.func);
-                    let zero_i32 = builder.ins().iconst(types::I32, 0);
-                    builder
-                        .ins()
-                        .call(memset_ref, &[result_ptr, zero_i32, alloc_size]);
-
-                    let strcpy_sig = {
-                        let mut sig = module.make_signature();
-                        sig.call_conv = CallConv::SystemV;
-                        sig.params.push(AbiParam::new(types::I64));
-                        sig.params.push(AbiParam::new(types::I64));
-                        sig.returns.push(AbiParam::new(types::I64));
-                        sig
-                    };
-                    let strcpy_id = module
-                        .declare_function("strcpy", Linkage::Import, &strcpy_sig)
-                        .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
-                    let strcpy_ref = module.declare_func_in_func(strcpy_id, builder.func);
-                    builder.ins().call(strcpy_ref, &[result_ptr, lhs_ptr]);
-
-                    let strcat_sig = {
-                        let mut sig = module.make_signature();
-                        sig.call_conv = CallConv::SystemV;
-                        sig.params.push(AbiParam::new(types::I64));
-                        sig.params.push(AbiParam::new(types::I64));
-                        sig.returns.push(AbiParam::new(types::I64));
-                        sig
-                    };
-                    let strcat_id = module
-                        .declare_function("strcat", Linkage::Import, &strcat_sig)
-                        .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
-                    let strcat_ref = module.declare_func_in_func(strcat_id, builder.func);
-                    builder.ins().call(strcat_ref, &[result_ptr, rhs_ptr]);
-
-                    Ok(result_ptr)
+                    let lhs_ptr = compile_sub!(lhs)?;
+                    let rhs_ptr = compile_sub!(rhs)?;
+                    Self::compile_string_concat(lhs_ptr, rhs_ptr, builder, module)
                 } else {
-                    let lhs = Self::compile_expr(
-                        lhs,
-                        builder,
-                        scope_stack,
-                        type_stack,
-                        idx,
-                        func_signatures,
-                        module,
-                        str_idx,
-                        loop_stack,
-                        type_map,
-                        structs,
-                    )?;
-                    let rhs = Self::compile_expr(
-                        rhs,
-                        builder,
-                        scope_stack,
-                        type_stack,
-                        idx,
-                        func_signatures,
-                        module,
-                        str_idx,
-                        loop_stack,
-                        type_map,
-                        structs,
-                    )?;
+                    let lhs = compile_sub!(lhs)?;
+                    let rhs = compile_sub!(rhs)?;
                     Ok(builder.ins().iadd(lhs, rhs))
                 }
             }
             Expr::Sub(lhs, rhs, _) => {
-                let lhs = Self::compile_expr(
-                    lhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
-                let rhs = Self::compile_expr(
-                    rhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let lhs = compile_sub!(lhs)?;
+                let rhs = compile_sub!(rhs)?;
                 Ok(builder.ins().isub(lhs, rhs))
             }
             Expr::Mul(lhs, rhs, _) => {
-                let lhs = Self::compile_expr(
-                    lhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
-                let rhs = Self::compile_expr(
-                    rhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let lhs = compile_sub!(lhs)?;
+                let rhs = compile_sub!(rhs)?;
                 Ok(builder.ins().imul(lhs, rhs))
             }
             Expr::Div(lhs, rhs, _) => {
-                let lhs = Self::compile_expr(
-                    lhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
-                let rhs = Self::compile_expr(
-                    rhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let lhs = compile_sub!(lhs)?;
+                let rhs = compile_sub!(rhs)?;
                 Ok(builder.ins().sdiv(lhs, rhs))
             }
             Expr::Mod(lhs, rhs, _) => {
-                let lhs = Self::compile_expr(
-                    lhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
-                let rhs = Self::compile_expr(
-                    rhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let lhs = compile_sub!(lhs)?;
+                let rhs = compile_sub!(rhs)?;
                 Ok(builder.ins().srem(lhs, rhs))
             }
 
             Expr::FAdd(lhs, rhs, _) => {
-                let lhs = Self::compile_expr(
-                    lhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
-                let rhs = Self::compile_expr(
-                    rhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let lhs = compile_sub!(lhs)?;
+                let rhs = compile_sub!(rhs)?;
                 Ok(builder.ins().fadd(lhs, rhs))
             }
             Expr::FSub(lhs, rhs, _) => {
-                let lhs = Self::compile_expr(
-                    lhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
-                let rhs = Self::compile_expr(
-                    rhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let lhs = compile_sub!(lhs)?;
+                let rhs = compile_sub!(rhs)?;
                 Ok(builder.ins().fsub(lhs, rhs))
             }
             Expr::FMul(lhs, rhs, _) => {
-                let lhs = Self::compile_expr(
-                    lhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
-                let rhs = Self::compile_expr(
-                    rhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let lhs = compile_sub!(lhs)?;
+                let rhs = compile_sub!(rhs)?;
                 Ok(builder.ins().fmul(lhs, rhs))
             }
             Expr::FDiv(lhs, rhs, _) => {
-                let lhs = Self::compile_expr(
-                    lhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
-                let rhs = Self::compile_expr(
-                    rhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let lhs = compile_sub!(lhs)?;
+                let rhs = compile_sub!(rhs)?;
                 Ok(builder.ins().fdiv(lhs, rhs))
             }
 
             Expr::Eq(lhs, rhs, _) => {
-                let lhs = Self::compile_expr(
-                    lhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
-                let rhs = Self::compile_expr(
-                    rhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let lhs = compile_sub!(lhs)?;
+                let rhs = compile_sub!(rhs)?;
                 Ok(builder.ins().icmp(ir::condcodes::IntCC::Equal, lhs, rhs))
             }
             Expr::Ne(lhs, rhs, _) => {
-                let lhs = Self::compile_expr(
-                    lhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
-                let rhs = Self::compile_expr(
-                    rhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let lhs = compile_sub!(lhs)?;
+                let rhs = compile_sub!(rhs)?;
                 Ok(builder.ins().icmp(ir::condcodes::IntCC::NotEqual, lhs, rhs))
             }
             Expr::Lt(lhs, rhs, _) => {
-                let lhs = Self::compile_expr(
-                    lhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
-                let rhs = Self::compile_expr(
-                    rhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let lhs = compile_sub!(lhs)?;
+                let rhs = compile_sub!(rhs)?;
                 Ok(builder
                     .ins()
                     .icmp(ir::condcodes::IntCC::SignedLessThan, lhs, rhs))
             }
             Expr::Le(lhs, rhs, _) => {
-                let lhs = Self::compile_expr(
-                    lhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
-                let rhs = Self::compile_expr(
-                    rhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let lhs = compile_sub!(lhs)?;
+                let rhs = compile_sub!(rhs)?;
                 Ok(builder
                     .ins()
                     .icmp(ir::condcodes::IntCC::SignedLessThanOrEqual, lhs, rhs))
             }
             Expr::Gt(lhs, rhs, _) => {
-                let lhs = Self::compile_expr(
-                    lhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
-                let rhs = Self::compile_expr(
-                    rhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let lhs = compile_sub!(lhs)?;
+                let rhs = compile_sub!(rhs)?;
                 Ok(builder
                     .ins()
                     .icmp(ir::condcodes::IntCC::SignedGreaterThan, lhs, rhs))
             }
             Expr::Ge(lhs, rhs, _) => {
-                let lhs = Self::compile_expr(
-                    lhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
-                let rhs = Self::compile_expr(
-                    rhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let lhs = compile_sub!(lhs)?;
+                let rhs = compile_sub!(rhs)?;
                 Ok(builder
                     .ins()
                     .icmp(ir::condcodes::IntCC::SignedGreaterThanOrEqual, lhs, rhs))
             }
 
             Expr::FEq(lhs, rhs, _) => {
-                let lhs = Self::compile_expr(
-                    lhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
-                let rhs = Self::compile_expr(
-                    rhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let lhs = compile_sub!(lhs)?;
+                let rhs = compile_sub!(rhs)?;
                 Ok(builder.ins().fcmp(ir::condcodes::FloatCC::Equal, lhs, rhs))
             }
             Expr::FNe(lhs, rhs, _) => {
-                let lhs = Self::compile_expr(
-                    lhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
-                let rhs = Self::compile_expr(
-                    rhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let lhs = compile_sub!(lhs)?;
+                let rhs = compile_sub!(rhs)?;
                 Ok(builder
                     .ins()
                     .fcmp(ir::condcodes::FloatCC::NotEqual, lhs, rhs))
             }
             Expr::FLt(lhs, rhs, _) => {
-                let lhs = Self::compile_expr(
-                    lhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
-                let rhs = Self::compile_expr(
-                    rhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let lhs = compile_sub!(lhs)?;
+                let rhs = compile_sub!(rhs)?;
                 Ok(builder
                     .ins()
                     .fcmp(ir::condcodes::FloatCC::LessThan, lhs, rhs))
             }
             Expr::FLe(lhs, rhs, _) => {
-                let lhs = Self::compile_expr(
-                    lhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
-                let rhs = Self::compile_expr(
-                    rhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let lhs = compile_sub!(lhs)?;
+                let rhs = compile_sub!(rhs)?;
                 Ok(builder
                     .ins()
                     .fcmp(ir::condcodes::FloatCC::LessThanOrEqual, lhs, rhs))
             }
             Expr::FGt(lhs, rhs, _) => {
-                let lhs = Self::compile_expr(
-                    lhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
-                let rhs = Self::compile_expr(
-                    rhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let lhs = compile_sub!(lhs)?;
+                let rhs = compile_sub!(rhs)?;
                 Ok(builder
                     .ins()
                     .fcmp(ir::condcodes::FloatCC::GreaterThan, lhs, rhs))
             }
             Expr::FGe(lhs, rhs, _) => {
-                let lhs = Self::compile_expr(
-                    lhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
-                let rhs = Self::compile_expr(
-                    rhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let lhs = compile_sub!(lhs)?;
+                let rhs = compile_sub!(rhs)?;
                 Ok(builder
                     .ins()
                     .fcmp(ir::condcodes::FloatCC::GreaterThanOrEqual, lhs, rhs))
             }
 
             Expr::StrCat(lhs, rhs, _) => {
-                let lhs_ptr = Self::compile_expr(
-                    lhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
-                let rhs_ptr = Self::compile_expr(
-                    rhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
-
-                let strlen_sig = {
-                    let mut sig = module.make_signature();
-                    sig.call_conv = CallConv::SystemV;
-                    sig.params.push(AbiParam::new(types::I64));
-                    sig.returns.push(AbiParam::new(types::I64));
-                    sig
-                };
-                let strlen_id = module
-                    .declare_function("strlen", Linkage::Import, &strlen_sig)
-                    .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
-                let strlen_ref = module.declare_func_in_func(strlen_id, builder.func);
-
-                let lhs_len = builder.ins().call(strlen_ref, &[lhs_ptr]);
-                let lhs_len = builder.inst_results(lhs_len)[0];
-                let rhs_len = builder.ins().call(strlen_ref, &[rhs_ptr]);
-                let rhs_len = builder.inst_results(rhs_len)[0];
-
-                let total_len = builder.ins().iadd(lhs_len, rhs_len);
-                let alloc_size = builder.ins().iadd_imm(total_len, 1);
-
-                let malloc_sig = {
-                    let mut sig = module.make_signature();
-                    sig.call_conv = CallConv::SystemV;
-                    sig.params.push(AbiParam::new(types::I64));
-                    sig.returns.push(AbiParam::new(types::I64));
-                    sig
-                };
-                let malloc_id = module
-                    .declare_function("malloc", Linkage::Import, &malloc_sig)
-                    .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
-                let malloc_ref = module.declare_func_in_func(malloc_id, builder.func);
-                let result_ptr = builder.ins().call(malloc_ref, &[alloc_size]);
-                let result_ptr = builder.inst_results(result_ptr)[0];
-
-                let memset_sig = {
-                    let mut sig = module.make_signature();
-                    sig.call_conv = CallConv::SystemV;
-                    sig.params.push(AbiParam::new(types::I64));
-                    sig.params.push(AbiParam::new(types::I32));
-                    sig.params.push(AbiParam::new(types::I64));
-                    sig.returns.push(AbiParam::new(types::I64));
-                    sig
-                };
-                let memset_id = module
-                    .declare_function("memset", Linkage::Import, &memset_sig)
-                    .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
-                let memset_ref = module.declare_func_in_func(memset_id, builder.func);
-                let zero_i32 = builder.ins().iconst(types::I32, 0);
-                builder
-                    .ins()
-                    .call(memset_ref, &[result_ptr, zero_i32, alloc_size]);
-
-                let strcpy_sig = {
-                    let mut sig = module.make_signature();
-                    sig.call_conv = CallConv::SystemV;
-                    sig.params.push(AbiParam::new(types::I64));
-                    sig.params.push(AbiParam::new(types::I64));
-                    sig.returns.push(AbiParam::new(types::I64));
-                    sig
-                };
-                let strcpy_id = module
-                    .declare_function("strcpy", Linkage::Import, &strcpy_sig)
-                    .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
-                let strcpy_ref = module.declare_func_in_func(strcpy_id, builder.func);
-                builder.ins().call(strcpy_ref, &[result_ptr, lhs_ptr]);
-
-                let strcat_sig = {
-                    let mut sig = module.make_signature();
-                    sig.call_conv = CallConv::SystemV;
-                    sig.params.push(AbiParam::new(types::I64));
-                    sig.params.push(AbiParam::new(types::I64));
-                    sig.returns.push(AbiParam::new(types::I64));
-                    sig
-                };
-                let strcat_id = module
-                    .declare_function("strcat", Linkage::Import, &strcat_sig)
-                    .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
-                let strcat_ref = module.declare_func_in_func(strcat_id, builder.func);
-                builder.ins().call(strcat_ref, &[result_ptr, rhs_ptr]);
-
-                Ok(result_ptr)
+                let lhs_ptr = compile_sub!(lhs)?;
+                let rhs_ptr = compile_sub!(rhs)?;
+                Self::compile_string_concat(lhs_ptr, rhs_ptr, builder, module)
             }
             Expr::And(lhs, rhs, _) => {
-                let lhs_val = Self::compile_expr(
-                    lhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
-                let rhs_val = Self::compile_expr(
-                    rhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let lhs_val = compile_sub!(lhs)?;
+                let rhs_val = compile_sub!(rhs)?;
                 Ok(builder.ins().band(lhs_val, rhs_val))
             }
             Expr::Or(lhs, rhs, _) => {
-                let lhs_val = Self::compile_expr(
-                    lhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
-                let rhs_val = Self::compile_expr(
-                    rhs,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let lhs_val = compile_sub!(lhs)?;
+                let rhs_val = compile_sub!(rhs)?;
                 Ok(builder.ins().bor(lhs_val, rhs_val))
             }
             Expr::Not(expr, _) => {
-                let val = Self::compile_expr(
-                    expr,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let val = compile_sub!(expr)?;
                 let one = builder.ins().iconst(types::I8, 1);
                 Ok(builder.ins().bxor(val, one))
             }
             Expr::VarDecl(name, ty, value, _) => {
-                let val = Self::compile_expr(
-                    &**value,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let val = compile_sub!(&**value)?;
 
                 let decl_type = if let Type::Named(n) = ty {
                     if n == "gen" {
@@ -1829,19 +1113,7 @@ impl CodeGen {
             }
 
             Expr::VarAssign(name, val, _) => {
-                let val = Self::compile_expr(
-                    &**val,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let val = compile_sub!(&**val)?;
                 let slot = Self::lookup_var(name, scope_stack).ok_or_else(|| {
                     CodeGenError::UndefinedVariable {
                         name: name.clone(),
@@ -1896,24 +1168,8 @@ impl CodeGen {
                 })
             }
             Expr::Call(callee, args, _) => {
-                let arg_values: Result<Vec<Value>, CodeGenError> = args
-                    .iter()
-                    .map(|a| {
-                        Self::compile_expr(
-                            a,
-                            builder,
-                            scope_stack,
-                            type_stack,
-                            idx,
-                            func_signatures,
-                            module,
-                            str_idx,
-                            loop_stack,
-                            type_map,
-                            structs,
-                        )
-                    })
-                    .collect();
+                let arg_values: Result<Vec<Value>, CodeGenError> =
+                    args.iter().map(|a| compile_sub!(a)).collect();
 
                 let arg_values = arg_values?;
 
@@ -1932,19 +1188,7 @@ impl CodeGen {
 
                 let callee_type = Self::get_expr_type(callee, type_stack);
 
-                let callee_val = Self::compile_expr(
-                    callee,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let callee_val = compile_sub!(callee)?;
 
                 let sig = {
                     let mut sig = module.make_signature();
@@ -1979,36 +1223,12 @@ impl CodeGen {
                 }
             }
             Expr::Return(value, _) => {
-                let val = Self::compile_expr(
-                    &**value,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let val = compile_sub!(&**value)?;
                 builder.ins().return_(&[val]);
                 Ok(Value::from_u32(0))
             }
             Expr::If(cond, then_branch, else_branch, _) => {
-                let cond_val = Self::compile_expr(
-                    cond,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let cond_val = compile_sub!(cond)?;
 
                 let then_has_return = Self::has_return(then_branch);
                 let else_has_return = else_branch.as_ref().map_or(false, |e| Self::has_return(e));
@@ -2053,19 +1273,7 @@ impl CodeGen {
                 builder.switch_to_block(then_block);
                 scope_stack.push(HashMap::new());
                 type_stack.push(HashMap::new());
-                let then_val = Self::compile_expr(
-                    then_branch,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let then_val = compile_sub!(then_branch)?;
                 scope_stack.pop();
                 type_stack.pop();
 
@@ -2090,19 +1298,7 @@ impl CodeGen {
                 let else_val = if let Some(else_expr) = else_branch {
                     scope_stack.push(HashMap::new());
                     type_stack.push(HashMap::new());
-                    let val = Self::compile_expr(
-                        else_expr,
-                        builder,
-                        scope_stack,
-                        type_stack,
-                        idx,
-                        func_signatures,
-                        module,
-                        str_idx,
-                        loop_stack,
-                        type_map,
-                        structs,
-                    )?;
+                    let val = compile_sub!(else_expr)?;
                     scope_stack.pop();
                     type_stack.pop();
 
@@ -2195,38 +1391,14 @@ impl CodeGen {
                     builder.ins().stack_store(*param, *s, 0);
                 }
 
-                let cond_val = Self::compile_expr(
-                    cond,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let cond_val = compile_sub!(cond)?;
                 let cond_i64 = builder.ins().uextend(types::I64, cond_val);
                 builder.ins().brif(cond_i64, loop_body, &[], loop_exit, &[]);
 
                 builder.switch_to_block(loop_body);
                 scope_stack.push(HashMap::new());
                 type_stack.push(HashMap::new());
-                Self::compile_expr(
-                    body,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                compile_sub!(body)?;
                 scope_stack.pop();
                 type_stack.pop();
                 loop_stack.pop();
@@ -2256,32 +1428,8 @@ impl CodeGen {
                 Ok(builder.ins().iconst(types::I64, 0))
             }
             Expr::Index(array, index, _) => {
-                let array_ptr = Self::compile_expr(
-                    array,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
-                let index_val = Self::compile_expr(
-                    index,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let array_ptr = compile_sub!(array)?;
+                let index_val = compile_sub!(index)?;
 
                 let offset = builder.ins().imul_imm(index_val, 8);
                 let element_ptr = builder.ins().iadd(array_ptr, offset);
@@ -2294,45 +1442,9 @@ impl CodeGen {
             }
             Expr::IndexAssign(array_index, value, _) => {
                 if let Expr::Index(array, index, _) = &**array_index {
-                    let array_ptr = Self::compile_expr(
-                        array,
-                        builder,
-                        scope_stack,
-                        type_stack,
-                        idx,
-                        func_signatures,
-                        module,
-                        str_idx,
-                        loop_stack,
-                        type_map,
-                        structs,
-                    )?;
-                    let index_val = Self::compile_expr(
-                        index,
-                        builder,
-                        scope_stack,
-                        type_stack,
-                        idx,
-                        func_signatures,
-                        module,
-                        str_idx,
-                        loop_stack,
-                        type_map,
-                        structs,
-                    )?;
-                    let value_val = Self::compile_expr(
-                        value,
-                        builder,
-                        scope_stack,
-                        type_stack,
-                        idx,
-                        func_signatures,
-                        module,
-                        str_idx,
-                        loop_stack,
-                        type_map,
-                        structs,
-                    )?;
+                    let array_ptr = compile_sub!(array)?;
+                    let index_val = compile_sub!(index)?;
+                    let value_val = compile_sub!(value)?;
 
                     let offset = builder.ins().imul_imm(index_val, 8);
                     let element_ptr = builder.ins().iadd(array_ptr, offset);
@@ -2421,19 +1533,7 @@ impl CodeGen {
                 Ok(ptr)
             }
             Expr::ArrayFill(elem_type, length, _) => {
-                let length_val = Self::compile_expr(
-                    length,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let length_val = compile_sub!(length)?;
 
                 let elem_size = match &elem_type {
                     Type::Named(n) if matches!(n.as_str(), "int" | "float" | "string") => 8i64,
@@ -2481,32 +1581,8 @@ impl CodeGen {
                 Ok(mem_ptr)
             }
             Expr::Range(start, end, _) => {
-                let start_val = Self::compile_expr(
-                    start,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
-                let end_val = Self::compile_expr(
-                    end,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let start_val = compile_sub!(start)?;
+                let end_val = compile_sub!(end)?;
 
                 let len_val = builder.ins().isub(end_val, start_val);
 
@@ -2591,19 +1667,7 @@ impl CodeGen {
                     loop_params: Vec::new(),
                 });
 
-                let array_ptr = Self::compile_expr(
-                    array,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let array_ptr = compile_sub!(array)?;
 
                 let array_len = match array.as_ref() {
                     Expr::ArrayLiteral(elements, _) => {
@@ -2611,32 +1675,8 @@ impl CodeGen {
                     }
 
                     Expr::Range(start, end, _) => {
-                        let start_val = Self::compile_expr(
-                            start,
-                            builder,
-                            scope_stack,
-                            type_stack,
-                            idx,
-                            func_signatures,
-                            module,
-                            str_idx,
-                            loop_stack,
-                            type_map,
-                            structs,
-                        )?;
-                        let end_val = Self::compile_expr(
-                            end,
-                            builder,
-                            scope_stack,
-                            type_stack,
-                            idx,
-                            func_signatures,
-                            module,
-                            str_idx,
-                            loop_stack,
-                            type_map,
-                            structs,
-                        )?;
+                        let start_val = compile_sub!(start)?;
+                        let end_val = compile_sub!(end)?;
                         let len = builder.ins().isub(end_val, start_val);
                         let zero = builder.ins().iconst(types::I64, 0);
                         let is_neg =
@@ -2711,19 +1751,7 @@ impl CodeGen {
                     .unwrap()
                     .insert(var.clone(), Slot::StackSlot(elem_slot));
 
-                Self::compile_expr(
-                    body,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                compile_sub!(body)?;
 
                 scope_stack.pop();
                 type_stack.pop();
@@ -2834,19 +1862,7 @@ impl CodeGen {
                 for (field_name, field_expr) in field_values {
                     let field_info = struct_def.fields.iter().find(|f| &f.name == field_name);
                     if let Some(field) = field_info {
-                        let field_val = Self::compile_expr(
-                            field_expr,
-                            builder,
-                            scope_stack,
-                            type_stack,
-                            idx,
-                            func_signatures,
-                            module,
-                            str_idx,
-                            loop_stack,
-                            type_map,
-                            structs,
-                        )?;
+                        let field_val = compile_sub!(field_expr)?;
 
                         let field_ptr = builder.ins().iadd_imm(mem_ptr, field.offset);
 
@@ -2866,19 +1882,7 @@ impl CodeGen {
                 Ok(mem_ptr)
             }
             Expr::MemberAccess(obj, field_name, _) => {
-                let obj_ptr = Self::compile_expr(
-                    obj,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let obj_ptr = compile_sub!(obj)?;
 
                 let (struct_name, is_pointer) = match &**obj {
                     Expr::Var(name, _) => {
@@ -2948,19 +1952,7 @@ impl CodeGen {
                 }
             }
             Expr::MemberAssign(obj, field_name, value, _) => {
-                let obj_ptr = Self::compile_expr(
-                    obj,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let obj_ptr = compile_sub!(obj)?;
 
                 let (struct_name, is_pointer) = match &**obj {
                     Expr::Var(name, _) => {
@@ -3016,19 +2008,7 @@ impl CodeGen {
 
                 let field_info = struct_def.fields.iter().find(|f| &f.name == field_name);
                 if let Some(field) = field_info {
-                    let value_val = Self::compile_expr(
-                        value,
-                        builder,
-                        scope_stack,
-                        type_stack,
-                        idx,
-                        func_signatures,
-                        module,
-                        str_idx,
-                        loop_stack,
-                        type_map,
-                        structs,
-                    )?;
+                    let value_val = compile_sub!(value)?;
 
                     let field_ptr = builder.ins().iadd_imm(obj_ptr, field.offset);
                     builder
@@ -3056,19 +2036,7 @@ impl CodeGen {
                     }
                 }
                 Expr::MemberAccess(obj, field_name, _) => {
-                    let obj_ptr = Self::compile_expr(
-                        obj,
-                        builder,
-                        scope_stack,
-                        type_stack,
-                        idx,
-                        func_signatures,
-                        module,
-                        str_idx,
-                        loop_stack,
-                        type_map,
-                        structs,
-                    )?;
+                    let obj_ptr = compile_sub!(obj)?;
 
                     let struct_name = match &**obj {
                         Expr::Var(name, _) => {
@@ -3161,32 +2129,8 @@ impl CodeGen {
                     }
                 }
                 Expr::Index(arr, index_expr, _) => {
-                    let arr_ptr = Self::compile_expr(
-                        arr,
-                        builder,
-                        scope_stack,
-                        type_stack,
-                        idx,
-                        func_signatures,
-                        module,
-                        str_idx,
-                        loop_stack,
-                        type_map,
-                        structs,
-                    )?;
-                    let index_val = Self::compile_expr(
-                        index_expr,
-                        builder,
-                        scope_stack,
-                        type_stack,
-                        idx,
-                        func_signatures,
-                        module,
-                        str_idx,
-                        loop_stack,
-                        type_map,
-                        structs,
-                    )?;
+                    let arr_ptr = compile_sub!(arr)?;
+                    let index_val = compile_sub!(index_expr)?;
 
                     let offset = builder.ins().imul_imm(index_val, 8);
                     let element_ptr = builder.ins().iadd(arr_ptr, offset);
@@ -3199,51 +2143,15 @@ impl CodeGen {
                 )),
             },
             Expr::Deref(expr, _) => {
-                let ptr = Self::compile_expr(
-                    expr,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let ptr = compile_sub!(expr)?;
                 let value = builder
                     .ins()
                     .load(types::I64, ir::MemFlags::trusted(), ptr, 0);
                 Ok(value)
             }
             Expr::DerefAssign(ptr_expr, val_expr, _) => {
-                let ptr = Self::compile_expr(
-                    ptr_expr,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
-                let val = Self::compile_expr(
-                    val_expr,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )?;
+                let ptr = compile_sub!(ptr_expr)?;
+                let val = compile_sub!(val_expr)?;
                 builder.ins().store(ir::MemFlags::trusted(), val, ptr, 0);
                 Ok(builder.ins().iconst(types::I64, 0))
             }

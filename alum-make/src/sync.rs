@@ -3,7 +3,7 @@ use git2::Repository;
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
-    fs::{File, copy, metadata, read_to_string},
+    fs::{File, metadata, read_to_string},
     path::Path,
 };
 use zip::ZipArchive;
@@ -78,8 +78,34 @@ pub fn sync() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             } else if let Some(local) = info.local {
-                if metadata(&format!(".deps/{}", name)).is_err() {
-                    copy(Path::new(&local), Path::new(&format!(".deps/{}", name)))?;
+                let dest = format!(".deps/{}", name);
+                if metadata(&dest).is_err() {
+                    let src = Path::new(&local);
+                    let dst = Path::new(&dest);
+                    if src.is_dir() {
+                        fn copy_dir(src: &Path, dst: &Path) -> Result<(), Box<dyn std::error::Error>> {
+                            std::fs::create_dir_all(dst)?;
+                            for entry in std::fs::read_dir(src)? {
+                                let entry = entry?;
+                                let file_type = entry.file_type()?;
+                                let file_name = entry.file_name();
+                                let src_path = entry.path();
+                                let dst_path = dst.join(&file_name);
+                                if file_type.is_dir() {
+                                    copy_dir(&src_path, &dst_path)?;
+                                } else {
+                                    std::fs::copy(&src_path, &dst_path)?;
+                                }
+                            }
+                            Ok(())
+                        }
+                        copy_dir(src, dst)?;
+                    } else {
+                        if let Some(parent) = dst.parent() {
+                            std::fs::create_dir_all(parent)?;
+                        }
+                        std::fs::copy(src, dst)?;
+                    }
                     let curr_hash = get_hash(&local)?;
                     deps_hash.insert(name, curr_hash);
                 }

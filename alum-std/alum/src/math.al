@@ -5,7 +5,7 @@ fun abs(n: int): int {
     return n
 }
 
-fun sqrt(n: int): int {
+fun sqr(n: int): int {
     return n * n
 }
 

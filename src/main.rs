@@ -1,6 +1,7 @@
 mod cli;
 mod compiler;
 use clap::Parser;
+use cli::build::DEFAULT_STD_LIB_PATH;
 use cli::link::{create_shared_library, create_static_library, link};
 use cli::{Cli, build, exec_run};
 
@@ -76,8 +77,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             if has_stdlib {
                 String::new()
             } else {
-                let path = "/usr/local/lib/libalum.a";
-                path.to_string()
+                DEFAULT_STD_LIB_PATH.to_string()
             }
         };
 
@@ -132,8 +132,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         let std_lib_path = if cli.nostdlib {
             String::new()
         } else {
-            let path = "/usr/local/lib/libalum.a";
-            path.to_string()
+            DEFAULT_STD_LIB_PATH.to_string()
         };
 
         if cli.verbose {

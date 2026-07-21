@@ -101,15 +101,10 @@ impl CheckerError {
     }
 }
 
-#[derive(Debug, Clone)]
-struct StructDef {
-    fields: Vec<(String, Type)>,
-}
-
 pub struct TypeChecker {
     type_stack: Vec<HashMap<String, Type>>,
     functions: HashMap<String, (Vec<Type>, Type)>,
-    structs: HashMap<String, StructDef>,
+    structs: HashMap<String, Vec<(String, Type)>>,
     typedefs: HashMap<String, Type>,
     type_var_counter: usize,
     type_bindings: HashMap<usize, Type>,
@@ -224,12 +219,7 @@ impl TypeChecker {
                         .insert(name.clone(), (param_types, ret_type.clone()));
                 }
                 Expr::Struct(name, fields, _) => {
-                    self.structs.insert(
-                        name.clone(),
-                        StructDef {
-                            fields: fields.clone(),
-                        },
-                    );
+                    self.structs.insert(name.clone(), fields.clone());
                 }
                 _ => {}
             }
@@ -358,8 +348,8 @@ impl TypeChecker {
                     _ => return Type::Named("int".to_string()),
                 };
                 if let Type::Named(struct_name) = inner_type {
-                    if let Some(struct_def) = self.structs.get(&struct_name) {
-                        for (name, ty) in &struct_def.fields {
+                    if let Some(fields) = self.structs.get(&struct_name) {
+                        for (name, ty) in fields {
                             if name == field_name {
                                 return ty.clone();
                             }
@@ -1003,13 +993,13 @@ impl TypeChecker {
             }
 
             Expr::StructLiteral(name, field_values, _) => {
-                let struct_def = self
+                let fields = self
                     .structs
                     .get(name)
                     .ok_or_else(|| CheckerError::UndefinedStruct(name.clone(), span))?
                     .clone();
 
-                for (field_name, expected_ty) in &struct_def.fields {
+                for (field_name, expected_ty) in &fields {
                     let mut found_idx = None;
                     for (idx, (n, _)) in field_values.iter().enumerate() {
                         if n == field_name {
@@ -1058,7 +1048,6 @@ impl TypeChecker {
                     .structs
                     .get(&struct_name)
                     .ok_or_else(|| CheckerError::UndefinedStruct(struct_name.clone(), span))?
-                    .fields
                     .clone();
 
                 for (name, ty) in &fields {
@@ -1085,7 +1074,7 @@ impl TypeChecker {
                             CheckerError::UndefinedStruct(struct_name.clone(), span)
                         })?;
 
-                        for (name, ty) in &struct_def.fields {
+                        for (name, ty) in struct_def {
                             if name == field_name {
                                 if !self.types_compatible(ty, &value_type) {
                                     return Err(CheckerError::TypeMismatch {
@@ -1114,7 +1103,7 @@ impl TypeChecker {
                                 CheckerError::UndefinedStruct(struct_name.clone(), span)
                             })?;
 
-                            for (name, ty) in &struct_def.fields {
+                            for (name, ty) in struct_def {
                                 if name == field_name {
                                     if !self.types_compatible(ty, &value_type) {
                                         return Err(CheckerError::TypeMismatch {

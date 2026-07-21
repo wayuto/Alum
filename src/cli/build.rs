@@ -4,6 +4,8 @@ use crate::compiler::{
 };
 use std::fs;
 
+pub const DEFAULT_STD_LIB_PATH: &str = "/usr/local/lib/libalum.a";
+
 pub fn build(
     input: String,
     print_ast: bool,
@@ -25,17 +27,6 @@ pub fn build(
     if preprocess_only {
         println!("{}", processed);
         return Ok(String::new());
-    }
-
-    if verbose {
-        eprintln!("Lexing...");
-    }
-    let lexer = Lexer::new(&processed);
-    let mut tokens = Vec::new();
-    for token in lexer {
-        tokens.push(token.map_err(|e| {
-            CompilerError::new(e, processed.clone(), input.clone(), source_map.clone())
-        })?);
     }
 
     if verbose {
@@ -108,7 +99,7 @@ pub fn exec_run(
 
     let exe_path = std::path::Path::new(&exe_file);
 
-    let std_lib_path = "/usr/local/lib/libalum.a";
+    let std_lib_path = DEFAULT_STD_LIB_PATH;
 
     super::link::link(
         vec![obj_file],

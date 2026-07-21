@@ -57,8 +57,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("No 'target/' directory found to clean.");
             }
 
-            if metadata(&".deps/").is_ok() {
-                std::fs::remove_dir_all(&".deps/")?;
+            if metadata(&".deps").is_ok() {
+                std::fs::remove_dir_all(&".deps")?;
                 println!("Removed dependencies in '.deps/' directory.");
             }
         }

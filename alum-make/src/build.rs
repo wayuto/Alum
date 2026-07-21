@@ -12,8 +12,6 @@ pub enum Target {
     OBJ,
 }
 
-static mut LINK: bool = false;
-
 fn get_files(root: &str, target: Target) -> Vec<PathBuf> {
     WalkDir::new(root)
         .into_iter()
@@ -67,9 +65,6 @@ fn compile_c(
                 .with_extension("o")
         };
         fs::create_dir_all(output.parent().unwrap())?;
-        unsafe {
-            LINK = true;
-        }
         let mut cmd = compiler.clone();
         cmd.push_str(" ");
         cmd.push_str(file.to_str().unwrap());
@@ -112,10 +107,6 @@ fn compile_alum(
     }
     if source_files.is_empty() {
         return Ok(());
-    }
-
-    unsafe {
-        LINK = true;
     }
 
     for file in source_files {

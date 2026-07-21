@@ -49,7 +49,7 @@ Provides mathematical operations.
 
 ```al
 extern abs(int): int        // Absolute value
-extern sqrt(int): int       // Square (note: returns x * x)
+extern sqr(int): int         // Square (x * x)
 extern max(int, int): int   // Maximum of two numbers
 extern min(int, int): int   // Minimum of two numbers
 extern pow(int, int): int   // Power function

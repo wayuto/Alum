@@ -67,7 +67,6 @@ pub(crate) struct LoopContext {
     pub header_block: ir::Block,
     pub exit_block: ir::Block,
     pub increment_block: Option<ir::Block>,
-    #[allow(dead_code)]
     pub loop_params: Vec<(String, Slot)>,
 }
 

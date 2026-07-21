@@ -239,7 +239,7 @@ impl<'a> Lexer<'a> {
             '/' => {
                 self.bump();
                 if self.current == Some('/') {
-                    while self.current == Some('\n') {
+                    while self.current != Some('\n') && self.current.is_some() {
                         self.bump();
                     }
                     return self.next_token();
