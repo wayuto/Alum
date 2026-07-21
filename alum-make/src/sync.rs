@@ -83,7 +83,10 @@ pub fn sync() -> Result<(), Box<dyn std::error::Error>> {
                     let src = Path::new(&local);
                     let dst = Path::new(&dest);
                     if src.is_dir() {
-                        fn copy_dir(src: &Path, dst: &Path) -> Result<(), Box<dyn std::error::Error>> {
+                        fn copy_dir(
+                            src: &Path,
+                            dst: &Path,
+                        ) -> Result<(), Box<dyn std::error::Error>> {
                             std::fs::create_dir_all(dst)?;
                             for entry in std::fs::read_dir(src)? {
                                 let entry = entry?;
