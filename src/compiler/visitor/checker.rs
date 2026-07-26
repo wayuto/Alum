@@ -835,14 +835,14 @@ impl TypeChecker {
                 Ok(Type::Named("void".to_string()))
             }
 
-            Expr::Index(array, index, _) => {
+            Expr::Index(array, idx, _) => {
                 let array_type = self.check_expr(array)?;
-                let index_type = self.check_expr(index)?;
+                let idx_type = self.check_expr(idx)?;
 
-                if !Self::is_numeric_type(&index_type) {
+                if !Self::is_numeric_type(&idx_type) {
                     return Err(CheckerError::InvalidOperation {
                         op: "array index".to_string(),
-                        type_name: format!("{:?}", index_type),
+                        type_name: format!("{:?}", idx_type),
                         span: span,
                     });
                 }
@@ -858,17 +858,17 @@ impl TypeChecker {
                 }
             }
 
-            Expr::IndexAssign(array_index, value, _) => {
+            Expr::IndexAssign(array_idx, value, _) => {
                 let value_type = self.check_expr(value)?;
 
-                if let Expr::Index(array, index, _) = array_index.as_mut() {
+                if let Expr::Index(array, idx, _) = array_idx.as_mut() {
                     let array_type = self.get_expr_type(array);
-                    let index_type = self.check_expr(index)?;
+                    let idx_type = self.check_expr(idx)?;
 
-                    if !Self::is_numeric_type(&index_type) {
+                    if !Self::is_numeric_type(&idx_type) {
                         return Err(CheckerError::InvalidOperation {
                             op: "array index".to_string(),
-                            type_name: format!("{:?}", index_type),
+                            type_name: format!("{:?}", idx_type),
                             span: span,
                         });
                     }
@@ -923,8 +923,8 @@ impl TypeChecker {
                 Ok(Type::Array(Box::new(elem_type), len))
             }
 
-            Expr::ArrayFill(elem_type, length, _) => {
-                let len_type = self.check_expr(length)?;
+            Expr::ArrayFill(elem_type, len, _) => {
+                let len_type = self.check_expr(len)?;
                 if !Self::is_numeric_type(&len_type) {
                     return Err(CheckerError::InvalidOperation {
                         op: "array fill".to_string(),
@@ -933,7 +933,7 @@ impl TypeChecker {
                     });
                 }
 
-                let len = if let Expr::Int(n, _) = length.as_ref() {
+                let len = if let Expr::Int(n, _) = len.as_ref() {
                     *n as usize
                 } else {
                     0

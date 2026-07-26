@@ -19,17 +19,17 @@ pub enum PreprocessorError {
         col: usize,
     },
     IoError {
-        message: String,
+        msg: String,
         row: usize,
         col: usize,
     },
     ConditionError {
-        message: String,
+        msg: String,
         row: usize,
         col: usize,
     },
     MacroError {
-        message: String,
+        msg: String,
         row: usize,
         col: usize,
     },
@@ -60,14 +60,14 @@ impl std::fmt::Display for PreprocessorError {
                     row, col, file
                 )
             }
-            PreprocessorError::IoError { message, row, col } => {
-                write!(f, "IO error at {}:{}: {}", row, col, message)
+            PreprocessorError::IoError { msg, row, col } => {
+                write!(f, "IO error at {}:{}: {}", row, col, msg)
             }
-            PreprocessorError::ConditionError { message, row, col } => {
-                write!(f, "Condition error at {}:{}: {}", row, col, message)
+            PreprocessorError::ConditionError { msg, row, col } => {
+                write!(f, "Condition error at {}:{}: {}", row, col, msg)
             }
-            PreprocessorError::MacroError { message, row, col } => {
-                write!(f, "Macro error at {}:{}: {}", row, col, message)
+            PreprocessorError::MacroError { msg, row, col } => {
+                write!(f, "Macro error at {}:{}: {}", row, col, msg)
             }
         }
     }
@@ -404,7 +404,7 @@ impl<'a> Preprocessor<'a> {
                                     self.bump();
                                 } else if !self.current().is_whitespace() {
                                     return Err(PreprocessorError::MacroError {
-                                        message: format!(
+                                        msg: format!(
                                             "Invalid parameter name: '{}'",
                                             self.current()
                                         ),
@@ -422,8 +422,7 @@ impl<'a> Preprocessor<'a> {
 
                             if self.current() != ')' {
                                 return Err(PreprocessorError::MacroError {
-                                    message: "Unclosed parameter list in macro definition"
-                                        .to_string(),
+                                    msg: "Unclosed parameter list in macro definition".to_string(),
                                     row: self.row,
                                     col: self.col,
                                 });
@@ -483,7 +482,7 @@ impl<'a> Preprocessor<'a> {
                                 && self.condition_stack.last().map(|&s| !s).unwrap_or(false);
                         } else {
                             return Err(PreprocessorError::ConditionError {
-                                message: "Unexpected $endif".to_string(),
+                                msg: "Unexpected $endif".to_string(),
                                 row: self.row,
                                 col: self.col,
                             });
@@ -497,7 +496,7 @@ impl<'a> Preprocessor<'a> {
 
                         let file_name =
                             self.parse_file_path().ok_or(PreprocessorError::IoError {
-                                message: "Invalid import path".to_string(),
+                                msg: "Invalid import path".to_string(),
                                 row: self.row,
                                 col: self.col,
                             })?;
@@ -512,7 +511,7 @@ impl<'a> Preprocessor<'a> {
 
                         let content = fs::read_to_string(&file_path).map_err(|e| {
                             PreprocessorError::IoError {
-                                message: format!("Failed to read file: {}", e),
+                                msg: format!("Failed to read file: {}", e),
                                 row: self.row,
                                 col: self.col,
                             }
@@ -567,7 +566,7 @@ impl<'a> Preprocessor<'a> {
 
         if !self.condition_stack.is_empty() {
             return Err(PreprocessorError::ConditionError {
-                message: "Unclosed $ifdef or $ifndef".to_string(),
+                msg: "Unclosed $ifdef or $ifndef".to_string(),
                 row: self.row,
                 col: self.col,
             });

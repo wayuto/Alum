@@ -1427,11 +1427,11 @@ impl CodeGen {
 
                 Ok(builder.ins().iconst(types::I64, 0))
             }
-            Expr::Index(array, index, _) => {
+            Expr::Index(array, idx, _) => {
                 let array_ptr = compile_sub!(array)?;
-                let index_val = compile_sub!(index)?;
+                let idx_val = compile_sub!(idx)?;
 
-                let offset = builder.ins().imul_imm(index_val, 8);
+                let offset = builder.ins().imul_imm(idx_val, 8);
                 let element_ptr = builder.ins().iadd(array_ptr, offset);
 
                 let element =
@@ -1440,13 +1440,13 @@ impl CodeGen {
                         .load(types::I64, ir::MemFlags::trusted(), element_ptr, 0);
                 Ok(element)
             }
-            Expr::IndexAssign(array_index, value, _) => {
-                if let Expr::Index(array, index, _) = &**array_index {
+            Expr::IndexAssign(array_idx, value, _) => {
+                if let Expr::Index(array, idx, _) = &**array_idx {
                     let array_ptr = compile_sub!(array)?;
-                    let index_val = compile_sub!(index)?;
+                    let idx_val = compile_sub!(idx)?;
                     let value_val = compile_sub!(value)?;
 
-                    let offset = builder.ins().imul_imm(index_val, 8);
+                    let offset = builder.ins().imul_imm(idx_val, 8);
                     let element_ptr = builder.ins().iadd(array_ptr, offset);
 
                     builder
@@ -1455,8 +1455,8 @@ impl CodeGen {
                     Ok(builder.ins().iconst(types::I64, 0))
                 } else {
                     Err(CodeGenError::UnexpectedExpression {
-                        found: (**array_index).clone(),
-                        span: array_index.span(),
+                        found: (**array_idx).clone(),
+                        span: array_idx.span(),
                     })
                 }
             }
@@ -1532,8 +1532,8 @@ impl CodeGen {
                 let ptr = builder.ins().global_value(types::I64, global_value);
                 Ok(ptr)
             }
-            Expr::ArrayFill(elem_type, length, _) => {
-                let length_val = compile_sub!(length)?;
+            Expr::ArrayFill(elem_type, len, _) => {
+                let len_val = compile_sub!(len)?;
 
                 let elem_size = match &elem_type {
                     Type::Named(n) if matches!(n.as_str(), "int" | "float" | "string") => 8i64,
@@ -1543,7 +1543,7 @@ impl CodeGen {
                     _ => 8i64,
                 };
 
-                let total_size = builder.ins().imul_imm(length_val, elem_size);
+                let total_size = builder.ins().imul_imm(len_val, elem_size);
 
                 let malloc_sig = {
                     let mut sig = module.make_signature();
@@ -1705,14 +1705,14 @@ impl CodeGen {
                     _ => builder.ins().iconst(types::I64, 0),
                 };
 
-                let index_slot =
+                let idx_slot =
                     builder.create_sized_stack_slot(cranelift::codegen::ir::StackSlotData::new(
                         cranelift::codegen::ir::StackSlotKind::ExplicitSlot,
                         8,
                         0,
                     ));
                 let zero = builder.ins().iconst(types::I64, 0);
-                builder.ins().stack_store(zero, index_slot, 0);
+                builder.ins().stack_store(zero, idx_slot, 0);
 
                 let elem_slot =
                     builder.create_sized_stack_slot(cranelift::codegen::ir::StackSlotData::new(
@@ -1724,7 +1724,7 @@ impl CodeGen {
                 builder.ins().jump(loop_header, &[]);
 
                 builder.switch_to_block(loop_header);
-                let current_idx = builder.ins().stack_load(types::I64, index_slot, 0);
+                let current_idx = builder.ins().stack_load(types::I64, idx_slot, 0);
 
                 let cmp = builder.ins().icmp(
                     ir::condcodes::IntCC::UnsignedLessThan,
@@ -1759,9 +1759,9 @@ impl CodeGen {
                 builder.ins().jump(loop_increment, &[]);
 
                 builder.switch_to_block(loop_increment);
-                let current_idx_inc = builder.ins().stack_load(types::I64, index_slot, 0);
+                let current_idx_inc = builder.ins().stack_load(types::I64, idx_slot, 0);
                 let next_idx = builder.ins().iadd_imm(current_idx_inc, 1);
-                builder.ins().stack_store(next_idx, index_slot, 0);
+                builder.ins().stack_store(next_idx, idx_slot, 0);
                 builder.ins().jump(loop_header, &[]);
 
                 loop_stack.pop();
@@ -2128,11 +2128,11 @@ impl CodeGen {
                         ))
                     }
                 }
-                Expr::Index(arr, index_expr, _) => {
+                Expr::Index(arr, idx_expr, _) => {
                     let arr_ptr = compile_sub!(arr)?;
-                    let index_val = compile_sub!(index_expr)?;
+                    let idx_val = compile_sub!(idx_expr)?;
 
-                    let offset = builder.ins().imul_imm(index_val, 8);
+                    let offset = builder.ins().imul_imm(idx_val, 8);
                     let element_ptr = builder.ins().iadd(arr_ptr, offset);
                     Ok(element_ptr)
                 }

@@ -214,7 +214,7 @@ impl<'a> Lexer<'a> {
         Ok(s)
     }
 
-    fn next_token(&mut self) -> Result<(Token, Span), LexerError> {
+    fn next_tok(&mut self) -> Result<(Token, Span), LexerError> {
         self.sw();
         let line = self.line;
         let col = self.col;
@@ -242,7 +242,7 @@ impl<'a> Lexer<'a> {
                     while self.current != Some('\n') && self.current.is_some() {
                         self.bump();
                     }
-                    return self.next_token();
+                    return self.next_tok();
                 }
                 Token::SLASH
             }
@@ -438,7 +438,7 @@ impl<'a> Iterator for Lexer<'a> {
         self.sw();
         match self.current {
             None => None,
-            _ => Some(self.next_token()),
+            _ => Some(self.next_tok()),
         }
     }
 }

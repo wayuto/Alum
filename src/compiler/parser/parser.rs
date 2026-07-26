@@ -645,9 +645,9 @@ impl<'a> Parser<'a> {
                     if is_fill_syntax {
                         let elem_type = self.parse_type()?;
                         self.expect(Token::SEMICOLON)?;
-                        let length = self.expr()?;
+                        let len = self.expr()?;
                         self.expect(Token::RBRACKET)?;
-                        return Ok(Expr::ArrayFill(elem_type, Box::new(length), span));
+                        return Ok(Expr::ArrayFill(elem_type, Box::new(len), span));
                     } else {
                         let mut elements = Vec::new();
                         loop {
@@ -814,9 +814,9 @@ impl<'a> Parser<'a> {
                         if matches!(self.peek(), Some(Ok((Token::LBRACKET, _)))) {
                             self.next()?;
                             let len = if let Some(Ok((Token::INT(n), _))) = self.peek() {
-                                let length = *n as usize;
+                                let len = *n as usize;
                                 self.next()?;
-                                length
+                                len
                             } else {
                                 0
                             };
@@ -970,9 +970,9 @@ impl<'a> Parser<'a> {
             self.next()?;
 
             let len = if let Some(Ok((Token::INT(n), _))) = self.peek() {
-                let length = *n as usize;
+                let len = *n as usize;
                 self.next()?;
-                length
+                len
             } else {
                 0
             };

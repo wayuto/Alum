@@ -91,11 +91,16 @@ pub fn exec_run(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let obj_file = build(input.clone(), false, None, include_paths, false, verbose)?;
 
-    let exe_file = if input.ends_with(".al") {
+    let exe_name = if input.ends_with(".al") {
         input.replace(".al", "")
     } else {
         input.clone()
     };
+    let exe_name = std::path::Path::new(&exe_name)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("a.out");
+    let exe_file = format!("/tmp/{}", exe_name);
 
     let exe_path = std::path::Path::new(&exe_file);
 
