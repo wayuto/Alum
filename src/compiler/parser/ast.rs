@@ -98,6 +98,15 @@ impl Expr {
             | Expr::MemberAccess(_, _, s)
             | Expr::MemberAssign(_, _, _, s)
             | Expr::Lambda(_, _, _, s)
+            | Expr::Neg(_, s)
+            | Expr::FNeg(_, s)
+            | Expr::Inc(_, s)
+            | Expr::Dec(_, s)
+            | Expr::Xor(_, _, s)
+            | Expr::LAnd(_, _, s)
+            | Expr::LOr(_, _, s)
+            | Expr::AddAssign(_, _, s)
+            | Expr::SubAssign(_, _, s)
             | Expr::AddressOf(_, s)
             | Expr::Deref(_, s)
             | Expr::DerefAssign(_, _, s) => *s,
@@ -135,7 +144,16 @@ pub enum Expr {
     FGe(Box<Expr>, Box<Expr>, Span),
     And(Box<Expr>, Box<Expr>, Span),
     Or(Box<Expr>, Box<Expr>, Span),
+    Neg(Box<Expr>, Span),
+    FNeg(Box<Expr>, Span),
     Not(Box<Expr>, Span),
+    Inc(String, Span),
+    Dec(String, Span),
+    Xor(Box<Expr>, Box<Expr>, Span),
+    LAnd(Box<Expr>, Box<Expr>, Span),
+    LOr(Box<Expr>, Box<Expr>, Span),
+    AddAssign(String, Box<Expr>, Span),
+    SubAssign(String, Box<Expr>, Span),
     StrCat(Box<Expr>, Box<Expr>, Span),
     Var(String, Span),
     VarDecl(String, Type, Box<Expr>, Span),
@@ -374,10 +392,60 @@ impl Expr {
                 r.fmt_with_indent(f, indent + 1)?;
                 write!(f, "\n{})", indent_str)
             }
+            Expr::Neg(e, _) => {
+                write!(f, "{}Neg(", indent_str)?;
+                write!(f, "\n")?;
+                e.fmt_with_indent(f, indent + 1)?;
+                write!(f, "\n{})", indent_str)
+            }
+            Expr::FNeg(e, _) => {
+                write!(f, "{}FNeg(", indent_str)?;
+                write!(f, "\n")?;
+                e.fmt_with_indent(f, indent + 1)?;
+                write!(f, "\n{})", indent_str)
+            }
             Expr::Not(e, _) => {
                 write!(f, "{}Not(", indent_str)?;
                 write!(f, "\n")?;
                 e.fmt_with_indent(f, indent + 1)?;
+                write!(f, "\n{})", indent_str)
+            }
+            Expr::Inc(name, _) => write!(f, "{}Inc(\"{}\")", indent_str, name),
+            Expr::Dec(name, _) => write!(f, "{}Dec(\"{}\")", indent_str, name),
+            Expr::Xor(l, r, _) => {
+                write!(f, "{}Xor(", indent_str)?;
+                write!(f, "\n")?;
+                l.fmt_with_indent(f, indent + 1)?;
+                write!(f, "\n")?;
+                r.fmt_with_indent(f, indent + 1)?;
+                write!(f, "\n{})", indent_str)
+            }
+            Expr::LAnd(l, r, _) => {
+                write!(f, "{}LAnd(", indent_str)?;
+                write!(f, "\n")?;
+                l.fmt_with_indent(f, indent + 1)?;
+                write!(f, "\n")?;
+                r.fmt_with_indent(f, indent + 1)?;
+                write!(f, "\n{})", indent_str)
+            }
+            Expr::LOr(l, r, _) => {
+                write!(f, "{}LOr(", indent_str)?;
+                write!(f, "\n")?;
+                l.fmt_with_indent(f, indent + 1)?;
+                write!(f, "\n")?;
+                r.fmt_with_indent(f, indent + 1)?;
+                write!(f, "\n{})", indent_str)
+            }
+            Expr::AddAssign(name, val, _) => {
+                write!(f, "{}AddAssign(\"{}\"", indent_str, name)?;
+                write!(f, "\n")?;
+                val.fmt_with_indent(f, indent + 1)?;
+                write!(f, "\n{})", indent_str)
+            }
+            Expr::SubAssign(name, val, _) => {
+                write!(f, "{}SubAssign(\"{}\"", indent_str, name)?;
+                write!(f, "\n")?;
+                val.fmt_with_indent(f, indent + 1)?;
                 write!(f, "\n{})", indent_str)
             }
             Expr::StrCat(l, r, _) => {

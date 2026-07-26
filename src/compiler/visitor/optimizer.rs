@@ -44,9 +44,14 @@ impl Optimizer {
                 self.optimize_expr(array);
                 self.optimize_expr(body);
             }
-            Expr::VarDecl(_, _, v, _) | Expr::VarAssign(_, v, _) | Expr::Return(v, _) => {
+            Expr::VarDecl(_, _, v, _)
+            | Expr::VarAssign(_, v, _)
+            | Expr::Return(v, _)
+            | Expr::AddAssign(_, v, _)
+            | Expr::SubAssign(_, v, _) => {
                 self.optimize_expr(v)
             }
+            Expr::Inc(_, _) | Expr::Dec(_, _) => {}
             Expr::Call(f, args, _) => {
                 self.optimize_expr(f);
                 args.iter_mut().for_each(|a| self.optimize_expr(a));
@@ -76,7 +81,8 @@ impl Optimizer {
             | Expr::Sub(l, r, _)
             | Expr::Mul(l, r, _)
             | Expr::Div(l, r, _)
-            | Expr::Mod(l, r, _)
+             | Expr::Mod(l, r, _)
+             | Expr::Xor(l, r, _)
             | Expr::FAdd(l, r, _)
             | Expr::FSub(l, r, _)
             | Expr::FMul(l, r, _)
@@ -94,12 +100,14 @@ impl Optimizer {
             | Expr::FGt(l, r, _)
             | Expr::FGe(l, r, _)
             | Expr::And(l, r, _)
-            | Expr::Or(l, r, _)
+             | Expr::Or(l, r, _)
+             | Expr::LAnd(l, r, _)
+             | Expr::LOr(l, r, _)
             | Expr::StrCat(l, r, _) => {
                 self.optimize_expr(l);
                 self.optimize_expr(r);
             }
-            Expr::Not(e, _) => self.optimize_expr(e),
+            Expr::Not(e, _) | Expr::Neg(e, _) | Expr::FNeg(e, _) => self.optimize_expr(e),
             _ => {}
         }
     }
@@ -148,6 +156,12 @@ impl Optimizer {
             },
             Expr::Mod(l, r, _) => match (l.as_ref(), r.as_ref()) {
                 (Expr::Int(a, _), Expr::Int(b, _)) => Some(Expr::Int(a % b, Span::new(0, 0))),
+                _ => None,
+            },
+            Expr::Xor(l, r, _) => match (l.as_ref(), r.as_ref()) {
+                (Expr::Int(a, _), Expr::Int(b, _)) => Some(Expr::Int(a ^ b, Span::new(0, 0))),
+                (Expr::Int(0, _), _) => Some(*r.clone()),
+                (_, Expr::Int(0, _)) => Some(*l.clone()),
                 _ => None,
             },
             Expr::FAdd(l, r, _) => match (l.as_ref(), r.as_ref()) {
@@ -238,8 +252,30 @@ impl Optimizer {
                 (e, Expr::Bool(false, _)) => Some(e.clone()),
                 _ => None,
             },
+            Expr::LAnd(l, r, _) => match (l.as_ref(), r.as_ref()) {
+                (Expr::Bool(true, _), e) => Some(e.clone()),
+                (Expr::Bool(false, _), _) => Some(Expr::Bool(false, Span::new(0, 0))),
+                (e, Expr::Bool(true, _)) => Some(e.clone()),
+                (_, Expr::Bool(false, _)) => Some(Expr::Bool(false, Span::new(0, 0))),
+                _ => None,
+            },
+            Expr::LOr(l, r, _) => match (l.as_ref(), r.as_ref()) {
+                (Expr::Bool(true, _), _) => Some(Expr::Bool(true, Span::new(0, 0))),
+                (Expr::Bool(false, _), e) => Some(e.clone()),
+                (_, Expr::Bool(true, _)) => Some(Expr::Bool(true, Span::new(0, 0))),
+                (e, Expr::Bool(false, _)) => Some(e.clone()),
+                _ => None,
+            },
             Expr::Not(e, _) => match e.as_ref() {
                 Expr::Bool(b, _) => Some(Expr::Bool(!b, Span::new(0, 0))),
+                _ => None,
+            },
+            Expr::Neg(e, _) => match e.as_ref() {
+                Expr::Int(n, _) => Some(Expr::Int(-n, Span::new(0, 0))),
+                _ => None,
+            },
+            Expr::FNeg(e, _) => match e.as_ref() {
+                Expr::Float(n, _) => Some(Expr::Float(-n, Span::new(0, 0))),
                 _ => None,
             },
             _ => None,
@@ -284,8 +320,9 @@ impl Optimizer {
             }
             Expr::FuncDecl(_, _, _, body, _) => self.dce(body),
             Expr::VarDecl(_, _, v, _) => self.dce(v),
-            Expr::VarAssign(_, v, _) => self.dce(v),
+            Expr::VarAssign(_, v, _) | Expr::AddAssign(_, v, _) | Expr::SubAssign(_, v, _) => self.dce(v),
             Expr::Return(v, _) => self.dce(v),
+            Expr::Inc(_, _) | Expr::Dec(_, _) => {}
             Expr::Call(f, args, _) => {
                 self.dce(f);
                 for a in args {
@@ -326,7 +363,8 @@ impl Optimizer {
             | Expr::Sub(l, r, _)
             | Expr::Mul(l, r, _)
             | Expr::Div(l, r, _)
-            | Expr::Mod(l, r, _)
+             | Expr::Mod(l, r, _)
+             | Expr::Xor(l, r, _)
             | Expr::FAdd(l, r, _)
             | Expr::FSub(l, r, _)
             | Expr::FMul(l, r, _)
@@ -344,12 +382,14 @@ impl Optimizer {
             | Expr::FGt(l, r, _)
             | Expr::FGe(l, r, _)
             | Expr::And(l, r, _)
-            | Expr::Or(l, r, _)
+             | Expr::Or(l, r, _)
+             | Expr::LAnd(l, r, _)
+             | Expr::LOr(l, r, _)
             | Expr::StrCat(l, r, _) => {
                 self.dce(l);
                 self.dce(r);
             }
-            Expr::Not(e, _) => self.dce(e),
+            Expr::Not(e, _) | Expr::Neg(e, _) | Expr::FNeg(e, _) => self.dce(e),
             _ => {}
         }
     }
@@ -369,7 +409,8 @@ impl Optimizer {
             | Expr::Sub(l, r, _)
             | Expr::Mul(l, r, _)
             | Expr::Div(l, r, _)
-            | Expr::Mod(l, r, _)
+             | Expr::Mod(l, r, _)
+             | Expr::Xor(l, r, _)
             | Expr::FAdd(l, r, _)
             | Expr::FSub(l, r, _)
             | Expr::FMul(l, r, _)
@@ -387,8 +428,10 @@ impl Optimizer {
             | Expr::FGt(l, r, _)
             | Expr::FGe(l, r, _)
             | Expr::And(l, r, _)
-            | Expr::Or(l, r, _) => self.is_pure(l) && self.is_pure(r),
-            Expr::Not(e, _) => self.is_pure(e),
+             | Expr::Or(l, r, _)
+             | Expr::LAnd(l, r, _)
+             | Expr::LOr(l, r, _) => self.is_pure(l) && self.is_pure(r),
+            Expr::Not(e, _) | Expr::Neg(e, _) | Expr::FNeg(e, _) => self.is_pure(e),
             Expr::Index(l, r, _) => self.is_pure(l) && self.is_pure(r),
             Expr::ArrayLiteral(elems, _) => elems.iter().all(|e| self.is_pure(e)),
             Expr::ArrayFill(_, len, _) => self.is_pure(len),
@@ -406,6 +449,10 @@ impl Optimizer {
             expr,
             Expr::VarDecl(_, _, _, _)
                 | Expr::VarAssign(_, _, _)
+                | Expr::AddAssign(_, _, _)
+                | Expr::SubAssign(_, _, _)
+                | Expr::Inc(_, _)
+                | Expr::Dec(_, _)
                 | Expr::Call(_, _, _)
                 | Expr::IndexAssign(_, _, _)
                 | Expr::MemberAssign(_, _, _, _)

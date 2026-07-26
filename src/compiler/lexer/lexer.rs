@@ -226,11 +226,27 @@ impl<'a> Lexer<'a> {
         let tok = match c {
             '+' => {
                 self.bump();
-                Token::PLUS
+                if self.current == Some('=') {
+                    self.bump();
+                    Token::PLUSEQ
+                } else if self.current == Some('+') {
+                    self.bump();
+                    Token::PLUSPLUS
+                } else {
+                    Token::PLUS
+                }
             }
             '-' => {
                 self.bump();
-                Token::MINUS
+                if self.current == Some('=') {
+                    self.bump();
+                    Token::MINUSEQ
+                } else if self.current == Some('-') {
+                    self.bump();
+                    Token::MINUSMINUS
+                } else {
+                    Token::MINUS
+                }
             }
             '*' => {
                 self.bump();

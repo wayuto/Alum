@@ -354,18 +354,34 @@ impl<'a> Parser<'a> {
     }
 
     fn logical(&mut self) -> Result<Expr, ParserError> {
-        let mut left = self.comparison()?;
+        let mut left = self.bitwise()?;
         while let Some(Ok((op, _))) = self.peek().cloned() {
             match op {
                 Token::AND | Token::OR => {
                     self.next()?;
-                    let right = self.comparison()?;
+                    let right = self.bitwise()?;
                     let span = left.span();
                     left = match op {
-                        Token::AND => Expr::And(Box::new(left), Box::new(right), span),
-                        Token::OR => Expr::Or(Box::new(left), Box::new(right), span),
+                        Token::AND => Expr::LAnd(Box::new(left), Box::new(right), span),
+                        Token::OR => Expr::LOr(Box::new(left), Box::new(right), span),
                         _ => unreachable!(),
                     };
+                }
+                _ => break,
+            }
+        }
+        Ok(left)
+    }
+
+    fn bitwise(&mut self) -> Result<Expr, ParserError> {
+        let mut left = self.comparison()?;
+        while let Some(Ok((op, _))) = self.peek().cloned() {
+            match op {
+                Token::XOR => {
+                    self.next()?;
+                    let right = self.comparison()?;
+                    let span = left.span();
+                    left = Expr::Xor(Box::new(left), Box::new(right), span);
                 }
                 _ => break,
             }
@@ -737,25 +753,59 @@ impl<'a> Parser<'a> {
                         let val = self.expr()?;
                         return Ok(Expr::VarAssign(name, Box::new(val), span));
                     }
+                    if let Some(Ok((Token::PLUSEQ, _))) = self.peek() {
+                        self.next()?;
+                        let val = self.expr()?;
+                        return Ok(Expr::AddAssign(name, Box::new(val), span));
+                    }
+                    if let Some(Ok((Token::MINUSEQ, _))) = self.peek() {
+                        self.next()?;
+                        let val = self.expr()?;
+                        return Ok(Expr::SubAssign(name, Box::new(val), span));
+                    }
                     return Ok(Expr::Var(name, span));
                 }
                 Ok((Token::MINUS, span)) => {
                     self.next()?;
                     let operand = self.factor()?;
-                    return Ok(Expr::Sub(
-                        Box::new(Expr::Int(0, span)),
-                        Box::new(operand),
-                        span,
-                    ));
+                    return Ok(Expr::Neg(Box::new(operand), span));
                 }
                 Ok((Token::PLUS, span)) => {
                     self.next()?;
                     let operand = self.factor()?;
-                    return Ok(Expr::Add(
-                        Box::new(Expr::Int(0, span)),
-                        Box::new(operand),
-                        span,
-                    ));
+                    return Ok(operand);
+                }
+                Ok((Token::PLUSPLUS, span)) => {
+                    self.next()?;
+                    match self.peek().cloned() {
+                        Some(Ok((Token::IDENT(name), _))) => {
+                            self.next()?;
+                            return Ok(Expr::Inc(name, span));
+                        }
+                        _ => {
+                            return Err(ParserError::UnexpectedToken {
+                                expected: None,
+                                found: self.peek().cloned().unwrap().unwrap().0,
+                                span,
+                            });
+                        }
+                    }
+                }
+                Ok((Token::MINUSMINUS, span)) => {
+                    self.next()?;
+                    match self.peek().cloned() {
+                        Some(Ok((Token::IDENT(name), _))) => {
+                            self.next()?;
+                            return Ok(Expr::Dec(name, span));
+                        }
+                        _ => {
+                            return Err(ParserError::UnexpectedToken {
+                                expected: None,
+                                found: self.peek().cloned().unwrap().unwrap().0,
+                                span,
+                            });
+                        }
+                    }
                 }
                 Ok((Token::NOT, span)) => {
                     self.next()?;

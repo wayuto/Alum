@@ -1,12 +1,12 @@
 # Alum Programming Language
 
-Alum is a modern, systems programming language designed for simplicity and performance. It features a clean syntax, strong static typing, and compiles to native machine code using the Cranelift code generator.
+Alum is a modern, systems programming language designed for simplicity and performance. It features a clean syntax, strong static typing, and compiles to native machine code via an optimizing IR pipeline.
 
 ## Features
 
 - **Simple Syntax**: Clean, readable syntax inspired by modern languages
 - **Static Typing**: Type safety with explicit type annotations
-- **Native Compilation**: Compiles directly to machine code via Cranelift
+- **Native Compilation**: Compiles directly to machine code via NASM + LLD
 - **Fast Compilation**: Efficient compilation pipeline
 - **FFI Support**: Interoperability with C for low-level operations
 - **Build Tool**: Integrated build system (almk) for project management
@@ -18,6 +18,7 @@ Alum is a modern, systems programming language designed for simplicity and perfo
 ### Prerequisites
 
 - Rust toolchain (2024 edition)
+- NASM (Netwide Assembler) — required for assembling the generated machine code
 
 ### Build from Source
 
@@ -529,12 +530,22 @@ Source Code (.al)
         │
         ▼
 ┌───────────────┐
-│   Optimizer   │  →  Constant folding, dead code elimination
+│  Optimizer    │  →  Constant folding, dead code elimination, IR optimizations
 └───────────────┘
         │
         ▼
 ┌───────────────┐
-│ Code Generator│  →  Compiles AST to machine code using Cranelift
+│   IR Gen      │  →  Lowers AST to intermediate representation (IR)
+└───────────────┘
+        │
+        ▼
+┌───────────────┐
+│ Code Generator│  →  Emits x86-64 NASM assembly from IR
+└───────────────┘
+        │
+        ▼
+┌───────────────┐
+│   Assembler   │  →  nasm assembles .asm to .o (ELF64)
 └───────────────┘
         │
         ▼
@@ -542,11 +553,11 @@ Source Code (.al)
         │
         ▼
 ┌───────────────┐
-│    Linker     │  →  Links object files with standard library
+│    Linker     │  →  LLD links object file with standard library
 └───────────────┘
         │
         ▼
- Executable File
+  Executable File
 ```
 
 ### Pipeline Stages
@@ -555,9 +566,11 @@ Source Code (.al)
 2. **Lexing**: Tokenizes source code into a stream of tokens
 3. **Parsing**: Builds Abstract Syntax Tree (AST) from tokens
 4. **Type Checking**: Validates type safety and semantic rules
-5. **Optimization**: Performs constant folding, dead code elimination, and other optimizations
-6. **Code Generation**: Compiles AST to machine code using Cranelift
-7. **Linking**: Links object files with standard library to produce executable
+5. **Optimization**: Performs constant folding, dead code elimination, and IR optimizations
+6. **IR Generation**: Lowers AST to a platform-agnostic intermediate representation
+7. **Code Generation**: Emits x86-64 assembly (NASM syntax) from IR
+8. **Assembly**: NASM assembles the `.asm` file to an ELF64 object file (`.o`)
+9. **Linking**: LLD links object files with the standard library to produce an executable
 
 **Optimizations performed:**
 - Constant folding (e.g., `2 + 3` → `5`)

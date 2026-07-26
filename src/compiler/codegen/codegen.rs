@@ -1,2164 +1,1180 @@
-use super::types::{CodeGenError, LoopContext, Slot, StructDef, StructField, get_type};
-use crate::compiler::Span;
-use crate::compiler::parser::{Expr, Program, Type};
-use cranelift::{
-    codegen::{ir, settings},
-    prelude::{
-        AbiParam, Configurable, FunctionBuilder, FunctionBuilderContext, InstBuilder, Signature,
-        Value,
-        isa::{self, CallConv},
-        types,
-    },
-};
-use cranelift_module::{FuncId, Linkage, Module};
-use cranelift_object::{ObjectBuilder, ObjectModule};
+use super::ir::{IRConst, IRFunction, IRProgram, IRType, Instruction, Op, Operand};
+use super::types::CodeGenError;
+use ordered_float::OrderedFloat;
 use std::collections::{HashMap, HashSet};
+use std::mem::take;
 
-pub struct CodeGen {
-    pub ast: Program,
-    pub module: ObjectModule,
-    pub builder_context: FunctionBuilderContext,
-    pub func_signatures: HashMap<String, (FuncId, Signature)>,
-    pub loop_stack: Vec<LoopContext>,
-    pub type_map: HashMap<String, ir::Type>,
-    pub structs: HashMap<String, StructDef>,
-    pub lambda_counter: u32,
+macro_rules! assemble {
+    ($buf:expr, $fmt:literal $(, $arg:expr)* $(,)?) => {
+        $buf.push_str(&format!(concat!($fmt, "\n") $(, $arg)*))
+    };
 }
 
-impl CodeGen {
-    pub(crate) fn get_type_size(
-        ty: &Type,
-        _type_map: &HashMap<String, ir::Type>,
-        structs: &HashMap<String, StructDef>,
-    ) -> i64 {
-        match ty {
-            Type::Named(name) => match name.as_str() {
-                "int" | "float" | "gen" => 8,
-                "string" => 8,
-                "void" => 0,
-                _ => {
-                    if let Some(struct_def) = structs.get(name) {
-                        struct_def.size
-                    } else {
-                        8
-                    }
-                }
-            },
-            Type::Array(inner, len) => {
-                let elem_size = Self::get_type_size(inner, _type_map, structs);
-                8 + elem_size * (*len as i64)
-            }
-            Type::Pointer(_) => 8,
-            Type::Function(_, _) => 8,
-            Type::TypeVar(_) => 8,
-            Type::Auto => 8,
-            Type::Gen => 8,
-        }
-    }
+pub struct AsmCodeGen {
+    program: IRProgram,
+    text: String,
+    data: String,
+    vars: HashMap<String, usize>,
+    lbl_cnt: usize,
+    str_cache: HashMap<String, String>,
+    flt_cache: HashMap<OrderedFloat<f64>, String>,
+    arg_reg: Vec<String>,
+    flt_arg_reg: Vec<String>,
+    ret_label: String,
+    regs: HashMap<String, Option<Operand>>,
+    curr_fn: String,
+    curr_flt_reg: usize,
+    internals: HashSet<String>,
+}
 
-    fn get_type_align(
-        ty: &Type,
-        type_map: &HashMap<String, ir::Type>,
-        structs: &HashMap<String, StructDef>,
-    ) -> i64 {
-        match ty {
-            Type::Named(name) => match name.as_str() {
-                "int" | "float" | "gen" => 8,
-                "string" => 8,
-                "bool" => 1,
-                "void" => 1,
-                _ => {
-                    if let Some(struct_def) = structs.get(name) {
-                        struct_def
-                            .fields
-                            .iter()
-                            .map(|f| Self::get_type_align(&f.ty, type_map, structs))
-                            .max()
-                            .unwrap_or(1)
-                    } else {
-                        8
-                    }
-                }
-            },
-            Type::Array(inner, _) => Self::get_type_align(inner, type_map, structs),
-            Type::Pointer(_) => 8,
-            Type::Function(_, _) => 8,
-            Type::TypeVar(_) => 8,
-            Type::Auto => 8,
-            Type::Gen => 8,
-        }
-    }
-
-    pub fn new(ast: Program) -> Self {
-        let mut flag_builder = settings::builder();
-        flag_builder.set("opt_level", "speed").unwrap();
-        flag_builder.set("enable_alias_analysis", "true").unwrap();
-        flag_builder
-            .set("regalloc_algorithm", "backtracking")
-            .unwrap();
-        let flags = settings::Flags::new(flag_builder);
-        let isa_builder = isa::lookup_by_name("x86_64").unwrap();
-        let isa = isa_builder.finish(flags).unwrap();
-        let object_builder = ObjectBuilder::new(
-            isa,
-            "main".to_string(),
-            cranelift_module::default_libcall_names(),
-        )
-        .unwrap();
-        let module = ObjectModule::new(object_builder);
-        let mut type_map = HashMap::new();
-        type_map.insert("int".to_string(), types::I64);
-        type_map.insert("float".to_string(), types::F64);
-        type_map.insert("bool".to_string(), types::I8);
-        type_map.insert("string".to_string(), types::I64);
-        type_map.insert("void".to_string(), types::INVALID);
-        type_map.insert("any".to_string(), types::I64);
+impl AsmCodeGen {
+    pub fn new(program: IRProgram) -> Self {
+        let internals = program
+            .functions
+            .iter()
+            .filter(|f| !f.is_external)
+            .map(|f| f.name.clone())
+            .collect();
         Self {
-            ast,
-            module,
-            builder_context: FunctionBuilderContext::new(),
-            func_signatures: HashMap::new(),
-            loop_stack: Vec::new(),
-            type_map,
-            structs: HashMap::new(),
-            lambda_counter: 0,
+            program,
+            text: String::new(),
+            data: String::new(),
+            vars: HashMap::new(),
+            lbl_cnt: 0,
+            str_cache: HashMap::new(),
+            flt_cache: HashMap::new(),
+            arg_reg: vec![
+                "rdi".to_string(),
+                "rsi".to_string(),
+                "rdx".to_string(),
+                "rcx".to_string(),
+                "r8".to_string(),
+                "r9".to_string(),
+            ],
+            flt_arg_reg: vec![
+                "xmm0".to_string(),
+                "xmm1".to_string(),
+                "xmm2".to_string(),
+                "xmm3".to_string(),
+                "xmm4".to_string(),
+                "xmm5".to_string(),
+                "xmm6".to_string(),
+                "xmm7".to_string(),
+                "xmm8".to_string(),
+                "xmm9".to_string(),
+                "xmm10".to_string(),
+                "xmm11".to_string(),
+                "xmm12".to_string(),
+                "xmm13".to_string(),
+                "xmm14".to_string(),
+                "xmm15".to_string(),
+            ],
+            ret_label: String::new(),
+            regs: HashMap::new(),
+            curr_fn: String::new(),
+            curr_flt_reg: 0,
+            internals,
         }
     }
 
-    fn convert_lambdas_to_functions(&mut self, program: Program) -> Program {
-        let mut new_body = Vec::new();
-        let mut lambda_map: std::collections::HashMap<String, Expr> =
-            std::collections::HashMap::new();
-
-        fn process_expr(
-            expr: Expr,
-            lambda_counter: &mut u32,
-            lambda_map: &mut std::collections::HashMap<String, Expr>,
-        ) -> Expr {
-            match expr {
-                Expr::Lambda(params, body, ret_type, _) => {
-                    let lambda_name = format!("_lambda_{}", lambda_counter);
-                    *lambda_counter += 1;
-
-                    let lambda_func = Expr::FuncDecl(
-                        lambda_name.clone(),
-                        params,
-                        ret_type,
-                        body,
-                        Span::new(0, 0),
-                    );
-                    lambda_map.insert(lambda_name.clone(), lambda_func);
-
-                    Expr::Var(lambda_name, Span::new(0, 0))
-                }
-                Expr::Block(body, _) => Expr::Block(
-                    body.into_iter()
-                        .map(|e| process_expr(e, lambda_counter, lambda_map))
-                        .collect(),
-                    Span::new(0, 0),
-                ),
-                Expr::Add(l, r, _) => Expr::Add(
-                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::Sub(l, r, _) => Expr::Sub(
-                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::Mul(l, r, _) => Expr::Mul(
-                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::Div(l, r, _) => Expr::Div(
-                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::Mod(l, r, _) => Expr::Mod(
-                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::FAdd(l, r, _) => Expr::FAdd(
-                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::FSub(l, r, _) => Expr::FSub(
-                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::FMul(l, r, _) => Expr::FMul(
-                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::FDiv(l, r, _) => Expr::FDiv(
-                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::Eq(l, r, _) => Expr::Eq(
-                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::Ne(l, r, _) => Expr::Ne(
-                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::Lt(l, r, _) => Expr::Lt(
-                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::Le(l, r, _) => Expr::Le(
-                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::Gt(l, r, _) => Expr::Gt(
-                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::Ge(l, r, _) => Expr::Ge(
-                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::FEq(l, r, _) => Expr::FEq(
-                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::FNe(l, r, _) => Expr::FNe(
-                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::FLt(l, r, _) => Expr::FLt(
-                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::FLe(l, r, _) => Expr::FLe(
-                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::FGt(l, r, _) => Expr::FGt(
-                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::FGe(l, r, _) => Expr::FGe(
-                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::And(l, r, _) => Expr::And(
-                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::Or(l, r, _) => Expr::Or(
-                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::Not(e, _) => Expr::Not(
-                    Box::new(process_expr(*e, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::StrCat(l, r, _) => Expr::StrCat(
-                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::VarDecl(name, ty, val, _) => Expr::VarDecl(
-                    name,
-                    ty,
-                    Box::new(process_expr(*val, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::VarAssign(name, val, _) => Expr::VarAssign(
-                    name,
-                    Box::new(process_expr(*val, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::Call(func, args, _) => Expr::Call(
-                    Box::new(process_expr(*func, lambda_counter, lambda_map)),
-                    args.into_iter()
-                        .map(|a| process_expr(a, lambda_counter, lambda_map))
-                        .collect(),
-                    Span::new(0, 0),
-                ),
-                Expr::Return(e, _) => Expr::Return(
-                    Box::new(process_expr(*e, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::If(cond, then_branch, else_branch, _) => Expr::If(
-                    Box::new(process_expr(*cond, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*then_branch, lambda_counter, lambda_map)),
-                    else_branch.map(|e| Box::new(process_expr(*e, lambda_counter, lambda_map))),
-                    Span::new(0, 0),
-                ),
-                Expr::While(cond, body, _) => Expr::While(
-                    Box::new(process_expr(*cond, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*body, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::For(var, array, body, _) => Expr::For(
-                    var,
-                    Box::new(process_expr(*array, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*body, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::Index(arr, idx, _) => Expr::Index(
-                    Box::new(process_expr(*arr, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*idx, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::IndexAssign(arr, val, _) => Expr::IndexAssign(
-                    Box::new(process_expr(*arr, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*val, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::ArrayLiteral(elements, _) => Expr::ArrayLiteral(
-                    elements
-                        .into_iter()
-                        .map(|e| process_expr(e, lambda_counter, lambda_map))
-                        .collect(),
-                    Span::new(0, 0),
-                ),
-                Expr::ArrayFill(ty, len, _) => Expr::ArrayFill(
-                    ty,
-                    Box::new(process_expr(*len, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::Range(start, end, _) => Expr::Range(
-                    Box::new(process_expr(*start, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*end, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::StructLiteral(name, fields, _) => Expr::StructLiteral(
-                    name,
-                    fields
-                        .into_iter()
-                        .map(|(n, e)| (n, process_expr(e, lambda_counter, lambda_map)))
-                        .collect(),
-                    Span::new(0, 0),
-                ),
-                Expr::MemberAccess(obj, field, _) => Expr::MemberAccess(
-                    Box::new(process_expr(*obj, lambda_counter, lambda_map)),
-                    field,
-                    Span::new(0, 0),
-                ),
-                Expr::MemberAssign(obj, field, val, _) => Expr::MemberAssign(
-                    Box::new(process_expr(*obj, lambda_counter, lambda_map)),
-                    field,
-                    Box::new(process_expr(*val, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::AddressOf(expr, _) => Expr::AddressOf(
-                    Box::new(process_expr(*expr, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::Deref(expr, _) => Expr::Deref(
-                    Box::new(process_expr(*expr, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::DerefAssign(ptr, val, _) => Expr::DerefAssign(
-                    Box::new(process_expr(*ptr, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*val, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                Expr::FuncDecl(name, params, ret_type, body, _) => Expr::FuncDecl(
-                    name,
-                    params,
-                    ret_type,
-                    Box::new(process_expr(*body, lambda_counter, lambda_map)),
-                    Span::new(0, 0),
-                ),
-                _ => expr,
+    pub fn compile(&mut self) -> Result<String, CodeGenError> {
+        assemble!(self.text, "section .text");
+        for func in &self.program.functions {
+            if func.is_external {
+                assemble!(self.text, "extern {}", func.name);
             }
         }
+        assemble!(self.text, "extern malloc");
+        assemble!(self.text, "extern strlen");
+        assemble!(self.text, "extern memcpy");
+        assemble!(self.text, "extern strcpy");
+        assemble!(self.data, "section .data");
+        assemble!(self.data, "align 16");
+        assemble!(self.data, "neg_mask: dq 0x8000000000000000, 0");
 
-        for expr in program.body {
-            let processed = process_expr(expr, &mut self.lambda_counter, &mut lambda_map);
-            new_body.push(processed);
+        for func in take(&mut self.program.functions) {
+            self.compile_fn(func)?;
         }
 
-        let lambda_funcs: Vec<Expr> = lambda_map.into_values().collect();
-        new_body.splice(0..0, lambda_funcs);
-
-        Program { body: new_body }
+        Ok(take(&mut self.data) + &self.text)
     }
 
-    pub fn generate(mut self) -> Result<Vec<u8>, CodeGenError> {
-        self.ast = self.convert_lambdas_to_functions(self.ast.clone());
-
-        for expr in self.ast.body.clone() {
-            match expr {
-                Expr::FuncDecl(name, params, ret_type, _body, _) => {
-                    let mut sig = self.module.make_signature();
-                    sig.call_conv = CallConv::SystemV;
-                    for (_, t) in params {
-                        sig.params.push(AbiParam::new(get_type(&t, &self.type_map)));
+    fn compile_code(&mut self, code: Instruction) -> Result<(), CodeGenError> {
+        match code.op {
+            Op::Move => {
+                let src = code
+                    .src1
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Move operation requires src1".to_string(),
+                    })?;
+                let dst = code
+                    .dst
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Move operation requires dst".to_string(),
+                    })?;
+                self.load(src, "rax")?;
+                if match src {
+                    Operand::Var(_) | Operand::Temp(_, _) => {
+                        self.get_offset(src)? != self.get_offset(dst)?
                     }
-
-                    if !matches!(ret_type, Type::Named(ref n) if n == "void") {
-                        sig.returns
-                            .push(AbiParam::new(get_type(&ret_type, &self.type_map)));
-                    }
-                    let func_id = self
-                        .module
-                        .declare_function(name.as_str(), Linkage::Export, &sig)
-                        .unwrap();
-                    self.func_signatures.insert(name, (func_id, sig));
+                    _ => true,
+                } {
+                    assemble!(self.text, "mov [rbp - {}], rax", self.get_offset(dst)?);
                 }
-                Expr::Extern(name, params, ret_type, _) => {
-                    let mut sig = self.module.make_signature();
-                    sig.call_conv = CallConv::SystemV;
-                    for (_, t) in params {
-                        sig.params.push(AbiParam::new(get_type(&t, &self.type_map)));
+                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::FMove => {
+                let src = code
+                    .src1
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "FMove operation requires src1".to_string(),
+                    })?;
+                let dst = code
+                    .dst
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "FMove operation requires dst".to_string(),
+                    })?;
+                self.load(src, "xmm0")?;
+                if match src {
+                    Operand::Var(_) | Operand::Temp(_, _) => {
+                        self.get_offset(src)? != self.get_offset(dst)?
                     }
-
-                    if !matches!(ret_type, Type::Named(ref n) if n == "void") {
-                        sig.returns
-                            .push(AbiParam::new(get_type(&ret_type, &self.type_map)));
-                    }
-                    let func_id = self
-                        .module
-                        .declare_function(name.as_str(), Linkage::Import, &sig)
-                        .unwrap();
-                    self.func_signatures.insert(name, (func_id, sig));
+                    _ => true,
+                } {
+                    assemble!(self.text, "movsd [rbp - {}], xmm0", self.get_offset(dst)?);
                 }
-                Expr::TypeDef(_) => {}
-                Expr::Struct(name, fields, _) => {
-                    let mut offset = 0i64;
-                    let mut max_align = 1i64;
-                    let mut struct_fields = Vec::new();
-
-                    for (field_name, field_ty) in fields {
-                        let field_align =
-                            Self::get_type_align(&field_ty, &self.type_map, &self.structs);
-                        let field_size =
-                            Self::get_type_size(&field_ty, &self.type_map, &self.structs);
-
-                        if offset % field_align != 0 {
-                            offset = ((offset / field_align) + 1) * field_align;
+                self.regs.insert("xmm0".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::Load | Op::Store => {
+                let src = code
+                    .src1
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Load/Store operation requires src1".to_string(),
+                    })?;
+                let dst = code
+                    .dst
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Load/Store operation requires dst".to_string(),
+                    })?;
+                self.load(src, "rax")?;
+                assemble!(self.text, "mov [rbp - {}], rax", self.get_offset(dst)?);
+                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::FLoad | Op::FStore => {
+                let src = code
+                    .src1
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "FLoad/FStore operation requires src1".to_string(),
+                    })?;
+                let dst = code
+                    .dst
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "FLoad/FStore operation requires dst".to_string(),
+                    })?;
+                self.load(src, "xmm0")?;
+                assemble!(self.text, "movsd [rbp - {}], xmm0", self.get_offset(dst)?);
+                self.regs.insert("xmm0".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::Add
+            | Op::Sub
+            | Op::Mul
+            | Op::Div
+            | Op::And
+            | Op::Or
+            | Op::LAnd
+            | Op::LOr
+            | Op::Xor => {
+                let dst = code
+                    .dst
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Binary operation requires dst".to_string(),
+                    })?;
+                let src1 = code
+                    .src1
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Binary operation requires src1".to_string(),
+                    })?;
+                let src2 = code
+                    .src2
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Binary operation requires src2".to_string(),
+                    })?;
+                let asm_op = self.get_asm_op(&code.op).to_string();
+                self.load(src1, "rax")?;
+                match src2 {
+                    Operand::ConstIdx(idx) => {
+                        if let IRConst::Int(v) = &self.program.constants[*idx] {
+                            assemble!(self.text, "{} rax, {}", asm_op, v);
                         }
-
-                        struct_fields.push(StructField {
-                            name: field_name,
-                            ty: field_ty,
-                            offset,
-                        });
-
-                        offset += field_size;
-                        max_align = max_align.max(field_align);
                     }
-
-                    let size = if offset % max_align != 0 {
-                        ((offset / max_align) + 1) * max_align
-                    } else {
-                        offset
-                    };
-
-                    self.structs.insert(
-                        name,
-                        StructDef {
-                            fields: struct_fields,
-                            size,
-                            align: max_align,
-                        },
-                    );
+                    Operand::Var(_) | Operand::Temp(_, _) => {
+                        let off = self.get_offset(src2)?;
+                        if matches!(code.op, Op::Div) {
+                            self.load(src2, "rbx")?;
+                            assemble!(self.text, "cqo");
+                            assemble!(self.text, "idiv rbx");
+                        } else {
+                            assemble!(self.text, "{} rax, qword [rbp - {}]", asm_op, off);
+                        }
+                    }
+                    _ => {
+                        self.load(src2, "rbx")?;
+                        assemble!(self.text, "{} rax, rbx", asm_op);
+                    }
                 }
-                expr => {
-                    let span = expr.span();
-                    return Err(CodeGenError::UnexpectedExpression { found: expr, span });
+                assemble!(self.text, "mov [rbp - {}], rax", self.get_offset(dst)?);
+                self.regs.remove("rax");
+                self.regs.remove("rdx");
+                if matches!(code.op, Op::Div) {
+                    self.regs.remove("rbx");
                 }
+                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::Mod => {
+                let dst = code
+                    .dst
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Mod operation requires dst".to_string(),
+                    })?;
+                let src1 = code
+                    .src1
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Mod operation requires src1".to_string(),
+                    })?;
+                let src2 = code
+                    .src2
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Mod operation requires src2".to_string(),
+                    })?;
+                self.load(src1, "rax")?;
+                self.load(src2, "rbx")?;
+                assemble!(self.text, "cqo");
+                assemble!(self.text, "idiv rbx");
+                assemble!(self.text, "mov [rbp - {}], rdx", self.get_offset(dst)?);
+                self.regs.clear();
+                self.regs.insert("rdx".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::FAdd | Op::FSub | Op::FMul | Op::FDiv => {
+                let dst = code
+                    .dst
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Float binary operation requires dst".to_string(),
+                    })?;
+                let src1 = code
+                    .src1
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Float binary operation requires src1".to_string(),
+                    })?;
+                let src2 = code
+                    .src2
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Float binary operation requires src2".to_string(),
+                    })?;
+                let fasm_op = self.get_fasm_op(&code.op).to_string();
+                self.load(src1, "xmm0")?;
+                match src2 {
+                    Operand::ConstIdx(idx) => {
+                        if let IRConst::Float(f) = &self.program.constants[*idx] {
+                            let lbl = self.alloc_flt(*f);
+                            assemble!(self.text, "{} xmm0, [rel {}]", fasm_op, lbl);
+                        }
+                    }
+                    Operand::Var(_) | Operand::Temp(_, _) => {
+                        let off = self.get_offset(src2)?;
+                        assemble!(self.text, "{} xmm0, qword [rbp - {}]", fasm_op, off);
+                    }
+                    _ => {
+                        self.load(src2, "xmm1")?;
+                        assemble!(self.text, "{} xmm0, xmm1", fasm_op);
+                    }
+                }
+                assemble!(self.text, "movsd [rbp - {}], xmm0", self.get_offset(dst)?);
+                self.regs.insert("xmm0".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::Eq | Op::Ne | Op::Gt | Op::Ge | Op::Lt | Op::Le => {
+                let dst = code
+                    .dst
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Comparison operation requires dst".to_string(),
+                    })?;
+                let src1 = code
+                    .src1
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Comparison operation requires src1".to_string(),
+                    })?;
+                let src2 = code
+                    .src2
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Comparison operation requires src2".to_string(),
+                    })?;
+                self.load(src1, "rax")?;
+                self.load(src2, "rbx")?;
+                assemble!(self.text, "cmp rax, rbx");
+                let set_op = match code.op {
+                    Op::Eq => "sete",
+                    Op::Ne => "setne",
+                    Op::Gt => "setg",
+                    Op::Ge => "setge",
+                    Op::Lt => "setl",
+                    Op::Le => "setle",
+                    _ => unreachable!(),
+                };
+                assemble!(self.text, "{} al", set_op);
+                assemble!(self.text, "movzx eax, al");
+                assemble!(self.text, "mov [rbp - {}], rax", self.get_offset(dst)?);
+                self.regs.clear();
+                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::FEq | Op::FNe | Op::FGt | Op::FGe | Op::FLt | Op::FLe => {
+                let dst = code
+                    .dst
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Float comparison operation requires dst".to_string(),
+                    })?;
+                let src1 = code
+                    .src1
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Float comparison operation requires src1".to_string(),
+                    })?;
+                let src2 = code
+                    .src2
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Float comparison operation requires src2".to_string(),
+                    })?;
+                self.load(src1, "xmm0")?;
+                self.load(src2, "xmm1")?;
+                assemble!(self.text, "ucomisd xmm0, xmm1");
+                let set_op = match code.op {
+                    Op::FEq => "sete",
+                    Op::FNe => "setne",
+                    Op::FGt => "seta",
+                    Op::FGe => "setae",
+                    Op::FLt => "setb",
+                    Op::FLe => "setbe",
+                    _ => unreachable!(),
+                };
+                assemble!(self.text, "{} al", set_op);
+                assemble!(self.text, "movzx eax, al");
+                assemble!(self.text, "mov [rbp - {}], rax", self.get_offset(dst)?);
+                self.regs.clear();
+                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::Neg | Op::Inc | Op::Dec | Op::SizeOf => {
+                let dst = code
+                    .dst
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Unary operation requires dst".to_string(),
+                    })?;
+                let src1 = code
+                    .src1
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Unary operation requires src1".to_string(),
+                    })?;
+                self.load(src1, "rax")?;
+                match code.op {
+                    Op::Neg => assemble!(self.text, "neg rax"),
+                    Op::Inc => assemble!(self.text, "inc rax"),
+                    Op::Dec => assemble!(self.text, "dec rax"),
+                    Op::SizeOf => assemble!(self.text, "mov rax, [rax]"),
+                    _ => unreachable!(),
+                }
+                assemble!(self.text, "mov [rbp - {}], rax", self.get_offset(dst)?);
+                self.regs.clear();
+                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::Not => {
+                let dst = code
+                    .dst
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Not operation requires dst".to_string(),
+                    })?;
+                let src1 = code
+                    .src1
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Not operation requires src1".to_string(),
+                    })?;
+                self.load(src1, "rax")?;
+                assemble!(self.text, "xor rax, 1");
+                assemble!(self.text, "mov [rbp - {}], rax", self.get_offset(dst)?);
+                self.regs.clear();
+                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::FNeg => {
+                let dst = code
+                    .dst
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "FNeg operation requires dst".to_string(),
+                    })?;
+                let src1 = code
+                    .src1
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "FNeg operation requires src1".to_string(),
+                    })?;
+                self.load(src1, "xmm0")?;
+                assemble!(self.text, "xorpd xmm0, oword [rel neg_mask]");
+                assemble!(self.text, "movsd [rbp - {}], xmm0", self.get_offset(dst)?);
+                self.regs.clear();
+                self.regs.insert("xmm0".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::Range => {
+                let dst = code
+                    .dst
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Range operation requires dst".to_string(),
+                    })?;
+                let src1 = code
+                    .src1
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Range operation requires src1".to_string(),
+                    })?;
+                let src2 = code
+                    .src2
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Range operation requires src2".to_string(),
+                    })?;
+                self.load(src1, "rdi")?;
+                self.load(src2, "rsi")?;
+                let end_lbl = self.new_label("range_end");
+                let fill_lbl = self.new_label("range_fill");
+                let skip_lbl = self.new_label("range_skip");
+                assemble!(self.text, "push rdi");
+                assemble!(self.text, "push rsi");
+                assemble!(self.text, "mov rax, rsi");
+                assemble!(self.text, "sub rax, rdi");
+                assemble!(self.text, "cmp rax, 0");
+                assemble!(self.text, "jge near {}", skip_lbl);
+                assemble!(self.text, "xor rax, rax");
+                assemble!(self.text, "{}:", skip_lbl);
+                assemble!(self.text, "push rax");
+                assemble!(self.text, "lea rdi, [rax * 8 + 8]");
+                assemble!(self.text, "call malloc wrt ..plt");
+                assemble!(self.text, "pop rdx");
+                assemble!(self.text, "mov [rax], rdx");
+                assemble!(self.text, "xor rcx, rcx");
+                assemble!(self.text, "pop rsi");
+                assemble!(self.text, "pop rdi");
+                assemble!(self.text, "{}:", fill_lbl);
+                assemble!(self.text, "cmp rcx, rdx");
+                assemble!(self.text, "jge near {}", end_lbl);
+                assemble!(self.text, "mov r8, rdi");
+                assemble!(self.text, "add r8, rcx");
+                assemble!(self.text, "mov [rax + rcx * 8 + 8], r8");
+                assemble!(self.text, "inc rcx");
+                assemble!(self.text, "jmp near {}", fill_lbl);
+                assemble!(self.text, "{}:", end_lbl);
+                assemble!(self.text, "mov [rbp - {}], rax", self.get_offset(dst)?);
+                self.regs.clear();
+                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::Arg(n) => {
+                let op = code
+                    .src1
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Arg operation requires src1".to_string(),
+                    })?;
+                if n < 6 {
+                    let reg = self.arg_reg[n].clone();
+                    self.load(op, &reg)?;
+                } else {
+                    self.load(op, "rax")?;
+                    assemble!(self.text, "push rax");
+                }
+                Ok(())
+            }
+            Op::FArg(n) => {
+                let op = code
+                    .src1
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "FArg operation requires src1".to_string(),
+                    })?;
+                if n < 8 {
+                    self.curr_flt_reg = n + 1;
+                    let reg = self.flt_arg_reg[n].clone();
+                    self.load(op, &reg)?;
+                } else {
+                    self.curr_flt_reg = 8;
+                    self.load(op, "xmm0")?;
+                    assemble!(self.text, "sub rsp, 8");
+                    assemble!(self.text, "movsd [rsp], xmm0");
+                }
+                Ok(())
+            }
+            Op::Call => {
+                let dst = code
+                    .dst
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Call operation requires dst".to_string(),
+                    })?;
+                let src1 = code
+                    .src1
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Call operation requires src1".to_string(),
+                    })?;
+                match src1 {
+                    Operand::Function(name) => {
+                        if self.curr_flt_reg > 0 {
+                            assemble!(self.text, "mov al, {}", self.curr_flt_reg);
+                        } else {
+                            assemble!(self.text, "xor al, al");
+                        }
+                        self.curr_flt_reg = 0;
+                        if self.internals.contains(name) {
+                            assemble!(self.text, "call {}", name);
+                        } else {
+                            assemble!(self.text, "call {} wrt ..plt", name);
+                        }
+                    }
+                    _ => {
+                        self.load(src1, "rax")?;
+                        assemble!(self.text, "call rax");
+                    }
+                }
+                let caller_saved = ["rax", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11"];
+                for reg in caller_saved {
+                    self.regs.remove(reg);
+                }
+                for i in 0..16 {
+                    self.regs.remove(&format!("xmm{}", i));
+                }
+                let is_float = match dst {
+                    Operand::Temp(_, IRType::Float) => true,
+                    _ => false,
+                };
+                if is_float {
+                    assemble!(self.text, "movsd [rbp - {}], xmm0", self.get_offset(dst)?);
+                    self.regs.insert("xmm0".to_string(), Some(dst.clone()));
+                } else {
+                    assemble!(self.text, "mov [rbp - {}], rax", self.get_offset(dst)?);
+                    self.regs.insert("rax".to_string(), Some(dst.clone()));
+                }
+                Ok(())
+            }
+            Op::Label(lbl) => {
+                assemble!(self.text, "{}:", lbl);
+                self.regs.clear();
+                Ok(())
+            }
+            Op::Jump => {
+                let src1 = code
+                    .src1
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Jump operation requires src1".to_string(),
+                    })?;
+                if let Operand::Label(lbl) = src1 {
+                    assemble!(self.text, "jmp near {}", lbl);
+                }
+                Ok(())
+            }
+            Op::JumpIfFalse => {
+                let src1 = code
+                    .src1
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "JumpIfFalse operation requires src1".to_string(),
+                    })?;
+                let src2 = code
+                    .src2
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "JumpIfFalse operation requires src2".to_string(),
+                    })?;
+                let lbl = match src2 {
+                    Operand::Label(s) => s,
+                    _ => {
+                        return Err(CodeGenError::InvalidOperand {
+                            message: "JumpIfFalse src2 must be a Label".to_string(),
+                        });
+                    }
+                };
+                self.load(src1, "rax")?;
+                assemble!(self.text, "cmp rax, 0");
+                assemble!(self.text, "je near {}", lbl);
+                Ok(())
+            }
+            Op::ArrayAccess => {
+                let dst = code
+                    .dst
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "ArrayAccess operation requires dst".to_string(),
+                    })?;
+                let src1 = code
+                    .src1
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "ArrayAccess operation requires src1".to_string(),
+                    })?;
+                let src2 = code
+                    .src2
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "ArrayAccess operation requires src2".to_string(),
+                    })?;
+                self.load(src1, "r10")?;
+                self.load(src2, "rcx")?;
+                assemble!(self.text, "lea rax, [r10 + rcx * 8 + 8]");
+                assemble!(self.text, "mov rax, [rax]");
+                assemble!(self.text, "mov [rbp - {}], rax", self.get_offset(dst)?);
+                self.regs.clear();
+                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::ArrayAssign => {
+                let dst = code
+                    .dst
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "ArrayAssign operation requires dst".to_string(),
+                    })?;
+                let src1 = code
+                    .src1
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "ArrayAssign operation requires src1".to_string(),
+                    })?;
+                let src2 = code
+                    .src2
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "ArrayAssign operation requires src2".to_string(),
+                    })?;
+                self.load(dst, "r10")?;
+                self.load(src1, "rcx")?;
+                self.load(src2, "rax")?;
+                assemble!(self.text, "lea rdx, [r10 + rcx * 8 + 8]");
+                assemble!(self.text, "mov [rdx], rax");
+                Ok(())
+            }
+            Op::Lea => {
+                let dst = code
+                    .dst
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Lea operation requires dst".to_string(),
+                    })?;
+                let src1 = code
+                    .src1
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Lea operation requires src1".to_string(),
+                    })?;
+                let offset = self.get_offset(src1)?;
+                assemble!(self.text, "lea rax, [rbp - {}]", offset);
+                assemble!(self.text, "mov [rbp - {}], rax", self.get_offset(dst)?);
+                self.regs.clear();
+                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::Malloc => {
+                let dst = code
+                    .dst
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Malloc operation requires dst".to_string(),
+                    })?;
+                let src1 = code
+                    .src1
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "Malloc operation requires src1".to_string(),
+                    })?;
+                self.load(src1, "rdi")?;
+                assemble!(self.text, "call malloc wrt ..plt");
+                assemble!(self.text, "mov [rbp - {}], rax", self.get_offset(dst)?);
+                self.regs.clear();
+                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::StoreAt => {
+                let dst = code
+                    .dst
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "StoreAt operation requires dst".to_string(),
+                    })?;
+                let src1 = code
+                    .src1
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "StoreAt operation requires src1".to_string(),
+                    })?;
+                let src2 = code
+                    .src2
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "StoreAt operation requires src2".to_string(),
+                    })?;
+                self.load(dst, "r10")?;
+                self.load(src2, "rax")?;
+                match src1 {
+                    Operand::ConstIdx(idx) => {
+                        if let IRConst::Int(offset) = &self.program.constants[*idx] {
+                            if *offset == 0 {
+                                assemble!(self.text, "mov [r10], rax");
+                            } else {
+                                assemble!(self.text, "mov [r10 + {}], rax", offset);
+                            }
+                        }
+                    }
+                    _ => {
+                        self.load(src1, "r11")?;
+                        assemble!(self.text, "add r10, r11");
+                        assemble!(self.text, "mov [r10], rax");
+                    }
+                }
+                Ok(())
+            }
+            Op::LoadAt => {
+                let dst = code
+                    .dst
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "LoadAt operation requires dst".to_string(),
+                    })?;
+                let src1 = code
+                    .src1
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "LoadAt operation requires src1".to_string(),
+                    })?;
+                let src2 = code
+                    .src2
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "LoadAt operation requires src2".to_string(),
+                    })?;
+                self.load(src1, "r10")?;
+                match src2 {
+                    Operand::ConstIdx(idx) => {
+                        if let IRConst::Int(offset) = &self.program.constants[*idx] {
+                            if *offset == 0 {
+                                assemble!(self.text, "mov rax, [r10]");
+                            } else {
+                                assemble!(self.text, "mov rax, [r10 + {}]", offset);
+                            }
+                        }
+                    }
+                    _ => {
+                        self.load(src2, "r11")?;
+                        assemble!(self.text, "add r10, r11");
+                        assemble!(self.text, "mov rax, [r10]");
+                    }
+                }
+                assemble!(self.text, "mov [rbp - {}], rax", self.get_offset(dst)?);
+                self.regs.clear();
+                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::StrLen => {
+                let dst = code
+                    .dst
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "StrLen operation requires dst".to_string(),
+                    })?;
+                let src1 = code
+                    .src1
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "StrLen operation requires src1".to_string(),
+                    })?;
+                self.load(src1, "rdi")?;
+                assemble!(self.text, "call strlen wrt ..plt");
+                assemble!(self.text, "mov [rbp - {}], rax", self.get_offset(dst)?);
+                self.regs.clear();
+                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::MemCopy => {
+                let dst_op = code
+                    .dst
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "MemCopy operation requires dst".to_string(),
+                    })?;
+                let src1 = code
+                    .src1
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "MemCopy operation requires src1".to_string(),
+                    })?;
+                let src2 = code
+                    .src2
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "MemCopy operation requires src2".to_string(),
+                    })?;
+                self.load(dst_op, "rdi")?;
+                self.load(src1, "rsi")?;
+                self.load(src2, "rdx")?;
+                assemble!(self.text, "call memcpy wrt ..plt");
+                Ok(())
+            }
+            Op::StrCat => {
+                let dst = code
+                    .dst
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "StrCat operation requires dst".to_string(),
+                    })?;
+                let src1 = code
+                    .src1
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "StrCat operation requires src1".to_string(),
+                    })?;
+                let src2 = code
+                    .src2
+                    .as_ref()
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: "StrCat operation requires src2".to_string(),
+                    })?;
+                let off_tmp = self.load_to_temp(src1)?;
+                assemble!(self.text, "mov rdi, [rbp - {}]", off_tmp);
+                assemble!(self.text, "call strlen wrt ..plt");
+                assemble!(self.text, "mov rbx, rax");
+                let off_tmp2 = self.load_to_temp(src2)?;
+                assemble!(self.text, "mov rdi, [rbp - {}]", off_tmp2);
+                assemble!(self.text, "call strlen wrt ..plt");
+                assemble!(self.text, "lea rdi, [rbx + rax + 1]");
+                assemble!(self.text, "call malloc wrt ..plt");
+                assemble!(self.text, "mov r15, rax");
+                assemble!(self.text, "mov rdi, r15");
+                assemble!(self.text, "mov rsi, [rbp - {}]", off_tmp);
+                assemble!(self.text, "call strcpy wrt ..plt");
+                assemble!(self.text, "mov rdi, r15");
+                assemble!(self.text, "call strlen wrt ..plt");
+                assemble!(self.text, "lea rdi, [r15 + rax]");
+                assemble!(self.text, "mov rsi, [rbp - {}]", off_tmp2);
+                assemble!(self.text, "call strcpy wrt ..plt");
+                assemble!(self.text, "mov [rbp - {}], r15", self.get_offset(dst)?);
+                self.regs.clear();
+                self.regs.insert("r15".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::Return(reg) => {
+                if let Some(ref val) = code.src1 {
+                    self.load(val, &reg)?;
+                }
+                assemble!(self.text, "jmp near {}", self.ret_label);
+                Ok(())
             }
         }
-        let mut str_idx = 0u32;
-        for expr in self.ast.body.clone() {
-            match expr {
-                Expr::FuncDecl(name, params, ret_type, body, _) => {
-                    self.compile_func(name, params, ret_type, body, &mut str_idx)?;
-                }
-                Expr::Extern(_, _, _, _) => {}
-                Expr::TypeDef(_) => {}
-                Expr::Struct(_, _, _) => {}
-                expr => {
-                    let span = expr.span();
-                    return Err(CodeGenError::UnexpectedExpression { found: expr, span });
-                }
-            }
-        }
-
-        let product = self.module.finish();
-        let object_code = product
-            .emit()
-            .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
-        Ok(object_code.to_vec())
     }
 
-    fn compile_func(
-        &mut self,
-        name: String,
-        params: Vec<(String, Type)>,
-        _ret_type: Type,
-        body: Box<Expr>,
-        str_idx: &mut u32,
-    ) -> Result<(), CodeGenError> {
-        let (func_id, ref sig) = self.func_signatures[&name].clone();
+    fn load_to_temp(&self, op: &Operand) -> Result<usize, CodeGenError> {
+        match op {
+            Operand::Var(_) | Operand::Temp(_, _) => self.get_offset(op),
+            _ => Err(CodeGenError::InvalidOperand {
+                message: "load_to_temp not supported".to_string(),
+            }),
+        }
+    }
 
-        let mut new_ctx = self.module.make_context();
-        new_ctx.func.signature = sig.clone();
-
-        let mut builder = FunctionBuilder::new(&mut new_ctx.func, &mut self.builder_context);
-        let entry_block = builder.create_block();
-        builder.append_block_params_for_function_params(entry_block);
-        builder.switch_to_block(entry_block);
-        builder.seal_block(entry_block);
-
-        let mut scope_stack: Vec<HashMap<String, Slot>> = Vec::new();
-        let mut type_stack: Vec<HashMap<String, Type>> = Vec::new();
-        scope_stack.push(HashMap::new());
-        type_stack.push(HashMap::new());
-        let mut idx = 0;
-
-        for (i, (param_name, param_ty)) in params.iter().enumerate() {
-            let val = builder.block_params(entry_block)[i];
-
-            let slot_size = Self::get_type_size(param_ty, &self.type_map, &self.structs) as u32;
-            let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
-                ir::StackSlotKind::ExplicitSlot,
-                slot_size,
-                0,
-            ));
-
-            builder.ins().stack_store(val, slot, 0);
-            scope_stack[0].insert(param_name.clone(), Slot::StackSlot(slot));
-            type_stack[0].insert(param_name.clone(), param_ty.clone());
-            idx += 1;
+    fn compile_fn(&mut self, func: IRFunction) -> Result<(), CodeGenError> {
+        if func.is_external {
+            assemble!(self.text, "extern {}", func.name);
+            return Ok(());
         }
 
-        Self::compile_expr(
-            &body,
-            &mut builder,
-            &mut scope_stack,
-            &mut type_stack,
-            &mut idx,
-            &self.func_signatures,
-            &mut self.module,
-            str_idx,
-            &mut self.loop_stack,
-            &self.type_map,
-            &self.structs,
-        )?;
+        self.vars.clear();
+        self.regs.clear();
+        let mut offset = 0;
 
-        if matches!(_ret_type, Type::Named(ref n) if n == "void") {
-            builder.ins().return_(&[]);
+        for (param, _) in &func.params {
+            if let Operand::Var(name) = param {
+                if !self.vars.contains_key(name) {
+                    offset += 8;
+                    self.vars.insert(name.clone(), offset);
+                }
+            }
+        }
+        for inst in &func.instructions {
+            let mut register_op = |op_opt: &Option<Operand>| {
+                if let Some(op) = op_opt {
+                    match op {
+                        Operand::Var(name) => {
+                            if !self.vars.contains_key(name) {
+                                offset += 8;
+                                self.vars.insert(name.clone(), offset);
+                            }
+                        }
+                        Operand::Temp(id, _) => {
+                            let temp_key = format!("_tmp_{}", id);
+                            if !self.vars.contains_key(&temp_key) {
+                                offset += 8;
+                                self.vars.insert(temp_key, offset);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            };
+            register_op(&inst.dst);
+            register_op(&inst.src1);
+            register_op(&inst.src2);
         }
 
-        builder.finalize();
-        self.module
-            .define_function(func_id, &mut new_ctx)
-            .map_err(|e| {
-                eprintln!("Verification error for function '{}':", name);
-                eprintln!("Function IR:\n{}", new_ctx.func.display());
-                CodeGenError::ModuleError(format!("{}: {}", name, e), Span::new(0, 0))
-            })?;
+        let stack_size = (offset + 15) & !15;
+        if func.is_pub {
+            assemble!(self.text, "global {}", func.name);
+        }
+        assemble!(self.text, "{}:", func.name);
+        assemble!(self.text, "push rbp");
+        assemble!(self.text, "mov rbp, rsp");
+        if stack_size > 0 {
+            assemble!(self.text, "sub rsp, {}", stack_size);
+        }
 
+        self.curr_fn = func.name.clone();
+        self.ret_label = format!(".L_{}_exit", func.name);
+
+        let mut int_idx = 0;
+        let mut flt_idx = 0;
+        for (param, ty) in &func.params {
+            let off = self.get_offset(param)?;
+            if matches!(ty, IRType::Float) {
+                if flt_idx < 8 {
+                    let reg = format!("xmm{}", flt_idx);
+                    assemble!(self.text, "movsd [rbp - {}], {}", off, reg);
+                    self.regs.insert(reg, Some(param.clone()));
+                    flt_idx += 1;
+                }
+            } else {
+                if int_idx < 6 {
+                    let reg = self.arg_reg[int_idx].clone();
+                    assemble!(self.text, "mov [rbp - {}], {}", off, reg);
+                    self.regs.insert(reg, Some(param.clone()));
+                    int_idx += 1;
+                }
+            }
+        }
+
+        let insts = &func.instructions;
+        for code in insts.iter() {
+            match &code.op {
+                Op::Return(reg_name) => {
+                    if let Some(ref val) = code.src1 {
+                        self.load(val, reg_name)?;
+                    }
+                    assemble!(self.text, "jmp near {}", self.ret_label);
+                }
+                Op::Label(name) => {
+                    assemble!(self.text, "{}:", name);
+                    self.regs.clear();
+                }
+                _ => {
+                    self.compile_code(code.clone())?;
+                }
+            }
+        }
+
+        assemble!(self.text, "{}:", self.ret_label);
+        assemble!(self.text, "leave");
+        assemble!(self.text, "ret");
         Ok(())
     }
 
-    pub(crate) fn find_var_assignments(expr: &Expr, modified_vars: &mut HashSet<String>) {
-        match expr {
-            Expr::Block(body, _) => {
-                for e in body {
-                    Self::find_var_assignments(e, modified_vars);
+    fn load(&mut self, op: &Operand, reg: &str) -> Result<(), CodeGenError> {
+        if let Some(Some(cached_op)) = self.regs.get(reg) {
+            if cached_op == op {
+                return Ok(());
+            }
+        }
+
+        match op {
+            Operand::ConstIdx(idx) => {
+                let constant = &self.program.constants[*idx];
+                match constant {
+                    IRConst::Int(v) => assemble!(self.text, "mov {}, {}", reg, v),
+                    IRConst::Float(f) => {
+                        let lbl = self.alloc_flt(*f);
+                        if reg.starts_with("xmm") {
+                            assemble!(self.text, "movsd {}, [rel {}]", reg, lbl);
+                        } else {
+                            assemble!(self.text, "mov {}, [rel {}]", reg, lbl);
+                        }
+                    }
+                    IRConst::Str(s) => {
+                        let lbl = self.alloc_str(s.clone());
+                        assemble!(self.text, "lea {}, [rel {}]", reg, lbl);
+                    }
+                    IRConst::Array(len, arr) => {
+                        self.alloc_arr(*len, arr.clone(), reg)?;
+                    }
                 }
             }
-            Expr::VarAssign(name, _, _) => {
-                modified_vars.insert(name.clone());
-            }
-            Expr::If(cond, t, e, _) => {
-                Self::find_var_assignments(cond, modified_vars);
-                Self::find_var_assignments(t, modified_vars);
-                if let Some(e) = e {
-                    Self::find_var_assignments(e, modified_vars);
+            Operand::Var(_) | Operand::Temp(_, _) => {
+                let off = self.get_offset(op)?;
+                if reg.starts_with("xmm") {
+                    assemble!(self.text, "movsd {}, qword [rbp - {}]", reg, off);
+                } else {
+                    assemble!(self.text, "mov {}, [rbp - {}]", reg, off);
                 }
             }
-            Expr::While(cond, body, _) => {
-                Self::find_var_assignments(cond, modified_vars);
-                Self::find_var_assignments(body, modified_vars);
-            }
-            Expr::For(_, array, body, _) => {
-                Self::find_var_assignments(array, modified_vars);
-                Self::find_var_assignments(body, modified_vars);
-            }
-            Expr::Add(l, r, _)
-            | Expr::Sub(l, r, _)
-            | Expr::Mul(l, r, _)
-            | Expr::Div(l, r, _)
-            | Expr::Mod(l, r, _)
-            | Expr::FAdd(l, r, _)
-            | Expr::FSub(l, r, _)
-            | Expr::FMul(l, r, _)
-            | Expr::FDiv(l, r, _)
-            | Expr::Eq(l, r, _)
-            | Expr::Ne(l, r, _)
-            | Expr::Lt(l, r, _)
-            | Expr::Le(l, r, _)
-            | Expr::Gt(l, r, _)
-            | Expr::Ge(l, r, _)
-            | Expr::FEq(l, r, _)
-            | Expr::FNe(l, r, _)
-            | Expr::FLt(l, r, _)
-            | Expr::FLe(l, r, _)
-            | Expr::FGt(l, r, _)
-            | Expr::FGe(l, r, _)
-            | Expr::And(l, r, _)
-            | Expr::Or(l, r, _)
-            | Expr::StrCat(l, r, _) => {
-                Self::find_var_assignments(l, modified_vars);
-                Self::find_var_assignments(r, modified_vars);
-            }
-            Expr::Not(e, _) | Expr::Return(e, _) => {
-                Self::find_var_assignments(e, modified_vars);
-            }
-            Expr::Call(func, args, _) => {
-                Self::find_var_assignments(func, modified_vars);
-                for a in args {
-                    Self::find_var_assignments(a, modified_vars);
-                }
-            }
-            Expr::Index(arr, idx, _) => {
-                Self::find_var_assignments(arr, modified_vars);
-                Self::find_var_assignments(idx, modified_vars);
-            }
-            Expr::IndexAssign(arr, _, _) => {
-                Self::find_var_assignments(arr, modified_vars);
-            }
-            Expr::ArrayLiteral(elements, _) => {
-                for e in elements {
-                    Self::find_var_assignments(e, modified_vars);
-                }
-            }
-            Expr::ArrayFill(_, len, _) => {
-                Self::find_var_assignments(len, modified_vars);
-            }
-            Expr::StructLiteral(_, fields, _) => {
-                for (_, f) in fields {
-                    Self::find_var_assignments(f, modified_vars);
-                }
-            }
-            Expr::MemberAccess(obj, _, _) => {
-                Self::find_var_assignments(obj, modified_vars);
-            }
-            Expr::MemberAssign(obj, _, val, _) => {
-                Self::find_var_assignments(obj, modified_vars);
-                Self::find_var_assignments(val, modified_vars);
-            }
-            Expr::AddressOf(expr, _) => {
-                Self::find_var_assignments(expr, modified_vars);
-            }
-            Expr::Deref(expr, _) => {
-                Self::find_var_assignments(expr, modified_vars);
-            }
-            Expr::DerefAssign(ptr, val, _) => {
-                Self::find_var_assignments(ptr, modified_vars);
-                Self::find_var_assignments(val, modified_vars);
+            Operand::Function(name) => {
+                assemble!(self.text, "lea {}, [rel {}]", reg, name);
             }
             _ => {}
         }
+
+        self.regs.insert(reg.to_string(), Some(op.clone()));
+        Ok(())
     }
 
-    fn lookup_var<'a>(name: &str, scope_stack: &'a Vec<HashMap<String, Slot>>) -> Option<&'a Slot> {
-        for scope in scope_stack.iter().rev() {
-            if let Some(v) = scope.get(name) {
-                return Some(v);
-            }
-        }
-        None
+    fn new_label(&mut self, name: &str) -> String {
+        let lbl = format!(".{}_{:X}", name, self.lbl_cnt);
+        self.lbl_cnt += 1;
+        lbl
     }
 
-    fn get_var_type(name: &str, type_stack: &Vec<HashMap<String, Type>>) -> Option<Type> {
-        for scope in type_stack.iter().rev() {
-            if let Some(ty) = scope.get(name) {
-                return Some(ty.clone());
-            }
-        }
-        None
-    }
-
-    fn get_expr_type(expr: &Expr, type_stack: &Vec<HashMap<String, Type>>) -> Type {
-        match expr {
-            Expr::Int(_, _) => Type::Named("int".to_string()),
-            Expr::Float(_, _) => Type::Named("float".to_string()),
-            Expr::Bool(_, _) => Type::Named("bool".to_string()),
-            Expr::String(_, _) => Type::Named("string".to_string()),
-            Expr::Nil(_) => Type::Named("void".to_string()),
-            Expr::Var(name, _) => {
-                for scope in type_stack.iter().rev() {
-                    if let Some(ty) = scope.get(name) {
-                        return ty.clone();
-                    }
-                }
-                Type::Named("int".to_string())
-            }
-            _ => Type::Named("int".to_string()),
-        }
-    }
-
-    fn has_return(expr: &Expr) -> bool {
-        match expr {
-            Expr::Return(_, _) => true,
-            Expr::Block(body, _) => body.last().map_or(false, |e| Self::has_return(e)),
-            Expr::If(_, then_branch, else_branch, _) => {
-                Self::has_return(then_branch)
-                    && else_branch.as_ref().map_or(false, |e| Self::has_return(e))
-            }
-            Expr::While(_, body, _) => Self::has_return(body),
-            Expr::For(_, _, body, _) => Self::has_return(body),
-            _ => false,
-        }
-    }
-
-    fn has_break_or_continue(expr: &Expr) -> bool {
-        match expr {
-            Expr::Break(_) | Expr::Continue(_) => true,
-            Expr::Block(body, _) => body.iter().any(|e| Self::has_break_or_continue(e)),
-            Expr::If(_, then_branch, else_branch, _) => {
-                Self::has_break_or_continue(then_branch)
-                    || else_branch
-                        .as_ref()
-                        .map_or(false, |e| Self::has_break_or_continue(e))
-            }
-            Expr::While(_, body, _) => Self::has_break_or_continue(body),
-            Expr::For(_, _, body, _) => Self::has_break_or_continue(body),
-            _ => false,
-        }
-    }
-
-    fn compile_string_concat(
-        lhs_ptr: Value,
-        rhs_ptr: Value,
-        builder: &mut FunctionBuilder,
-        module: &mut ObjectModule,
-    ) -> Result<Value, CodeGenError> {
-        let strlen_sig = {
-            let mut sig = module.make_signature();
-            sig.call_conv = CallConv::SystemV;
-            sig.params.push(AbiParam::new(types::I64));
-            sig.returns.push(AbiParam::new(types::I64));
-            sig
-        };
-        let strlen_id = module
-            .declare_function("strlen", Linkage::Import, &strlen_sig)
-            .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
-        let strlen_ref = module.declare_func_in_func(strlen_id, builder.func);
-
-        let lhs_len = builder.ins().call(strlen_ref, &[lhs_ptr]);
-        let lhs_len = builder.inst_results(lhs_len)[0];
-        let rhs_len = builder.ins().call(strlen_ref, &[rhs_ptr]);
-        let rhs_len = builder.inst_results(rhs_len)[0];
-
-        let total_len = builder.ins().iadd(lhs_len, rhs_len);
-        let alloc_size = builder.ins().iadd_imm(total_len, 1);
-
-        let malloc_sig = {
-            let mut sig = module.make_signature();
-            sig.call_conv = CallConv::SystemV;
-            sig.params.push(AbiParam::new(types::I64));
-            sig.returns.push(AbiParam::new(types::I64));
-            sig
-        };
-        let malloc_id = module
-            .declare_function("malloc", Linkage::Import, &malloc_sig)
-            .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
-        let malloc_ref = module.declare_func_in_func(malloc_id, builder.func);
-        let result_ptr = builder.ins().call(malloc_ref, &[alloc_size]);
-        let result_ptr = builder.inst_results(result_ptr)[0];
-
-        let memset_sig = {
-            let mut sig = module.make_signature();
-            sig.call_conv = CallConv::SystemV;
-            sig.params.push(AbiParam::new(types::I64));
-            sig.params.push(AbiParam::new(types::I32));
-            sig.params.push(AbiParam::new(types::I64));
-            sig.returns.push(AbiParam::new(types::I64));
-            sig
-        };
-        let memset_id = module
-            .declare_function("memset", Linkage::Import, &memset_sig)
-            .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
-        let memset_ref = module.declare_func_in_func(memset_id, builder.func);
-        let zero_i32 = builder.ins().iconst(types::I32, 0);
-        builder
-            .ins()
-            .call(memset_ref, &[result_ptr, zero_i32, alloc_size]);
-
-        let strcpy_sig = {
-            let mut sig = module.make_signature();
-            sig.call_conv = CallConv::SystemV;
-            sig.params.push(AbiParam::new(types::I64));
-            sig.params.push(AbiParam::new(types::I64));
-            sig.returns.push(AbiParam::new(types::I64));
-            sig
-        };
-        let strcpy_id = module
-            .declare_function("strcpy", Linkage::Import, &strcpy_sig)
-            .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
-        let strcpy_ref = module.declare_func_in_func(strcpy_id, builder.func);
-        builder.ins().call(strcpy_ref, &[result_ptr, lhs_ptr]);
-
-        let strcat_sig = {
-            let mut sig = module.make_signature();
-            sig.call_conv = CallConv::SystemV;
-            sig.params.push(AbiParam::new(types::I64));
-            sig.params.push(AbiParam::new(types::I64));
-            sig.returns.push(AbiParam::new(types::I64));
-            sig
-        };
-        let strcat_id = module
-            .declare_function("strcat", Linkage::Import, &strcat_sig)
-            .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
-        let strcat_ref = module.declare_func_in_func(strcat_id, builder.func);
-        builder.ins().call(strcat_ref, &[result_ptr, rhs_ptr]);
-
-        Ok(result_ptr)
-    }
-
-    pub(crate) fn compile_expr(
-        expr: &Expr,
-        builder: &mut FunctionBuilder,
-        scope_stack: &mut Vec<HashMap<String, Slot>>,
-        type_stack: &mut Vec<HashMap<String, Type>>,
-        idx: &mut u32,
-        func_signatures: &HashMap<String, (FuncId, Signature)>,
-        module: &mut ObjectModule,
-        str_idx: &mut u32,
-        loop_stack: &mut Vec<LoopContext>,
-        type_map: &HashMap<String, ir::Type>,
-        structs: &HashMap<String, StructDef>,
-    ) -> Result<Value, CodeGenError> {
-        macro_rules! compile_sub {
-            ($e:expr) => {
-                Self::compile_expr(
-                    $e,
-                    builder,
-                    scope_stack,
-                    type_stack,
-                    idx,
-                    func_signatures,
-                    module,
-                    str_idx,
-                    loop_stack,
-                    type_map,
-                    structs,
-                )
-            };
-        }
-
-        match expr {
-            Expr::Block(body, _) => {
-                scope_stack.push(HashMap::new());
-                type_stack.push(HashMap::new());
-                let result = if body.len() > 1 {
-                    let (last, body) = body.split_last().unwrap();
-                    for expr in body {
-                        compile_sub!(expr)?;
-                    }
-                    compile_sub!(last)
-                } else {
-                    compile_sub!(body.last().unwrap())
-                };
-                scope_stack.pop();
-                type_stack.pop();
-                result
-            }
-            Expr::Int(i, _) => Ok(builder.ins().iconst(types::I64, *i as i64)),
-            Expr::Float(f, _) => Ok(builder.ins().f64const(*f)),
-            Expr::Bool(b, _) => Ok(builder.ins().iconst(types::I8, *b as i64)),
-            Expr::String(s, _) => {
-                let data_id = module
-                    .declare_data(
-                        &format!("str_{}", str_idx),
-                        cranelift_module::Linkage::Local,
-                        true,
-                        false,
-                    )
-                    .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
-
-                let mut data_desc = cranelift_module::DataDescription::new();
-                let mut bytes = s.as_bytes().to_vec();
-                bytes.push(0);
-                data_desc.define(bytes.into());
-                module
-                    .define_data(data_id, &data_desc)
-                    .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
-
-                let global_value = module.declare_data_in_func(data_id, builder.func);
-                let ptr = builder.ins().global_value(types::I64, global_value);
-                *str_idx += 1;
-                Ok(ptr)
-            }
-            Expr::Nil(_) => Ok(builder.ins().iconst(types::I64, 0)),
-
-            Expr::Add(lhs, rhs, _) => {
-                let lhs_type = Self::get_expr_type(lhs, type_stack);
-                let rhs_type = Self::get_expr_type(rhs, type_stack);
-                let is_string = matches!(lhs_type, Type::Named(ref n) if n == "string")
-                    || matches!(rhs_type, Type::Named(ref n) if n == "string");
-
-                if is_string {
-                    let lhs_ptr = compile_sub!(lhs)?;
-                    let rhs_ptr = compile_sub!(rhs)?;
-                    Self::compile_string_concat(lhs_ptr, rhs_ptr, builder, module)
-                } else {
-                    let lhs = compile_sub!(lhs)?;
-                    let rhs = compile_sub!(rhs)?;
-                    Ok(builder.ins().iadd(lhs, rhs))
-                }
-            }
-            Expr::Sub(lhs, rhs, _) => {
-                let lhs = compile_sub!(lhs)?;
-                let rhs = compile_sub!(rhs)?;
-                Ok(builder.ins().isub(lhs, rhs))
-            }
-            Expr::Mul(lhs, rhs, _) => {
-                let lhs = compile_sub!(lhs)?;
-                let rhs = compile_sub!(rhs)?;
-                Ok(builder.ins().imul(lhs, rhs))
-            }
-            Expr::Div(lhs, rhs, _) => {
-                let lhs = compile_sub!(lhs)?;
-                let rhs = compile_sub!(rhs)?;
-                Ok(builder.ins().sdiv(lhs, rhs))
-            }
-            Expr::Mod(lhs, rhs, _) => {
-                let lhs = compile_sub!(lhs)?;
-                let rhs = compile_sub!(rhs)?;
-                Ok(builder.ins().srem(lhs, rhs))
-            }
-
-            Expr::FAdd(lhs, rhs, _) => {
-                let lhs = compile_sub!(lhs)?;
-                let rhs = compile_sub!(rhs)?;
-                Ok(builder.ins().fadd(lhs, rhs))
-            }
-            Expr::FSub(lhs, rhs, _) => {
-                let lhs = compile_sub!(lhs)?;
-                let rhs = compile_sub!(rhs)?;
-                Ok(builder.ins().fsub(lhs, rhs))
-            }
-            Expr::FMul(lhs, rhs, _) => {
-                let lhs = compile_sub!(lhs)?;
-                let rhs = compile_sub!(rhs)?;
-                Ok(builder.ins().fmul(lhs, rhs))
-            }
-            Expr::FDiv(lhs, rhs, _) => {
-                let lhs = compile_sub!(lhs)?;
-                let rhs = compile_sub!(rhs)?;
-                Ok(builder.ins().fdiv(lhs, rhs))
-            }
-
-            Expr::Eq(lhs, rhs, _) => {
-                let lhs = compile_sub!(lhs)?;
-                let rhs = compile_sub!(rhs)?;
-                Ok(builder.ins().icmp(ir::condcodes::IntCC::Equal, lhs, rhs))
-            }
-            Expr::Ne(lhs, rhs, _) => {
-                let lhs = compile_sub!(lhs)?;
-                let rhs = compile_sub!(rhs)?;
-                Ok(builder.ins().icmp(ir::condcodes::IntCC::NotEqual, lhs, rhs))
-            }
-            Expr::Lt(lhs, rhs, _) => {
-                let lhs = compile_sub!(lhs)?;
-                let rhs = compile_sub!(rhs)?;
-                Ok(builder
-                    .ins()
-                    .icmp(ir::condcodes::IntCC::SignedLessThan, lhs, rhs))
-            }
-            Expr::Le(lhs, rhs, _) => {
-                let lhs = compile_sub!(lhs)?;
-                let rhs = compile_sub!(rhs)?;
-                Ok(builder
-                    .ins()
-                    .icmp(ir::condcodes::IntCC::SignedLessThanOrEqual, lhs, rhs))
-            }
-            Expr::Gt(lhs, rhs, _) => {
-                let lhs = compile_sub!(lhs)?;
-                let rhs = compile_sub!(rhs)?;
-                Ok(builder
-                    .ins()
-                    .icmp(ir::condcodes::IntCC::SignedGreaterThan, lhs, rhs))
-            }
-            Expr::Ge(lhs, rhs, _) => {
-                let lhs = compile_sub!(lhs)?;
-                let rhs = compile_sub!(rhs)?;
-                Ok(builder
-                    .ins()
-                    .icmp(ir::condcodes::IntCC::SignedGreaterThanOrEqual, lhs, rhs))
-            }
-
-            Expr::FEq(lhs, rhs, _) => {
-                let lhs = compile_sub!(lhs)?;
-                let rhs = compile_sub!(rhs)?;
-                Ok(builder.ins().fcmp(ir::condcodes::FloatCC::Equal, lhs, rhs))
-            }
-            Expr::FNe(lhs, rhs, _) => {
-                let lhs = compile_sub!(lhs)?;
-                let rhs = compile_sub!(rhs)?;
-                Ok(builder
-                    .ins()
-                    .fcmp(ir::condcodes::FloatCC::NotEqual, lhs, rhs))
-            }
-            Expr::FLt(lhs, rhs, _) => {
-                let lhs = compile_sub!(lhs)?;
-                let rhs = compile_sub!(rhs)?;
-                Ok(builder
-                    .ins()
-                    .fcmp(ir::condcodes::FloatCC::LessThan, lhs, rhs))
-            }
-            Expr::FLe(lhs, rhs, _) => {
-                let lhs = compile_sub!(lhs)?;
-                let rhs = compile_sub!(rhs)?;
-                Ok(builder
-                    .ins()
-                    .fcmp(ir::condcodes::FloatCC::LessThanOrEqual, lhs, rhs))
-            }
-            Expr::FGt(lhs, rhs, _) => {
-                let lhs = compile_sub!(lhs)?;
-                let rhs = compile_sub!(rhs)?;
-                Ok(builder
-                    .ins()
-                    .fcmp(ir::condcodes::FloatCC::GreaterThan, lhs, rhs))
-            }
-            Expr::FGe(lhs, rhs, _) => {
-                let lhs = compile_sub!(lhs)?;
-                let rhs = compile_sub!(rhs)?;
-                Ok(builder
-                    .ins()
-                    .fcmp(ir::condcodes::FloatCC::GreaterThanOrEqual, lhs, rhs))
-            }
-
-            Expr::StrCat(lhs, rhs, _) => {
-                let lhs_ptr = compile_sub!(lhs)?;
-                let rhs_ptr = compile_sub!(rhs)?;
-                Self::compile_string_concat(lhs_ptr, rhs_ptr, builder, module)
-            }
-            Expr::And(lhs, rhs, _) => {
-                let lhs_val = compile_sub!(lhs)?;
-                let rhs_val = compile_sub!(rhs)?;
-                Ok(builder.ins().band(lhs_val, rhs_val))
-            }
-            Expr::Or(lhs, rhs, _) => {
-                let lhs_val = compile_sub!(lhs)?;
-                let rhs_val = compile_sub!(rhs)?;
-                Ok(builder.ins().bor(lhs_val, rhs_val))
-            }
-            Expr::Not(expr, _) => {
-                let val = compile_sub!(expr)?;
-                let one = builder.ins().iconst(types::I8, 1);
-                Ok(builder.ins().bxor(val, one))
-            }
-            Expr::VarDecl(name, ty, value, _) => {
-                let val = compile_sub!(&**value)?;
-
-                let decl_type = if let Type::Named(n) = ty {
-                    if n == "gen" {
-                        match &**value {
-                            Expr::Int(_, _) => Type::Named("int".to_string()),
-                            Expr::Float(_, _) => Type::Named("float".to_string()),
-                            Expr::Bool(_, _) => Type::Named("bool".to_string()),
-                            Expr::String(_, _) => Type::Named("string".to_string()),
-                            _ => Type::Named("int".to_string()),
-                        }
-                    } else {
-                        ty.clone()
-                    }
-                } else {
-                    ty.clone()
-                };
-
-                let slot_size = Self::get_type_size(&decl_type, type_map, structs) as u32;
-                let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
-                    ir::StackSlotKind::ExplicitSlot,
-                    slot_size,
-                    0,
-                ));
-
-                builder.ins().stack_store(val, slot, 0);
-                scope_stack
-                    .last_mut()
-                    .unwrap()
-                    .insert(name.clone(), Slot::StackSlot(slot));
-                type_stack
-                    .last_mut()
-                    .unwrap()
-                    .insert(name.clone(), ty.clone());
-                *idx += 1;
-                Ok(Value::from_u32(0))
-            }
-
-            Expr::VarAssign(name, val, _) => {
-                let val = compile_sub!(&**val)?;
-                let slot = Self::lookup_var(name, scope_stack).ok_or_else(|| {
-                    CodeGenError::UndefinedVariable {
-                        name: name.clone(),
-                        span: Span::new(0, 0),
-                    }
-                })?;
-                match slot {
-                    Slot::StackSlot(s) => {
-                        builder.ins().stack_store(val, *s, 0);
-                    }
-                }
-                Ok(val)
-            }
-            Expr::Var(name, var_span) => {
-                if let Some(slot) = Self::lookup_var(name, scope_stack) {
-                    return match slot {
-                        Slot::StackSlot(s) => {
-                            let mut found_type = None;
-                            for scope in type_stack.iter().rev() {
-                                if let Some(ty) = scope.get(name) {
-                                    found_type = Some(ty.clone());
-                                    break;
-                                }
-                            }
-
-                            let ty = match found_type {
-                                Some(t) => t,
-                                None => Type::Named("int".to_string()),
-                            };
-
-                            let ir_type = get_type(&ty, type_map);
-                            let val = builder.ins().stack_load(ir_type, *s, 0);
-
-                            if ir_type == types::I8 {
-                                Ok(builder.ins().uextend(types::I64, val))
-                            } else {
-                                Ok(val)
-                            }
-                        }
-                    };
-                }
-
-                if let Some((func_id, _)) = func_signatures.get(name) {
-                    let func_ref = module.declare_func_in_func(*func_id, builder.func);
-                    let addr = builder.ins().func_addr(types::I64, func_ref);
-                    return Ok(addr);
-                }
-
-                Err(CodeGenError::UndefinedVariable {
-                    name: name.clone(),
-                    span: *var_span,
-                })
-            }
-            Expr::Call(callee, args, _) => {
-                let arg_values: Result<Vec<Value>, CodeGenError> =
-                    args.iter().map(|a| compile_sub!(a)).collect();
-
-                let arg_values = arg_values?;
-
-                if let Expr::Var(name, _) = &**callee {
-                    if let Some((func_id, _)) = func_signatures.get(name) {
-                        let func_ref = module.declare_func_in_func(*func_id, builder.func);
-                        let call = builder.ins().call(func_ref, &arg_values);
-                        let results = builder.inst_results(call);
-                        if results.is_empty() {
-                            return Ok(builder.ins().iconst(types::I64, 0));
-                        } else {
-                            return Ok(results[0]);
-                        }
-                    }
-                }
-
-                let callee_type = Self::get_expr_type(callee, type_stack);
-
-                let callee_val = compile_sub!(callee)?;
-
-                let sig = {
-                    let mut sig = module.make_signature();
-                    sig.call_conv = CallConv::SystemV;
-                    for arg in &arg_values {
-                        sig.params
-                            .push(AbiParam::new(builder.func.dfg.value_type(*arg)));
-                    }
-
-                    let return_type = if let Type::Function(_, ret) = callee_type {
-                        get_type(&ret, type_map)
-                    } else {
-                        types::I64
-                    };
-
-                    if return_type != types::INVALID {
-                        sig.returns.push(AbiParam::new(return_type));
-                    }
-                    sig
-                };
-
-                let sig_ref = builder.import_signature(sig);
-
-                let call = builder
-                    .ins()
-                    .call_indirect(sig_ref, callee_val, &arg_values);
-                let results = builder.inst_results(call);
-                if results.is_empty() {
-                    Ok(builder.ins().iconst(types::I64, 0))
-                } else {
-                    Ok(results[0])
-                }
-            }
-            Expr::Return(value, _) => {
-                let val = compile_sub!(&**value)?;
-                builder.ins().return_(&[val]);
-                Ok(Value::from_u32(0))
-            }
-            Expr::If(cond, then_branch, else_branch, _) => {
-                let cond_val = compile_sub!(cond)?;
-
-                let then_has_return = Self::has_return(then_branch);
-                let else_has_return = else_branch.as_ref().map_or(false, |e| Self::has_return(e));
-
-                let then_has_break = Self::has_break_or_continue(then_branch);
-                let else_has_break = else_branch
-                    .as_ref()
-                    .map_or(false, |e| Self::has_break_or_continue(e));
-                let has_break_or_continue = then_has_break || else_has_break;
-
-                let in_loop = !loop_stack.is_empty();
-                let then_has_terminal = then_has_return || (in_loop && then_has_break);
-                let else_has_terminal = else_has_return || (in_loop && else_has_break);
-                let both_terminal = then_has_terminal && else_has_terminal;
-
-                let in_loop_with_increment = loop_stack
-                    .last()
-                    .and_then(|ctx| ctx.increment_block)
-                    .is_some();
-
-                let then_block = builder.create_block();
-                let else_block = builder.create_block();
-
-                let merge_block =
-                    if both_terminal || in_loop_with_increment || has_break_or_continue {
-                        None
-                    } else {
-                        Some(builder.create_block())
-                    };
-
-                let cond_type = builder.func.dfg.value_type(cond_val);
-                let cond_i64 = if cond_type == types::I64 {
-                    cond_val
-                } else {
-                    builder.ins().uextend(types::I64, cond_val)
-                };
-
-                builder
-                    .ins()
-                    .brif(cond_i64, then_block, &[], else_block, &[]);
-
-                builder.switch_to_block(then_block);
-                scope_stack.push(HashMap::new());
-                type_stack.push(HashMap::new());
-                let then_val = compile_sub!(then_branch)?;
-                scope_stack.pop();
-                type_stack.pop();
-
-                if !then_has_terminal {
-                    if let Some(merge) = merge_block {
-                        if else_branch.is_some() {
-                            builder.ins().jump(merge, &[then_val.into()]);
-                        } else {
-                            builder.ins().jump(merge, &[]);
-                        }
-                    } else if in_loop_with_increment {
-                        if let Some(loop_ctx) = loop_stack.last() {
-                            if let Some(inc_block) = loop_ctx.increment_block {
-                                builder.ins().jump(inc_block, &[]);
-                            }
-                        }
-                    }
-                }
-                builder.seal_block(then_block);
-
-                builder.switch_to_block(else_block);
-                let else_val = if let Some(else_expr) = else_branch {
-                    scope_stack.push(HashMap::new());
-                    type_stack.push(HashMap::new());
-                    let val = compile_sub!(else_expr)?;
-                    scope_stack.pop();
-                    type_stack.pop();
-
-                    if !else_has_terminal {
-                        if let Some(merge) = merge_block {
-                            builder.ins().jump(merge, &[val.into()]);
-                        } else if in_loop_with_increment {
-                            if let Some(loop_ctx) = loop_stack.last() {
-                                if let Some(inc_block) = loop_ctx.increment_block {
-                                    builder.ins().jump(inc_block, &[]);
-                                }
-                            }
-                        }
-                    }
-                    Some(val)
-                } else {
-                    if let Some(merge) = merge_block {
-                        builder.ins().jump(merge, &[]);
-                    }
-                    None
-                };
-                builder.seal_block(else_block);
-
-                if let Some(merge) = merge_block {
-                    if else_val.is_some() {
-                        let merge_val = builder
-                            .append_block_param(merge, builder.func.dfg.value_type(then_val));
-
-                        builder.switch_to_block(merge);
-                        builder.seal_block(merge);
-                        Ok(merge_val)
-                    } else {
-                        builder.switch_to_block(merge);
-                        builder.seal_block(merge);
-                        Ok(then_val)
-                    }
-                } else {
-                    Ok(then_val)
-                }
-            }
-            Expr::While(cond, body, _) => {
-                let loop_header = builder.create_block();
-                let loop_body = builder.create_block();
-                let loop_exit = builder.create_block();
-
-                loop_stack.push(LoopContext {
-                    header_block: loop_header,
-                    exit_block: loop_exit,
-                    increment_block: None,
-                    loop_params: Vec::new(),
-                });
-
-                let mut modified_vars = HashSet::new();
-                Self::find_var_assignments(body, &mut modified_vars);
-
-                let mut loop_params: Vec<(String, Value, ir::StackSlot)> = Vec::new();
-                let mut param_types = Vec::new();
-                for var_name in &modified_vars {
-                    if let Some(slot) = Self::lookup_var(var_name, scope_stack) {
-                        match slot {
-                            Slot::StackSlot(s) => {
-                                let var_value = builder.ins().stack_load(types::I64, *s, 0);
-                                let var_type = builder.func.dfg.value_type(var_value);
-                                param_types.push(var_type);
-                                let param = builder.append_block_param(loop_header, var_type);
-                                loop_params.push((var_name.clone(), param, *s));
-                            }
-                        }
-                    }
-                }
-
-                if let Some(loop_ctx) = loop_stack.last_mut() {
-                    loop_ctx.loop_params = loop_params
+    fn alloc_str(&mut self, s: String) -> String {
+        if let Some(lbl) = self.str_cache.get(&s) {
+            return lbl.clone();
+        } else {
+            let lbl = format!("L.S.{}", self.lbl_cnt);
+            self.str_cache.insert(s.clone(), lbl.clone());
+            self.lbl_cnt += 1;
+            let bytes = s.as_bytes();
+            if bytes.is_empty() {
+                assemble!(self.data, "{} db 0", lbl);
+            } else {
+                assemble!(
+                    self.data,
+                    "{} db {}, 0",
+                    lbl,
+                    bytes
                         .iter()
-                        .map(|(name, _, s)| (name.clone(), Slot::StackSlot(*s)))
-                        .collect();
-                }
-
-                let initial_values: Vec<Value> = loop_params
-                    .iter()
-                    .map(|(_, _, s)| builder.ins().stack_load(types::I64, *s, 0))
-                    .collect();
-                let initial_args: Vec<ir::BlockArg> =
-                    initial_values.iter().map(|v| (*v).into()).collect();
-                builder.ins().jump(loop_header, initial_args.as_slice());
-
-                builder.switch_to_block(loop_header);
-
-                for (_, param, s) in &loop_params {
-                    builder.ins().stack_store(*param, *s, 0);
-                }
-
-                let cond_val = compile_sub!(cond)?;
-                let cond_i64 = builder.ins().uextend(types::I64, cond_val);
-                builder.ins().brif(cond_i64, loop_body, &[], loop_exit, &[]);
-
-                builder.switch_to_block(loop_body);
-                scope_stack.push(HashMap::new());
-                type_stack.push(HashMap::new());
-                compile_sub!(body)?;
-                scope_stack.pop();
-                type_stack.pop();
-                loop_stack.pop();
-
-                let mut loop_values = Vec::new();
-                for (var_name, _, s) in &loop_params {
-                    if let Some(slot) = Self::lookup_var(var_name, scope_stack) {
-                        match slot {
-                            Slot::StackSlot(ss) => {
-                                loop_values.push(builder.ins().stack_load(types::I64, *ss, 0));
-                            }
-                        }
-                    } else {
-                        loop_values.push(builder.ins().stack_load(types::I64, *s, 0));
-                    }
-                }
-                let loop_args: Vec<ir::BlockArg> =
-                    loop_values.iter().map(|v| (*v).into()).collect();
-                builder.ins().jump(loop_header, loop_args.as_slice());
-
-                builder.seal_block(loop_body);
-                builder.seal_block(loop_header);
-
-                builder.switch_to_block(loop_exit);
-                builder.seal_block(loop_exit);
-
-                Ok(builder.ins().iconst(types::I64, 0))
+                        .map(|b| b.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
             }
-            Expr::Index(array, idx, _) => {
-                let array_ptr = compile_sub!(array)?;
-                let idx_val = compile_sub!(idx)?;
+            lbl
+        }
+    }
 
-                let offset = builder.ins().imul_imm(idx_val, 8);
-                let element_ptr = builder.ins().iadd(array_ptr, offset);
+    fn alloc_flt(&mut self, f: OrderedFloat<f64>) -> String {
+        if let Some(lbl) = self.flt_cache.get(&f) {
+            return lbl.clone();
+        } else {
+            let lbl = format!("L.F.{}", self.lbl_cnt);
+            self.flt_cache.insert(f, lbl.clone());
+            self.lbl_cnt += 1;
+            assemble!(self.data, "{} dq 0x{:x}", lbl, f.into_inner().to_bits());
+            lbl
+        }
+    }
 
-                let element =
-                    builder
-                        .ins()
-                        .load(types::I64, ir::MemFlags::trusted(), element_ptr, 0);
-                Ok(element)
-            }
-            Expr::IndexAssign(array_idx, value, _) => {
-                if let Expr::Index(array, idx, _) = &**array_idx {
-                    let array_ptr = compile_sub!(array)?;
-                    let idx_val = compile_sub!(idx)?;
-                    let value_val = compile_sub!(value)?;
-
-                    let offset = builder.ins().imul_imm(idx_val, 8);
-                    let element_ptr = builder.ins().iadd(array_ptr, offset);
-
-                    builder
-                        .ins()
-                        .store(ir::MemFlags::trusted(), value_val, element_ptr, 0);
-                    Ok(builder.ins().iconst(types::I64, 0))
-                } else {
-                    Err(CodeGenError::UnexpectedExpression {
-                        found: (**array_idx).clone(),
-                        span: array_idx.span(),
+    fn get_offset(&self, op: &Operand) -> Result<usize, CodeGenError> {
+        match op {
+            Operand::Var(name) => self
+                .vars
+                .get(name)
+                .ok_or_else(|| CodeGenError::MissingOperand {
+                    message: format!("variable '{}' not found in stack frame", name),
+                })
+                .map(|v| *v),
+            Operand::Temp(id, _) => {
+                let key = format!("_tmp_{}", id);
+                self.vars
+                    .get(&key)
+                    .ok_or_else(|| CodeGenError::MissingOperand {
+                        message: format!("temporary '{}' not found in stack frame", key),
                     })
-                }
+                    .map(|v| *v)
             }
-            Expr::ArrayLiteral(elements, _) => {
-                let data_id = module
-                    .declare_data(
-                        &format!("array_{}", idx),
-                        cranelift_module::Linkage::Local,
-                        true,
-                        false,
-                    )
-                    .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
-
-                let mut data_desc = cranelift_module::DataDescription::new();
-                let mut bytes = Vec::new();
-
-                let mut str_idx = 0;
-                for elem in elements {
-                    match elem {
-                        Expr::Int(n, _) => {
-                            let val = *n as i64;
-                            bytes.extend_from_slice(&val.to_le_bytes());
-                        }
-                        Expr::Float(f, _) => {
-                            let val = f.to_bits();
-                            bytes.extend_from_slice(&val.to_le_bytes());
-                        }
-                        Expr::Bool(b, _) => {
-                            let val = *b as i64;
-                            bytes.extend_from_slice(&val.to_le_bytes());
-                        }
-                        Expr::String(s, _) => {
-                            let str_data_id = module
-                                .declare_data(
-                                    &format!("array_str_{}_{}", idx, str_idx),
-                                    cranelift_module::Linkage::Local,
-                                    true,
-                                    false,
-                                )
-                                .map_err(|e| {
-                                    CodeGenError::ModuleError(e.to_string(), Span::new(0, 0))
-                                })?;
-                            let mut str_data_desc = cranelift_module::DataDescription::new();
-                            let mut str_bytes = s.as_bytes().to_vec();
-                            str_bytes.push(0);
-                            str_data_desc.define(str_bytes.into());
-                            module
-                                .define_data(str_data_id, &str_data_desc)
-                                .map_err(|e| {
-                                    CodeGenError::ModuleError(e.to_string(), Span::new(0, 0))
-                                })?;
-
-                            bytes.extend_from_slice(&[0u8; 8]);
-                            str_idx += 1;
-                        }
-                        Expr::Nil(_) => {
-                            bytes.extend_from_slice(&[0u8; 8]);
-                        }
-                        _ => {
-                            return Err(CodeGenError::ModuleError(
-                                "Array literals currently only support int, float, bool, string, and nil constants".to_string(),
-                                Span::new(0, 0),
-                            ));
-                        }
-                    }
-                }
-                data_desc.define(bytes.into());
-                module
-                    .define_data(data_id, &data_desc)
-                    .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
-
-                let global_value = module.declare_data_in_func(data_id, builder.func);
-                let ptr = builder.ins().global_value(types::I64, global_value);
-                Ok(ptr)
-            }
-            Expr::ArrayFill(elem_type, len, _) => {
-                let len_val = compile_sub!(len)?;
-
-                let elem_size = match &elem_type {
-                    Type::Named(n) if matches!(n.as_str(), "int" | "float" | "string") => 8i64,
-                    Type::Named(n) if n == "bool" => 1i64,
-                    Type::Named(n) if n == "void" => 0i64,
-                    Type::Array(_, _) => 8i64,
-                    _ => 8i64,
-                };
-
-                let total_size = builder.ins().imul_imm(len_val, elem_size);
-
-                let malloc_sig = {
-                    let mut sig = module.make_signature();
-                    sig.call_conv = CallConv::SystemV;
-                    sig.params.push(AbiParam::new(types::I64));
-                    sig.returns.push(AbiParam::new(types::I64));
-                    sig
-                };
-                let malloc_id = module
-                    .declare_function("malloc", Linkage::Import, &malloc_sig)
-                    .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
-                let malloc_ref = module.declare_func_in_func(malloc_id, builder.func);
-                let mem_ptr = builder.ins().call(malloc_ref, &[total_size]);
-                let mem_ptr = builder.inst_results(mem_ptr)[0];
-
-                let memset_sig = {
-                    let mut sig = module.make_signature();
-                    sig.call_conv = CallConv::SystemV;
-                    sig.params.push(AbiParam::new(types::I64));
-                    sig.params.push(AbiParam::new(types::I32));
-                    sig.params.push(AbiParam::new(types::I64));
-                    sig.returns.push(AbiParam::new(types::I64));
-                    sig
-                };
-                let memset_id = module
-                    .declare_function("memset", Linkage::Import, &memset_sig)
-                    .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
-                let memset_ref = module.declare_func_in_func(memset_id, builder.func);
-                let zero_val = builder.ins().iconst(types::I32, 0);
-
-                builder
-                    .ins()
-                    .call(memset_ref, &[mem_ptr, zero_val, total_size]);
-
-                Ok(mem_ptr)
-            }
-            Expr::Range(start, end, _) => {
-                let start_val = compile_sub!(start)?;
-                let end_val = compile_sub!(end)?;
-
-                let len_val = builder.ins().isub(end_val, start_val);
-
-                let zero = builder.ins().iconst(types::I64, 0);
-                let is_neg =
-                    builder
-                        .ins()
-                        .icmp(ir::condcodes::IntCC::SignedLessThan, len_val, zero);
-                let final_len = builder.ins().select(is_neg, zero, len_val);
-
-                let total_size = builder.ins().imul_imm(final_len, 8);
-
-                let malloc_sig = {
-                    let mut sig = module.make_signature();
-                    sig.call_conv = CallConv::SystemV;
-                    sig.params.push(AbiParam::new(types::I64));
-                    sig.returns.push(AbiParam::new(types::I64));
-                    sig
-                };
-                let malloc_id = module
-                    .declare_function("malloc", Linkage::Import, &malloc_sig)
-                    .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
-                let malloc_ref = module.declare_func_in_func(malloc_id, builder.func);
-                let mem_ptr = builder.ins().call(malloc_ref, &[total_size]);
-                let mem_ptr = builder.inst_results(mem_ptr)[0];
-
-                let fill_header = builder.create_block();
-                let fill_body = builder.create_block();
-                let fill_exit = builder.create_block();
-
-                let idx_slot =
-                    builder.create_sized_stack_slot(cranelift::codegen::ir::StackSlotData::new(
-                        cranelift::codegen::ir::StackSlotKind::ExplicitSlot,
-                        8,
-                        0,
-                    ));
-                builder.ins().stack_store(zero, idx_slot, 0);
-
-                builder.ins().jump(fill_header, &[]);
-
-                builder.switch_to_block(fill_header);
-                let current_idx = builder.ins().stack_load(types::I64, idx_slot, 0);
-                let cmp = builder.ins().icmp(
-                    ir::condcodes::IntCC::UnsignedLessThan,
-                    current_idx,
-                    final_len,
-                );
-                let cmp_i64 = builder.ins().uextend(types::I64, cmp);
-                builder.ins().brif(cmp_i64, fill_body, &[], fill_exit, &[]);
-
-                builder.switch_to_block(fill_body);
-
-                let elem_val = builder.ins().iadd(start_val, current_idx);
-
-                let elem_offset = builder.ins().imul_imm(current_idx, 8);
-                let elem_ptr = builder.ins().iadd(mem_ptr, elem_offset);
-                builder
-                    .ins()
-                    .store(ir::MemFlags::new(), elem_val, elem_ptr, 0);
-
-                let next_idx = builder.ins().iadd_imm(current_idx, 1);
-                builder.ins().stack_store(next_idx, idx_slot, 0);
-                builder.ins().jump(fill_header, &[]);
-
-                builder.switch_to_block(fill_exit);
-                builder.seal_block(fill_header);
-                builder.seal_block(fill_body);
-                builder.seal_block(fill_exit);
-
-                Ok(mem_ptr)
-            }
-            Expr::For(var, array, body, _) => {
-                let loop_header = builder.create_block();
-                let loop_body = builder.create_block();
-                let loop_increment = builder.create_block();
-                let loop_exit = builder.create_block();
-
-                loop_stack.push(LoopContext {
-                    header_block: loop_header,
-                    exit_block: loop_exit,
-                    increment_block: Some(loop_increment),
-                    loop_params: Vec::new(),
-                });
-
-                let array_ptr = compile_sub!(array)?;
-
-                let array_len = match array.as_ref() {
-                    Expr::ArrayLiteral(elements, _) => {
-                        builder.ins().iconst(types::I64, elements.len() as i64)
-                    }
-
-                    Expr::Range(start, end, _) => {
-                        let start_val = compile_sub!(start)?;
-                        let end_val = compile_sub!(end)?;
-                        let len = builder.ins().isub(end_val, start_val);
-                        let zero = builder.ins().iconst(types::I64, 0);
-                        let is_neg =
-                            builder
-                                .ins()
-                                .icmp(ir::condcodes::IntCC::SignedLessThan, len, zero);
-                        builder.ins().select(is_neg, zero, len)
-                    }
-
-                    Expr::Var(name, _) => {
-                        if let Some(ty) = Self::get_var_type(name, type_stack) {
-                            if let Type::Array(_, len) = ty {
-                                if len > 0 {
-                                    builder.ins().iconst(types::I64, len as i64)
-                                } else {
-                                    builder.ins().iconst(types::I64, 0)
-                                }
-                            } else {
-                                builder.ins().iconst(types::I64, 0)
-                            }
-                        } else {
-                            builder.ins().iconst(types::I64, 0)
-                        }
-                    }
-
-                    _ => builder.ins().iconst(types::I64, 0),
-                };
-
-                let idx_slot =
-                    builder.create_sized_stack_slot(cranelift::codegen::ir::StackSlotData::new(
-                        cranelift::codegen::ir::StackSlotKind::ExplicitSlot,
-                        8,
-                        0,
-                    ));
-                let zero = builder.ins().iconst(types::I64, 0);
-                builder.ins().stack_store(zero, idx_slot, 0);
-
-                let elem_slot =
-                    builder.create_sized_stack_slot(cranelift::codegen::ir::StackSlotData::new(
-                        cranelift::codegen::ir::StackSlotKind::ExplicitSlot,
-                        8,
-                        0,
-                    ));
-
-                builder.ins().jump(loop_header, &[]);
-
-                builder.switch_to_block(loop_header);
-                let current_idx = builder.ins().stack_load(types::I64, idx_slot, 0);
-
-                let cmp = builder.ins().icmp(
-                    ir::condcodes::IntCC::UnsignedLessThan,
-                    current_idx,
-                    array_len,
-                );
-                let cmp_i64 = builder.ins().uextend(types::I64, cmp);
-                builder.ins().brif(cmp_i64, loop_body, &[], loop_exit, &[]);
-
-                builder.switch_to_block(loop_body);
-
-                let elem_offset = builder.ins().imul_imm(current_idx, 8);
-                let elem_ptr = builder.ins().iadd(array_ptr, elem_offset);
-                let elem_val = builder
-                    .ins()
-                    .load(types::I64, ir::MemFlags::new(), elem_ptr, 0);
-                builder.ins().stack_store(elem_val, elem_slot, 0);
-
-                scope_stack.push(HashMap::new());
-                type_stack.push(HashMap::new());
-
-                scope_stack
-                    .last_mut()
-                    .unwrap()
-                    .insert(var.clone(), Slot::StackSlot(elem_slot));
-
-                compile_sub!(body)?;
-
-                scope_stack.pop();
-                type_stack.pop();
-
-                builder.ins().jump(loop_increment, &[]);
-
-                builder.switch_to_block(loop_increment);
-                let current_idx_inc = builder.ins().stack_load(types::I64, idx_slot, 0);
-                let next_idx = builder.ins().iadd_imm(current_idx_inc, 1);
-                builder.ins().stack_store(next_idx, idx_slot, 0);
-                builder.ins().jump(loop_header, &[]);
-
-                loop_stack.pop();
-
-                builder.seal_block(loop_increment);
-                builder.seal_block(loop_body);
-                builder.seal_block(loop_header);
-
-                builder.switch_to_block(loop_exit);
-                builder.seal_block(loop_exit);
-
-                Ok(builder.ins().iconst(types::I64, 0))
-            }
-            Expr::Break(_) => {
-                if let Some(loop_ctx) = loop_stack.last() {
-                    builder.ins().jump(loop_ctx.exit_block, &[]);
-                    Ok(Value::from_u32(0))
-                } else {
-                    Err(CodeGenError::ModuleError(
-                        "break statement outside of loop".to_string(),
-                        Span::new(0, 0),
-                    ))
-                }
-            }
-            Expr::Continue(_) => {
-                if let Some(loop_ctx) = loop_stack.last() {
-                    if let Some(inc_block) = loop_ctx.increment_block {
-                        builder.ins().jump(inc_block, &[]);
-                    } else {
-                        let mut loop_values = Vec::new();
-                        for (var_name, slot) in &loop_ctx.loop_params {
-                            if let Some(s) = Self::lookup_var(var_name, scope_stack) {
-                                match s {
-                                    Slot::StackSlot(ss) => {
-                                        loop_values.push(builder.ins().stack_load(
-                                            types::I64,
-                                            *ss,
-                                            0,
-                                        ));
-                                    }
-                                }
-                            } else {
-                                match slot {
-                                    Slot::StackSlot(ss) => {
-                                        loop_values.push(builder.ins().stack_load(
-                                            types::I64,
-                                            *ss,
-                                            0,
-                                        ));
-                                    }
-                                }
-                            }
-                        }
-                        let loop_args: Vec<ir::BlockArg> =
-                            loop_values.iter().map(|v| (*v).into()).collect();
-                        builder
-                            .ins()
-                            .jump(loop_ctx.header_block, loop_args.as_slice());
-                    }
-                    Ok(Value::from_u32(0))
-                } else {
-                    Err(CodeGenError::ModuleError(
-                        "continue statement outside of loop".to_string(),
-                        Span::new(0, 0),
-                    ))
-                }
-            }
-            Expr::TypeDef(_) => Ok(Value::from_u32(0)),
-            Expr::Struct(name, fields, _) => {
-                let _ = (name, fields);
-                Ok(Value::from_u32(0))
-            }
-            Expr::StructLiteral(name, field_values, _) => {
-                let struct_def = structs.get(name).ok_or_else(|| {
-                    CodeGenError::ModuleError(
-                        format!("Undefined struct type: {}", name),
-                        Span::new(0, 0),
-                    )
-                })?;
-
-                let struct_size = struct_def.size;
-
-                let malloc_sig = {
-                    let mut sig = module.make_signature();
-                    sig.call_conv = CallConv::SystemV;
-                    sig.params.push(AbiParam::new(types::I64));
-                    sig.returns.push(AbiParam::new(types::I64));
-                    sig
-                };
-                let malloc_id = module
-                    .declare_function("malloc", Linkage::Import, &malloc_sig)
-                    .map_err(|e| CodeGenError::ModuleError(e.to_string(), Span::new(0, 0)))?;
-                let malloc_ref = module.declare_func_in_func(malloc_id, builder.func);
-                let size_val = builder.ins().iconst(types::I64, struct_size);
-                let mem_ptr = builder.ins().call(malloc_ref, &[size_val]);
-                let mem_ptr = builder.inst_results(mem_ptr)[0];
-
-                for (field_name, field_expr) in field_values {
-                    let field_info = struct_def.fields.iter().find(|f| &f.name == field_name);
-                    if let Some(field) = field_info {
-                        let field_val = compile_sub!(field_expr)?;
-
-                        let field_ptr = builder.ins().iadd_imm(mem_ptr, field.offset);
-
-                        let field_ir_type = get_type(&field.ty, type_map);
-                        if field_ir_type == types::I8 {
-                            builder
-                                .ins()
-                                .store(ir::MemFlags::trusted(), field_val, field_ptr, 0);
-                        } else {
-                            builder
-                                .ins()
-                                .store(ir::MemFlags::trusted(), field_val, field_ptr, 0);
-                        }
-                    }
-                }
-
-                Ok(mem_ptr)
-            }
-            Expr::MemberAccess(obj, field_name, _) => {
-                let obj_ptr = compile_sub!(obj)?;
-
-                let (struct_name, is_pointer) = match &**obj {
-                    Expr::Var(name, _) => {
-                        let mut found_type = None;
-                        for scope in type_stack.iter().rev() {
-                            if let Some(ty) = scope.get(name) {
-                                found_type = Some(ty.clone());
-                                break;
-                            }
-                        }
-                        match found_type {
-                            Some(Type::Named(name)) => (name, false),
-                            Some(Type::Pointer(inner_type)) => {
-                                if let Type::Named(name) = *inner_type {
-                                    (name, true)
-                                } else {
-                                    return Err(CodeGenError::ModuleError(
-                                        "Pointer to non-struct type".to_string(),
-                                        Span::new(0, 0),
-                                    ));
-                                }
-                            }
-                            _ => {
-                                return Err(CodeGenError::ModuleError(
-                                    "Member access on non-struct type".to_string(),
-                                    Span::new(0, 0),
-                                ));
-                            }
-                        }
-                    }
-                    _ => {
-                        return Err(CodeGenError::ModuleError(
-                            "Member access only supported on variables".to_string(),
-                            Span::new(0, 0),
-                        ));
-                    }
-                };
-
-                let obj_ptr = if is_pointer {
-                    builder
-                        .ins()
-                        .load(types::I64, ir::MemFlags::trusted(), obj_ptr, 0)
-                } else {
-                    obj_ptr
-                };
-
-                let struct_def = structs.get(&struct_name).ok_or_else(|| {
-                    CodeGenError::ModuleError(
-                        format!("Undefined struct type: {}", struct_name),
-                        Span::new(0, 0),
-                    )
-                })?;
-
-                let field_info = struct_def.fields.iter().find(|f| &f.name == field_name);
-                if let Some(field) = field_info {
-                    let field_ptr = builder.ins().iadd_imm(obj_ptr, field.offset);
-                    let field_val =
-                        builder
-                            .ins()
-                            .load(types::I64, ir::MemFlags::trusted(), field_ptr, 0);
-                    Ok(field_val)
-                } else {
-                    Err(CodeGenError::ModuleError(
-                        format!("Struct {} has no field {}", struct_name, field_name),
-                        Span::new(0, 0),
-                    ))
-                }
-            }
-            Expr::MemberAssign(obj, field_name, value, _) => {
-                let obj_ptr = compile_sub!(obj)?;
-
-                let (struct_name, is_pointer) = match &**obj {
-                    Expr::Var(name, _) => {
-                        let mut found_type = None;
-                        for scope in type_stack.iter().rev() {
-                            if let Some(ty) = scope.get(name) {
-                                found_type = Some(ty.clone());
-                                break;
-                            }
-                        }
-                        match found_type {
-                            Some(Type::Named(name)) => (name, false),
-                            Some(Type::Pointer(inner_type)) => {
-                                if let Type::Named(name) = *inner_type {
-                                    (name, true)
-                                } else {
-                                    return Err(CodeGenError::ModuleError(
-                                        "Pointer to non-struct type".to_string(),
-                                        Span::new(0, 0),
-                                    ));
-                                }
-                            }
-                            _ => {
-                                return Err(CodeGenError::ModuleError(
-                                    "Member assign on non-struct type".to_string(),
-                                    Span::new(0, 0),
-                                ));
-                            }
-                        }
-                    }
-                    _ => {
-                        return Err(CodeGenError::ModuleError(
-                            "Member assign only supported on variables".to_string(),
-                            Span::new(0, 0),
-                        ));
-                    }
-                };
-
-                let obj_ptr = if is_pointer {
-                    builder
-                        .ins()
-                        .load(types::I64, ir::MemFlags::trusted(), obj_ptr, 0)
-                } else {
-                    obj_ptr
-                };
-
-                let struct_def = structs.get(&struct_name).ok_or_else(|| {
-                    CodeGenError::ModuleError(
-                        format!("Undefined struct type: {}", struct_name),
-                        Span::new(0, 0),
-                    )
-                })?;
-
-                let field_info = struct_def.fields.iter().find(|f| &f.name == field_name);
-                if let Some(field) = field_info {
-                    let value_val = compile_sub!(value)?;
-
-                    let field_ptr = builder.ins().iadd_imm(obj_ptr, field.offset);
-                    builder
-                        .ins()
-                        .store(ir::MemFlags::trusted(), value_val, field_ptr, 0);
-                    Ok(builder.ins().iconst(types::I64, 0))
-                } else {
-                    Err(CodeGenError::ModuleError(
-                        format!("Struct {} has no field {}", struct_name, field_name),
-                        Span::new(0, 0),
-                    ))
-                }
-            }
-            Expr::AddressOf(expr, _) => match &**expr {
-                Expr::Var(name, _) => {
-                    if let Some(slot) = Self::lookup_var(name, scope_stack) {
-                        match slot {
-                            Slot::StackSlot(s) => Ok(builder.ins().stack_addr(types::I64, *s, 0)),
-                        }
-                    } else {
-                        Err(CodeGenError::ModuleError(
-                            format!("Undefined variable: {}", name),
-                            Span::new(0, 0),
-                        ))
-                    }
-                }
-                Expr::MemberAccess(obj, field_name, _) => {
-                    let obj_ptr = compile_sub!(obj)?;
-
-                    let struct_name = match &**obj {
-                        Expr::Var(name, _) => {
-                            let mut found_type = None;
-                            for scope in type_stack.iter().rev() {
-                                if let Some(ty) = scope.get(name) {
-                                    found_type = Some(ty.clone());
-                                    break;
-                                }
-                            }
-                            match found_type {
-                                Some(Type::Pointer(inner_type)) => {
-                                    if let Type::Named(name) = *inner_type {
-                                        name
-                                    } else {
-                                        return Err(CodeGenError::ModuleError(
-                                            "Pointer to non-struct type".to_string(),
-                                            Span::new(0, 0),
-                                        ));
-                                    }
-                                }
-                                Some(Type::Named(name)) => name,
-                                _ => {
-                                    return Err(CodeGenError::ModuleError(
-                                        "Member access on non-struct type".to_string(),
-                                        Span::new(0, 0),
-                                    ));
-                                }
-                            }
-                        }
-                        Expr::Deref(inner, _) => match &**inner {
-                            Expr::Var(name, _) => {
-                                let mut found_type = None;
-                                for scope in type_stack.iter().rev() {
-                                    if let Some(ty) = scope.get(name) {
-                                        found_type = Some(ty.clone());
-                                        break;
-                                    }
-                                }
-                                match found_type {
-                                    Some(Type::Pointer(inner_type)) => {
-                                        if let Type::Named(name) = *inner_type {
-                                            name
-                                        } else {
-                                            return Err(CodeGenError::ModuleError(
-                                                "Deref of non-pointer type".to_string(),
-                                                Span::new(0, 0),
-                                            ));
-                                        }
-                                    }
-                                    _ => {
-                                        return Err(CodeGenError::ModuleError(
-                                            "Member access on non-struct type".to_string(),
-                                            Span::new(0, 0),
-                                        ));
-                                    }
-                                }
-                            }
-                            _ => {
-                                return Err(CodeGenError::ModuleError(
-                                    "Member access on non-struct type".to_string(),
-                                    Span::new(0, 0),
-                                ));
-                            }
-                        },
-                        _ => {
-                            return Err(CodeGenError::ModuleError(
-                                "Member access only supported on variables".to_string(),
-                                Span::new(0, 0),
-                            ));
-                        }
-                    };
-
-                    let struct_def = structs.get(&struct_name).ok_or_else(|| {
-                        CodeGenError::ModuleError(
-                            format!("Undefined struct type: {}", struct_name),
-                            Span::new(0, 0),
-                        )
-                    })?;
-
-                    let field_info = struct_def.fields.iter().find(|f| &f.name == field_name);
-                    if let Some(field) = field_info {
-                        let field_ptr = builder.ins().iadd_imm(obj_ptr, field.offset);
-                        Ok(field_ptr)
-                    } else {
-                        Err(CodeGenError::ModuleError(
-                            format!("Struct {} has no field {}", struct_name, field_name),
-                            Span::new(0, 0),
-                        ))
-                    }
-                }
-                Expr::Index(arr, idx_expr, _) => {
-                    let arr_ptr = compile_sub!(arr)?;
-                    let idx_val = compile_sub!(idx_expr)?;
-
-                    let offset = builder.ins().imul_imm(idx_val, 8);
-                    let element_ptr = builder.ins().iadd(arr_ptr, offset);
-                    Ok(element_ptr)
-                }
-                _ => Err(CodeGenError::ModuleError(
-                    "AddressOf only supported on variables, member access, or array index"
-                        .to_string(),
-                    Span::new(0, 0),
-                )),
-            },
-            Expr::Deref(expr, _) => {
-                let ptr = compile_sub!(expr)?;
-                let value = builder
-                    .ins()
-                    .load(types::I64, ir::MemFlags::trusted(), ptr, 0);
-                Ok(value)
-            }
-            Expr::DerefAssign(ptr_expr, val_expr, _) => {
-                let ptr = compile_sub!(ptr_expr)?;
-                let val = compile_sub!(val_expr)?;
-                builder.ins().store(ir::MemFlags::trusted(), val, ptr, 0);
-                Ok(builder.ins().iconst(types::I64, 0))
-            }
-            _ => Err(CodeGenError::UnexpectedExpression {
-                found: expr.clone(),
-                span: expr.span(),
+            _ => Err(CodeGenError::InvalidOperand {
+                message: "Not a stack operand".to_string(),
             }),
+        }
+    }
+
+    fn alloc_arr(&mut self, len: usize, arr: Vec<Operand>, reg: &str) -> Result<(), CodeGenError> {
+        let size = (len * 8 + 8 + 15) & !15;
+        assemble!(self.text, "sub rsp, {}", size);
+        assemble!(self.text, "mov r10, rsp");
+        assemble!(self.text, "mov rax, {}", len);
+        assemble!(self.text, "mov [r10], rax");
+        for (i, op) in arr.iter().enumerate() {
+            self.load(op, "rax")?;
+            assemble!(self.text, "mov [r10 + {}], rax", 8 + i * 8);
+        }
+        assemble!(self.text, "mov {}, r10", reg);
+        self.regs.clear();
+        Ok(())
+    }
+
+    fn get_asm_op(&self, op: &Op) -> &str {
+        match op {
+            Op::Add => "add",
+            Op::Sub => "sub",
+            Op::Mul => "imul",
+            Op::Div => "idiv",
+            Op::LAnd => "and",
+            Op::LOr => "or",
+            Op::Xor => "xor",
+            _ => "",
+        }
+    }
+
+    fn get_fasm_op(&self, op: &Op) -> &str {
+        match op {
+            Op::FAdd => "addsd",
+            Op::FSub => "subsd",
+            Op::FMul => "mulsd",
+            Op::FDiv => "divsd",
+            _ => "",
         }
     }
 }

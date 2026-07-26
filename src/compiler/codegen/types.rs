@@ -1,50 +1,39 @@
 use crate::compiler::Span;
-use crate::compiler::parser::Type;
-use cranelift::codegen::ir;
-use std::{collections::HashMap, fmt::Display};
+use std::fmt::Display;
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum Slot {
-    StackSlot(ir::StackSlot),
-}
-
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum CodeGenError {
-    UnexpectedExpression {
-        found: crate::compiler::parser::Expr,
-        span: Span,
-    },
-    UndefinedVariable {
-        name: String,
-        span: Span,
-    },
-    #[allow(dead_code)]
-    UndefinedFunction {
-        name: String,
-        span: Span,
-    },
-    ModuleError(String, Span),
+    UndefinedVariable { name: String, span: Span },
+    UndefinedFunction { name: String, span: Span },
+    NameError { message: String },
+    TypeError { message: String },
+    ScopeError { message: String },
+    SyntaxError { message: String },
+    MissingOperand { message: String },
+    InvalidOperand { message: String },
+    UnsupportedOperation { message: String },
+    NasmError(String),
 }
 
 impl Display for CodeGenError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            CodeGenError::UnexpectedExpression { found, span } => {
-                write!(
-                    f,
-                    "Unexpected expression: '{:?}' at {:?}, expected FuncDecl",
-                    found, span
-                )
+            CodeGenError::UndefinedVariable { name, .. } => {
+                write!(f, "Undefined variable: '{}'", name)
             }
-            CodeGenError::UndefinedVariable { name, span } => {
-                write!(f, "Undefined variable: '{:?}' at {:?}", name, span)
+            CodeGenError::UndefinedFunction { name, .. } => {
+                write!(f, "Undefined function: '{}'", name)
             }
-            CodeGenError::UndefinedFunction { name, span } => {
-                write!(f, "Undefined function: '{:?}' at {:?}", name, span)
+            CodeGenError::NameError { message } => write!(f, "Name error: {}", message),
+            CodeGenError::TypeError { message } => write!(f, "Type error: {}", message),
+            CodeGenError::ScopeError { message } => write!(f, "Scope error: {}", message),
+            CodeGenError::SyntaxError { message } => write!(f, "Syntax error: {}", message),
+            CodeGenError::MissingOperand { message } => write!(f, "Missing operand: {}", message),
+            CodeGenError::InvalidOperand { message } => write!(f, "Invalid operand: {}", message),
+            CodeGenError::UnsupportedOperation { message } => {
+                write!(f, "Unsupported operation: {}", message)
             }
-            CodeGenError::ModuleError(msg, span) => {
-                write!(f, "Module error: '{}' at {:?}", msg, span)
-            }
+            CodeGenError::NasmError(msg) => write!(f, "NASM error: {}", msg),
         }
     }
 }
@@ -52,47 +41,11 @@ impl Display for CodeGenError {
 impl std::error::Error for CodeGenError {}
 
 impl CodeGenError {
-    pub fn span(&self) -> crate::compiler::Span {
+    pub fn span(&self) -> Span {
         match self {
-            CodeGenError::UnexpectedExpression { span, .. }
-            | CodeGenError::UndefinedVariable { span, .. }
-            | CodeGenError::UndefinedFunction { span, .. }
-            | CodeGenError::ModuleError(_, span) => *span,
+            CodeGenError::UndefinedVariable { span, .. }
+            | CodeGenError::UndefinedFunction { span, .. } => *span,
+            _ => Span::new(0, 0),
         }
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct LoopContext {
-    pub header_block: ir::Block,
-    pub exit_block: ir::Block,
-    pub increment_block: Option<ir::Block>,
-    pub loop_params: Vec<(String, Slot)>,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct StructField {
-    pub name: String,
-    pub ty: Type,
-    pub offset: i64,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct StructDef {
-    pub fields: Vec<StructField>,
-    pub size: i64,
-    #[allow(dead_code)]
-    pub align: i64,
-}
-
-pub(crate) fn get_type(t: &Type, type_map: &HashMap<String, ir::Type>) -> ir::Type {
-    match t {
-        Type::Named(name) => *type_map.get(name).unwrap_or(&ir::types::I64),
-        Type::Array(_, _) => ir::types::I64,
-        Type::Pointer(_) => ir::types::I64,
-        Type::Function(_, _) => ir::types::I64,
-        Type::TypeVar(_) => ir::types::I64,
-        Type::Auto => ir::types::I64,
-        Type::Gen => ir::types::I64,
     }
 }

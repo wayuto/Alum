@@ -314,7 +314,14 @@ impl TypeChecker {
             | Expr::Sub(_, _, _)
             | Expr::Mul(_, _, _)
             | Expr::Div(_, _, _)
-            | Expr::Mod(_, _, _) => Type::Named("int".to_string()),
+            | Expr::Mod(_, _, _)
+            | Expr::Neg(_, _)
+            | Expr::Xor(_, _, _)
+            | Expr::Inc(_, _)
+            | Expr::Dec(_, _)
+            | Expr::AddAssign(_, _, _)
+            | Expr::SubAssign(_, _, _) => Type::Named("int".to_string()),
+            Expr::FNeg(_, _) => Type::Named("float".to_string()),
             Expr::FEq(_, _, _)
             | Expr::FNe(_, _, _)
             | Expr::FLt(_, _, _)
@@ -327,7 +334,7 @@ impl TypeChecker {
             | Expr::Le(_, _, _)
             | Expr::Gt(_, _, _)
             | Expr::Ge(_, _, _) => Type::Named("bool".to_string()),
-            Expr::And(_, _, _) | Expr::Or(_, _, _) | Expr::Not(_, _) => {
+            Expr::And(_, _, _) | Expr::Or(_, _, _) | Expr::LAnd(_, _, _) | Expr::LOr(_, _, _) | Expr::Not(_, _) => {
                 Type::Named("bool".to_string())
             }
             Expr::StrCat(_, _, _) => Type::Named("string".to_string()),
@@ -624,6 +631,100 @@ impl TypeChecker {
                 }
 
                 Ok(Type::Named("int".to_string()))
+            }
+
+            Expr::Neg(operand, _) => {
+                let ty = self.check_expr(operand)?;
+                if Self::is_float_type(&ty) {
+                    *expr = Expr::FNeg(
+                        operand.clone(),
+                        Span::new(0, 0),
+                    );
+                    return self.check_expr(expr);
+                }
+                if !Self::is_numeric_type(&ty) {
+                    return Err(CheckerError::InvalidOperation {
+                        op: "negation".to_string(),
+                        type_name: format!("{:?}", ty),
+                        span: span,
+                    });
+                }
+                Ok(ty)
+            }
+
+            Expr::FNeg(operand, _) => {
+                let ty = self.check_expr(operand)?;
+                if !Self::is_numeric_type(&ty) {
+                    return Err(CheckerError::InvalidOperation {
+                        op: "negation".to_string(),
+                        type_name: format!("{:?}", ty),
+                        span: span,
+                    });
+                }
+                Ok(Type::Named("float".to_string()))
+            }
+
+            Expr::Xor(lhs, rhs, _) => {
+                let lhs_type = self.check_expr(lhs)?;
+                let rhs_type = self.check_expr(rhs)?;
+                if Self::is_float_type(&lhs_type) || Self::is_float_type(&rhs_type) {
+                    return Err(CheckerError::InvalidOperation {
+                        op: "xor".to_string(),
+                        type_name: "float".to_string(),
+                        span: span,
+                    });
+                }
+                if !Self::is_numeric_type(&lhs_type) || !Self::is_numeric_type(&rhs_type) {
+                    return Err(CheckerError::InvalidOperation {
+                        op: "xor".to_string(),
+                        type_name: format!("{:?} and {:?}", lhs_type, rhs_type),
+                        span: span,
+                    });
+                }
+                Ok(Type::Named("int".to_string()))
+            }
+
+            Expr::Inc(name, _) | Expr::Dec(name, _) => {
+                let var_type = self
+                    .lookup_var(name)
+                    .ok_or_else(|| CheckerError::UndefinedVariable(name.clone(), span))?;
+                if !Self::is_numeric_type(&var_type) {
+                    return Err(CheckerError::InvalidOperation {
+                        op: "increment/decrement".to_string(),
+                        type_name: format!("{:?}", var_type),
+                        span: span,
+                    });
+                }
+                Ok(var_type)
+            }
+
+            Expr::AddAssign(name, value, _) | Expr::SubAssign(name, value, _) => {
+                let var_type = self
+                    .lookup_var(name)
+                    .ok_or_else(|| CheckerError::UndefinedVariable(name.clone(), span))?;
+                let value_type = self.check_expr(value)?;
+                self.unify_types(&var_type, &value_type).map_err(|_| {
+                    CheckerError::TypeMismatch {
+                        expected: var_type.clone(),
+                        found: value_type,
+                        context: format!("compound assignment to '{}'", name),
+                        span: span,
+                    }
+                })?;
+                Ok(var_type)
+            }
+
+            Expr::LAnd(lhs, rhs, _) | Expr::LOr(lhs, rhs, _) => {
+                let lhs_type = self.check_expr(lhs)?;
+                let rhs_type = self.check_expr(rhs)?;
+                if !Self::is_bool_type(&lhs_type) || !Self::is_bool_type(&rhs_type) {
+                    return Err(CheckerError::InvalidOperation {
+                        op: "logical".to_string(),
+                        type_name: format!("{:?} and {:?}", lhs_type, rhs_type),
+                        span: span,
+                    });
+                }
+                Ok(Type::Named("bool".to_string()))
             }
 
             Expr::Eq(lhs, rhs, _)

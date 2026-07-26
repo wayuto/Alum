@@ -5,7 +5,4 @@ edition = "2024"
 
 [dependencies]
 clap = { version = "4.5.54", features = ["derive"] }
-cranelift = "0.127.2"
-cranelift-module = "0.127.2"
-cranelift-object = "0.127.2"
-object = { version = "0.36", features = ["write_core", "read_core", "std"] }
+ordered-float = "5.0.0"
