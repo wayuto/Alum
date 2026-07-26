@@ -25,6 +25,12 @@ pub struct Assembler {
     globals: Vec<String>,
 }
 
+fn mem_rex_bits(m: &Mem) -> (bool, bool) {
+    let rex_x = m.index.map(|i| i.rex_b()).unwrap_or(false);
+    let rex_b = m.base.map(|b| b.rex_b()).unwrap_or(false);
+    (rex_x, rex_b)
+}
+
 impl Assembler {
     pub fn new() -> Self {
         Assembler {
@@ -149,7 +155,8 @@ impl Assembler {
                 self.emit_rm64_r64(0x89, op, *r, section, offset)?;
             }
             Mov(Operand::Mem(m), Operand::Imm(v)) => {
-                self.emit_rex(section, true, false, false, false);
+                let (rex_x, rex_b) = mem_rex_bits(m);
+                self.emit_rex(section, true, false, rex_x, rex_b);
                 self.emit_bytes(section, vec![0xc7]);
                 self.emit_modrm_sib(section, 0, m, offset)?;
                 self.emit_slice(section, &(*v as i32).to_le_bytes());
@@ -160,8 +167,8 @@ impl Assembler {
                 self.emit_bytes(section, vec![self.modrm(3, d.reg_id() & 7, s.reg_id() & 7)]);
             }
             Movsd(dst, src) => self.emit_movsd(dst, src, section, offset)?,
-            Add(dst, src) => self.emit_binop(0x03, 0x01, 0x83, 0x05, dst, src, section, offset)?,
-            Sub(dst, src) => self.emit_binop(0x2b, 0x29, 0x83, 0x2d, dst, src, section, offset)?,
+            Add(dst, src) => self.emit_binop(0x03, 0x01, 0x83, 0x00, dst, src, section, offset)?,
+            Sub(dst, src) => self.emit_binop(0x2b, 0x29, 0x83, 0x05, dst, src, section, offset)?,
             Imul(Operand::Reg(r), op) => {
                 self.emit_binop_imul(*r, op, section, offset)?;
             }
@@ -184,22 +191,19 @@ impl Assembler {
                 self.emit_rex(section, true, false, false, reg.rex_b());
                 self.emit_slice(section, &[0xff, self.modrm(3, 1, reg.reg_id() & 7)]);
             }
-            Xor(dst, src) => self.emit_binop(0x33, 0x31, 0x83, 0x35, dst, src, section, offset)?,
-            Or(dst, src) => self.emit_binop(0x0b, 0x09, 0x83, 0x0d, dst, src, section, offset)?,
-            And(dst, src) => self.emit_binop(0x23, 0x21, 0x83, 0x25, dst, src, section, offset)?,
+            Xor(dst, src) => self.emit_binop(0x33, 0x31, 0x83, 0x06, dst, src, section, offset)?,
+            Or(dst, src) => self.emit_binop(0x0b, 0x09, 0x83, 0x01, dst, src, section, offset)?,
+            And(dst, src) => self.emit_binop(0x23, 0x21, 0x83, 0x04, dst, src, section, offset)?,
             Cmp(Operand::Reg(r), Operand::Imm(0)) => {
                 self.emit_rex(section, true, false, false, r.rex_b());
-                self.emit_slice(
-                    section,
-                    &[0x83, self.modrm(3, 7, r.reg_id() & 7), 0x00],
-                );
+                self.emit_slice(section, &[0x83, self.modrm(3, 7, r.reg_id() & 7), 0x00]);
             }
             Cmp(Operand::Reg(r), op) => {
                 self.emit_binop(
                     0x3b,
                     0x39,
                     0x83,
-                    0x3d,
+                    0x07,
                     &Operand::Reg(*r),
                     op,
                     section,
@@ -290,29 +294,37 @@ impl Assembler {
             Xorpd(d, src) => {
                 let prefix = 0x66u8;
                 self.emit_slice(section, &[prefix]);
-                self.emit_rex(section, false, false, false, d.rex_b());
-                self.emit_slice(section, &[0x0f, 0x57]);
                 match src {
-                    Operand::Mem(m) => self.emit_modrm_sib(section, d.reg_id() & 7, m, offset)?,
+                    Operand::Mem(m) => {
+                        let (rex_x, rex_b) = mem_rex_bits(m);
+                        self.emit_rex(section, false, d.rex_b(), rex_x, rex_b);
+                        self.emit_slice(section, &[0x0f, 0x57]);
+                        self.emit_modrm_sib(section, d.reg_id() & 7, m, offset)?;
+                    }
                     Operand::DataLabel(l) => {
+                        self.emit_rex(section, false, false, false, d.rex_b());
+                        self.emit_slice(section, &[0x0f, 0x57]);
                         self.emit_rm_disp32(section, d.reg_id() & 7);
                         self.emit_reloc(section, RelocKind::Pc32, l.clone(), -4);
                     }
                     _ => return Err(format!("unsupported xorpd src: {:?}", src)),
                 }
             }
-            Lea(Operand::Reg(r), src) => {
-                self.emit_rex(section, true, false, false, r.rex_b());
-                self.emit_slice(section, &[0x8d]);
-                match src {
-                    Operand::Mem(m) => self.emit_modrm_sib(section, r.reg_id() & 7, m, offset)?,
-                    Operand::DataLabel(l) => {
-                        self.emit_rm_disp32(section, r.reg_id() & 7);
-                        self.emit_reloc(section, RelocKind::Pc32, l.clone(), -4);
-                    }
-                    _ => return Err(format!("unsupported lea src: {:?}", src)),
+            Lea(Operand::Reg(r), src) => match src {
+                Operand::Mem(m) => {
+                    let (rex_x, rex_b) = mem_rex_bits(m);
+                    self.emit_rex(section, true, r.rex_b(), rex_x, rex_b);
+                    self.emit_slice(section, &[0x8d]);
+                    self.emit_modrm_sib(section, r.reg_id() & 7, m, offset)?;
                 }
-            }
+                Operand::DataLabel(l) => {
+                    self.emit_rex(section, true, false, false, r.rex_b());
+                    self.emit_slice(section, &[0x8d]);
+                    self.emit_rm_disp32(section, r.reg_id() & 7);
+                    self.emit_reloc(section, RelocKind::Pc32, l.clone(), -4);
+                }
+                _ => return Err(format!("unsupported lea src: {:?}", src)),
+            },
             _ => return Err(format!("unsupported instruction: {:?}", asm)),
         }
         Ok(())
@@ -334,14 +346,12 @@ impl Assembler {
     fn emit_rm_disp32(&mut self, section: &str, reg: u8) {
         self.emit_slice(section, &[self.modrm(0, reg & 7, 5)]);
     }
-
     fn emit_mov_label(&mut self, r: Reg, lbl: &str, section: &str, _offset: u64) {
         self.emit_rex(section, true, false, false, r.rex_b());
         self.emit_slice(section, &[0x8d]);
         self.emit_rm_disp32(section, r.reg_id() & 7);
         self.emit_reloc(section, RelocKind::Pc32, lbl.to_string(), -4);
     }
-
     fn emit_r64_rm64(
         &mut self,
         opcode: u8,
@@ -352,14 +362,15 @@ impl Assembler {
     ) -> Result<(), String> {
         match src {
             Operand::Reg(s) => {
-                self.emit_rex(section, true, s.rex_b(), false, r.rex_b());
+                self.emit_rex(section, true, r.rex_b(), false, s.rex_b());
                 self.emit_slice(
                     section,
                     &[opcode, self.modrm(3, r.reg_id() & 7, s.reg_id() & 7)],
                 );
             }
             Operand::Mem(m) => {
-                self.emit_rex(section, true, false, false, r.rex_b());
+                let (rex_x, rex_b) = mem_rex_bits(m);
+                self.emit_rex(section, true, r.rex_b(), rex_x, rex_b);
                 self.emit_slice(section, &[opcode]);
                 self.emit_modrm_sib(section, r.reg_id() & 7, m, offset)?;
             }
@@ -385,7 +396,8 @@ impl Assembler {
                 );
             }
             Operand::Mem(m) => {
-                self.emit_rex(section, true, r.rex_b(), false, false);
+                let (rex_x, rex_b) = mem_rex_bits(m);
+                self.emit_rex(section, true, r.rex_b(), rex_x, rex_b);
                 self.emit_slice(section, &[opcode]);
                 self.emit_modrm_sib(section, r.reg_id() & 7, m, offset)?;
             }
@@ -407,14 +419,15 @@ impl Assembler {
     ) -> Result<(), String> {
         match (dst, src) {
             (Operand::Reg(r), Operand::Reg(s)) => {
-                self.emit_rex(section, true, s.rex_b(), false, r.rex_b());
+                self.emit_rex(section, true, r.rex_b(), false, s.rex_b());
                 self.emit_slice(
                     section,
-                    &[op_rm, self.modrm(3, s.reg_id() & 7, r.reg_id() & 7)],
+                    &[op_rm, self.modrm(3, r.reg_id() & 7, s.reg_id() & 7)],
                 );
             }
             (Operand::Reg(r), Operand::Mem(m)) => {
-                self.emit_rex(section, true, false, false, r.rex_b());
+                let (rex_x, rex_b) = mem_rex_bits(m);
+                self.emit_rex(section, true, r.rex_b(), rex_x, rex_b);
                 self.emit_slice(section, &[op_rm]);
                 self.emit_modrm_sib(section, r.reg_id() & 7, m, offset)?;
             }
@@ -452,7 +465,8 @@ impl Assembler {
                 );
             }
             Operand::Mem(m) => {
-                self.emit_rex(section, true, false, false, r.rex_b());
+                let (rex_x, rex_b) = mem_rex_bits(m);
+                self.emit_rex(section, true, r.rex_b(), rex_x, rex_b);
                 self.emit_slice(section, &[0x0f, 0xaf]);
                 self.emit_modrm_sib(section, r.reg_id() & 7, m, offset)?;
             }
@@ -487,14 +501,16 @@ impl Assembler {
         let f2 = 0xf2u8;
         match (dst, src) {
             (Operand::Reg(r), Operand::Mem(m)) if r.is_xmm() => {
+                let (rex_x, rex_b) = mem_rex_bits(m);
                 self.emit_slice(section, &[f2]);
-                self.emit_rex(section, false, false, false, r.rex_b());
+                self.emit_rex(section, false, r.rex_b(), rex_x, rex_b);
                 self.emit_slice(section, &[0x0f, 0x10]);
                 self.emit_modrm_sib(section, r.reg_id() & 7, m, offset)?;
             }
             (Operand::Mem(m), Operand::Reg(r)) if r.is_xmm() => {
+                let (rex_x, rex_b) = mem_rex_bits(m);
                 self.emit_slice(section, &[f2]);
-                self.emit_rex(section, false, false, false, r.rex_b());
+                self.emit_rex(section, false, r.rex_b(), rex_x, rex_b);
                 self.emit_slice(section, &[0x0f, 0x11]);
                 self.emit_modrm_sib(section, r.reg_id() & 7, m, offset)?;
             }
@@ -529,8 +545,9 @@ impl Assembler {
         let f2 = 0xf2u8;
         match (dst, src) {
             (Operand::Reg(r), Operand::Mem(m)) if r.is_xmm() => {
+                let (rex_x, rex_b) = mem_rex_bits(m);
                 self.emit_slice(section, &[f2]);
-                self.emit_rex(section, false, false, false, r.rex_b());
+                self.emit_rex(section, false, r.rex_b(), rex_x, rex_b);
                 self.emit_slice(section, &[0x0f, opcode]);
                 self.emit_modrm_sib(section, r.reg_id() & 7, m, offset)?;
             }
@@ -562,7 +579,7 @@ impl Assembler {
 
     fn emit_cond_jmp(&mut self, opcode: u16, lbl: &str, section: &str) {
         self.emit_slice(section, &opcode.to_be_bytes());
-        self.emit_reloc(section, RelocKind::Pc32, lbl.to_string(), -6);
+        self.emit_reloc(section, RelocKind::Pc32, lbl.to_string(), -4);
     }
 
     fn emit_modrm_sib(
@@ -582,8 +599,6 @@ impl Assembler {
                     8 => 3,
                     _ => return Err("invalid scale".to_string()),
                 };
-                let _needs_rex = base.rex_b() || idx.rex_b();
-                self.emit_rex(section, false, false, idx.rex_b(), base.rex_b());
                 let mod_ = if m.disp == 0 {
                     0u8
                 } else if m.disp >= -128 && m.disp <= 127 {
@@ -603,9 +618,7 @@ impl Assembler {
                 }
             }
             (Some(base), None) => {
-                let base_rex = base.rex_b();
                 if m.disp == 0 && base != Reg::Rbp {
-                    self.emit_rex(section, false, false, false, base_rex);
                     let rm = if base == Reg::Rsp {
                         0x04
                     } else {
@@ -621,7 +634,6 @@ impl Assembler {
                     } else {
                         2u8
                     };
-                    self.emit_rex(section, false, false, false, base_rex);
                     let rm = if base == Reg::Rsp {
                         0x04
                     } else {
@@ -646,7 +658,6 @@ impl Assembler {
                     8 => 3,
                     _ => return Err("invalid scale".to_string()),
                 };
-                self.emit_rex(section, false, false, idx.rex_b(), false);
                 self.emit_slice(section, &[self.modrm(0, reg7, 0x04)]);
                 self.emit_slice(
                     section,

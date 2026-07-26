@@ -48,9 +48,7 @@ impl Optimizer {
             | Expr::VarAssign(_, v, _)
             | Expr::Return(v, _)
             | Expr::AddAssign(_, v, _)
-            | Expr::SubAssign(_, v, _) => {
-                self.optimize_expr(v)
-            }
+            | Expr::SubAssign(_, v, _) => self.optimize_expr(v),
             Expr::Inc(_, _) | Expr::Dec(_, _) => {}
             Expr::Call(f, args, _) => {
                 self.optimize_expr(f);
@@ -81,8 +79,8 @@ impl Optimizer {
             | Expr::Sub(l, r, _)
             | Expr::Mul(l, r, _)
             | Expr::Div(l, r, _)
-             | Expr::Mod(l, r, _)
-             | Expr::Xor(l, r, _)
+            | Expr::Mod(l, r, _)
+            | Expr::Xor(l, r, _)
             | Expr::FAdd(l, r, _)
             | Expr::FSub(l, r, _)
             | Expr::FMul(l, r, _)
@@ -304,7 +302,9 @@ impl Optimizer {
             }
             Expr::FuncDecl(_, _, _, body, _) => self.dce(body),
             Expr::VarDecl(_, _, v, _) => self.dce(v),
-            Expr::VarAssign(_, v, _) | Expr::AddAssign(_, v, _) | Expr::SubAssign(_, v, _) => self.dce(v),
+            Expr::VarAssign(_, v, _) | Expr::AddAssign(_, v, _) | Expr::SubAssign(_, v, _) => {
+                self.dce(v)
+            }
             Expr::Return(v, _) => self.dce(v),
             Expr::Inc(_, _) | Expr::Dec(_, _) => {}
             Expr::Call(f, args, _) => {
@@ -347,8 +347,8 @@ impl Optimizer {
             | Expr::Sub(l, r, _)
             | Expr::Mul(l, r, _)
             | Expr::Div(l, r, _)
-             | Expr::Mod(l, r, _)
-             | Expr::Xor(l, r, _)
+            | Expr::Mod(l, r, _)
+            | Expr::Xor(l, r, _)
             | Expr::FAdd(l, r, _)
             | Expr::FSub(l, r, _)
             | Expr::FMul(l, r, _)
@@ -391,8 +391,8 @@ impl Optimizer {
             | Expr::Sub(l, r, _)
             | Expr::Mul(l, r, _)
             | Expr::Div(l, r, _)
-             | Expr::Mod(l, r, _)
-             | Expr::Xor(l, r, _)
+            | Expr::Mod(l, r, _)
+            | Expr::Xor(l, r, _)
             | Expr::FAdd(l, r, _)
             | Expr::FSub(l, r, _)
             | Expr::FMul(l, r, _)

@@ -21,10 +21,11 @@ struct Context {
     pub loop_end_labels: Vec<String>,
     pub loop_inc_labels: Vec<String>,
     pub var_types: HashMap<String, Type>,
+    pub func_name: String,
 }
 
 impl Context {
-    pub fn new() -> Self {
+    pub fn new(func_name: String) -> Self {
         Self {
             instructions: Vec::new(),
             tmp_cnt: 0,
@@ -33,6 +34,7 @@ impl Context {
             loop_end_labels: Vec::new(),
             loop_inc_labels: Vec::new(),
             var_types: HashMap::new(),
+            func_name,
         }
     }
 
@@ -43,7 +45,7 @@ impl Context {
 
     pub fn new_label(&mut self, name: &str) -> String {
         self.label_cnt += 1;
-        format!(".{}_{:X}", name, self.label_cnt - 1)
+        format!(".{}_{}_{}", self.func_name, name, self.label_cnt - 1)
     }
 
     pub fn enter_scope(&mut self) {
@@ -455,7 +457,7 @@ impl IRGen {
                 | Expr::String(_, _)
                 | Expr::Nil(_)
                 | Expr::Var(_, _) => {
-                    let mut ctx = Context::new();
+                    let mut ctx = Context::new("_global".to_string());
                     ctx.enter_scope();
                     self.compile_expr(
                         Expr::VarDecl(
@@ -1276,7 +1278,9 @@ impl IRGen {
                     for (arg, param) in zip(args.iter(), func.params.iter()) {
                         let operand = self.compile_expr(arg.clone(), ctx)?;
                         let operand_type = ctx.get_operand_type(&operand, &self.constants)?;
-                        if operand_type != param.1 {
+                        let type_matches = operand_type == param.1
+                            || (matches!(operand_type, IRType::Array(_)) && param.1 == IRType::Int);
+                        if !type_matches {
                             return Err(CodeGenError::TypeError {
                                 message: format!(
                                     "unexpected type {:?}, expected {:?}",
@@ -1331,9 +1335,16 @@ impl IRGen {
             }
 
             Expr::Index(arr, idx, _) => {
+                let elem_ir_type = match &*arr {
+                    Expr::Var(name, _) => match ctx.get_var_high_type(name) {
+                        Some(Type::Array(elem_type, _)) => Context::type_to_ir_type(elem_type),
+                        _ => IRType::Int,
+                    },
+                    _ => IRType::Int,
+                };
                 let arr_op = self.compile_expr(*arr, ctx)?;
                 let offset = self.compile_expr(*idx, ctx)?;
-                let res_tmp = ctx.new_tmp(IRType::Int);
+                let res_tmp = ctx.new_tmp(elem_ir_type);
                 ctx.instructions.push(Instruction {
                     op: Op::ArrayAccess,
                     dst: Some(res_tmp.clone()),
@@ -1424,27 +1435,59 @@ impl IRGen {
                     Type::Named(n) if matches!(n.as_str(), "int" | "float" | "string") => 8i64,
                     _ => 8i64,
                 };
-                let total_size_idx = self.get_const_index(IRConst::Int(
-                    if let IRType::Array(Some(l)) = Context::type_to_ir_type(&typ) {
-                        (l as i64 + 1) * 8
-                    } else {
-                        8 + elem_size * 8
-                    },
-                ));
                 let ptr_tmp = ctx.new_tmp(IRType::Int);
-                ctx.instructions.push(Instruction {
-                    op: Op::Malloc,
-                    dst: Some(ptr_tmp.clone()),
-                    src1: Some(Operand::ConstIdx(total_size_idx)),
-                    src2: None,
-                });
-                let zero_idx = self.get_const_index(IRConst::Int(0));
-                ctx.instructions.push(Instruction {
-                    op: Op::StoreAt,
-                    dst: Some(ptr_tmp.clone()),
-                    src1: Some(Operand::ConstIdx(zero_idx)),
-                    src2: Some(len_op),
-                });
+                if let Operand::ConstIdx(n) = &len_op {
+                    let n_val = if let IRConst::Int(v) = &self.constants[*n] {
+                        *v
+                    } else {
+                        elem_size * 8
+                    };
+                    let total_size = (n_val + 1) * 8;
+                    let total_size_idx = self.get_const_index(IRConst::Int(total_size));
+                    ctx.instructions.push(Instruction {
+                        op: Op::Malloc,
+                        dst: Some(ptr_tmp.clone()),
+                        src1: Some(Operand::ConstIdx(total_size_idx)),
+                        src2: None,
+                    });
+                    let zero_idx = self.get_const_index(IRConst::Int(0));
+                    ctx.instructions.push(Instruction {
+                        op: Op::StoreAt,
+                        dst: Some(ptr_tmp.clone()),
+                        src1: Some(Operand::ConstIdx(zero_idx)),
+                        src2: Some(len_op),
+                    });
+                } else {
+                    let esize_idx = self.get_const_index(IRConst::Int(elem_size));
+                    let byte_len_tmp = ctx.new_tmp(IRType::Int);
+                    ctx.instructions.push(Instruction {
+                        op: Op::Mul,
+                        dst: Some(byte_len_tmp.clone()),
+                        src1: Some(len_op.clone()),
+                        src2: Some(Operand::ConstIdx(esize_idx)),
+                    });
+                    let header_idx = self.get_const_index(IRConst::Int(8));
+                    let total_size_tmp = ctx.new_tmp(IRType::Int);
+                    ctx.instructions.push(Instruction {
+                        op: Op::Add,
+                        dst: Some(total_size_tmp.clone()),
+                        src1: Some(byte_len_tmp),
+                        src2: Some(Operand::ConstIdx(header_idx)),
+                    });
+                    ctx.instructions.push(Instruction {
+                        op: Op::Malloc,
+                        dst: Some(ptr_tmp.clone()),
+                        src1: Some(total_size_tmp),
+                        src2: None,
+                    });
+                    let zero_idx = self.get_const_index(IRConst::Int(0));
+                    ctx.instructions.push(Instruction {
+                        op: Op::StoreAt,
+                        dst: Some(ptr_tmp.clone()),
+                        src1: Some(Operand::ConstIdx(zero_idx)),
+                        src2: Some(len_op),
+                    });
+                }
                 Ok(ptr_tmp)
             }
 
@@ -1469,15 +1512,23 @@ impl IRGen {
 
             Expr::MemberAccess(obj, field_name, _) => {
                 let struct_name = match &*obj {
-                    Expr::Var(name, _) => {
-                        if let Some(Type::Named(sname)) = ctx.get_var_high_type(name) {
-                            sname.clone()
-                        } else {
+                    Expr::Var(name, _) => match ctx.get_var_high_type(name) {
+                        Some(Type::Named(sname)) => sname.clone(),
+                        Some(Type::Pointer(box_ty)) => {
+                            if let Type::Named(sname) = box_ty.as_ref() {
+                                sname.clone()
+                            } else {
+                                return Err(CodeGenError::TypeError {
+                                    message: "member access on non-struct variable".to_string(),
+                                });
+                            }
+                        }
+                        _ => {
                             return Err(CodeGenError::TypeError {
                                 message: "member access on non-struct variable".to_string(),
                             });
                         }
-                    }
+                    },
                     _ => {
                         return Err(CodeGenError::TypeError {
                             message: "member access on non-variable expression".to_string(),
@@ -1521,15 +1572,23 @@ impl IRGen {
 
             Expr::MemberAssign(obj, field_name, value, _) => {
                 let struct_name = match &*obj {
-                    Expr::Var(name, _) => {
-                        if let Some(Type::Named(sname)) = ctx.get_var_high_type(name) {
-                            sname.clone()
-                        } else {
+                    Expr::Var(name, _) => match ctx.get_var_high_type(name) {
+                        Some(Type::Named(sname)) => sname.clone(),
+                        Some(Type::Pointer(box_ty)) => {
+                            if let Type::Named(sname) = box_ty.as_ref() {
+                                sname.clone()
+                            } else {
+                                return Err(CodeGenError::TypeError {
+                                    message: "member assign on non-struct variable".to_string(),
+                                });
+                            }
+                        }
+                        _ => {
                             return Err(CodeGenError::TypeError {
                                 message: "member assign on non-struct variable".to_string(),
                             });
                         }
-                    }
+                    },
                     _ => {
                         return Err(CodeGenError::TypeError {
                             message: "member assign on non-variable expression".to_string(),
@@ -1580,14 +1639,22 @@ impl IRGen {
                         });
                     }
                 };
-                let res_tmp = ctx.new_tmp(IRType::Int);
-                ctx.instructions.push(Instruction {
-                    op: Op::Lea,
-                    dst: Some(res_tmp.clone()),
-                    src1: Some(Operand::Var(name)),
-                    src2: None,
-                });
-                Ok(res_tmp)
+                let is_struct = match ctx.get_var_high_type(&name) {
+                    Some(Type::Named(name)) => self.structs.contains_key(name),
+                    _ => false,
+                };
+                if is_struct {
+                    self.compile_expr(*inner, ctx)
+                } else {
+                    let res_tmp = ctx.new_tmp(IRType::Int);
+                    ctx.instructions.push(Instruction {
+                        op: Op::Lea,
+                        dst: Some(res_tmp.clone()),
+                        src1: Some(Operand::Var(name)),
+                        src2: None,
+                    });
+                    Ok(res_tmp)
+                }
             }
 
             Expr::Deref(inner, _) => {
@@ -1645,24 +1712,27 @@ impl IRGen {
     fn compile_fn(
         &mut self,
         name: String,
-        _params: Vec<(String, Type)>,
+        params: Vec<(String, Type)>,
         body: Expr,
     ) -> Result<(), CodeGenError> {
         let func = self.find_func(&name)?;
 
-        let mut ctx = Context::new();
+        let mut ctx = Context::new(name.clone());
         ctx.enter_scope();
 
-        for (_i, (param, ty)) in func.params.iter().enumerate() {
-            if let Operand::Var(name) = param {
+        for (i, (param, ty)) in func.params.iter().enumerate() {
+            if let Operand::Var(pname) = param {
                 if let Some(scope) = ctx.scope.last_mut() {
                     scope.insert(
-                        name.clone(),
+                        pname.clone(),
                         Symbol {
-                            name: name.clone(),
+                            name: pname.clone(),
                             ir_type: ty.clone(),
                         },
                     );
+                }
+                if let Some((_, hty)) = params.get(i) {
+                    ctx.var_types.insert(pname.clone(), hty.clone());
                 }
             }
         }
@@ -1687,7 +1757,7 @@ impl IRGen {
             });
         }
 
-        if let Some(f) = self.functions.iter_mut().find(|f| f.name == name) {
+        if let Some(f) = self.functions.iter_mut().rev().find(|f| f.name == name) {
             f.instructions = take(&mut ctx.instructions);
         }
         Ok(())
@@ -1716,7 +1786,13 @@ impl IRGen {
             is_pub: false,
             is_external: true,
         };
-        self.functions.push(signature);
+        let already_defined = self
+            .functions
+            .iter()
+            .any(|f| f.name == name && !f.is_external);
+        if !already_defined {
+            self.functions.push(signature);
+        }
         Ok(())
     }
 

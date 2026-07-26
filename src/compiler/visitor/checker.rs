@@ -636,10 +636,7 @@ impl TypeChecker {
             Expr::Neg(operand, _) => {
                 let ty = self.check_expr(operand)?;
                 if Self::is_float_type(&ty) {
-                    *expr = Expr::FNeg(
-                        operand.clone(),
-                        Span::new(0, 0),
-                    );
+                    *expr = Expr::FNeg(operand.clone(), Span::new(0, 0));
                     return self.check_expr(expr);
                 }
                 if !Self::is_numeric_type(&ty) {

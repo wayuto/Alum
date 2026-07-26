@@ -8,28 +8,39 @@ pub fn write_elf(asm: &Assembler) -> Vec<u8> {
     let externs = asm.externs();
     let globals = asm.globals();
 
-    let mut syms: Vec<(String, bool, u64, u16)> = Vec::new();
-    syms.push((String::new(), false, 0, 0));
-
+    let mut local_syms: Vec<(String, u64, u16)> = Vec::new();
+    let mut global_syms: Vec<(String, u64, u16, bool)> = Vec::new();
     let mut sym_map: HashMap<String, u32> = HashMap::new();
 
+    let shndx_for = |section: &str| -> u16 {
+        if section == "text" {
+            1
+        } else if section == "data" {
+            2
+        } else {
+            0
+        }
+    };
+
     for e in externs {
-        let idx = syms.len() as u32;
+        if sym_map.contains_key(e) {
+            continue;
+        }
+        let idx = (1 + local_syms.len() + global_syms.len()) as u32;
         sym_map.insert(e.clone(), idx);
-        syms.push((e.clone(), true, 0, 0));
+        global_syms.push((e.clone(), 0, 0, true));
     }
+
     for g in globals {
+        if sym_map.contains_key(g) {
+            continue;
+        }
         if let Some((section, offset)) = asm.labels().get(g) {
-            let shndx: u16 = if section == "text" {
-                1
-            } else if section == "data" {
-                2
-            } else {
-                0
-            };
-            let idx = syms.len() as u32;
+            let shndx = shndx_for(section);
+            let idx = (1 + local_syms.len() + global_syms.len()) as u32;
             sym_map.insert(g.clone(), idx);
-            syms.push((g.clone(), false, *offset, shndx));
+            global_syms.push((g.clone(), *offset, shndx, false));
+        } else {
         }
     }
 
@@ -38,21 +49,40 @@ pub fn write_elf(asm: &Assembler) -> Vec<u8> {
             continue;
         }
         if let Some((section, offset)) = asm.labels().get(&r.target) {
-            let shndx: u16 = if section == "text" {
-                1
-            } else if section == "data" {
-                2
+            let shndx = shndx_for(section);
+            if globals.contains(&r.target) {
+                let idx = (1 + local_syms.len() + global_syms.len()) as u32;
+                sym_map.insert(r.target.clone(), idx);
+                global_syms.push((r.target.clone(), *offset, shndx, false));
             } else {
-                0
-            };
-            let idx = syms.len() as u32;
-            sym_map.insert(r.target.clone(), idx);
-            syms.push((r.target.clone(), false, *offset, shndx));
+                local_syms.push((r.target.clone(), *offset, shndx));
+
+                let idx = (1 + local_syms.len() + global_syms.len()) as u32;
+                sym_map.insert(r.target.clone(), idx);
+            }
         } else {
-            let idx = syms.len() as u32;
+            let idx = (1 + local_syms.len() + global_syms.len()) as u32;
             sym_map.insert(r.target.clone(), idx);
-            syms.push((r.target.clone(), true, 0, 0));
+            global_syms.push((r.target.clone(), 0, 0, true));
         }
+    }
+
+    let mut syms: Vec<(String, u8, u64, u16)> = Vec::new();
+    syms.push((String::new(), 0, 0, 0));
+    sym_map.clear();
+
+    for (name, value, shndx) in &local_syms {
+        let idx = syms.len() as u32;
+        sym_map.insert(name.clone(), idx);
+
+        syms.push((name.clone(), 0x00, *value, *shndx));
+    }
+    let first_global = syms.len() as u32;
+    for (name, value, shndx, is_undef) in &global_syms {
+        let idx = syms.len() as u32;
+        sym_map.insert(name.clone(), idx);
+        let st_info = if *is_undef { 0x10 } else { 0x12 };
+        syms.push((name.clone(), st_info, *value, *shndx));
     }
 
     let sec_names = &[
@@ -88,17 +118,10 @@ pub fn write_elf(asm: &Assembler) -> Vec<u8> {
     }
 
     let mut symtab_data = Vec::<u8>::new();
-    for (i, (_sym_name, is_undef, sym_value, st_shndx)) in syms.iter().enumerate() {
+    for (i, (_sym_name, st_info, sym_value, st_shndx)) in syms.iter().enumerate() {
         let name_off = strtab_ofs[i];
-        let st_info: u8 = if i == 0 {
-            0
-        } else if *is_undef {
-            0x10
-        } else {
-            0x12
-        };
         symtab_data.extend_from_slice(&name_off.to_le_bytes());
-        symtab_data.push(st_info);
+        symtab_data.push(*st_info);
         symtab_data.push(0);
         symtab_data.extend_from_slice(&st_shndx.to_le_bytes());
         symtab_data.extend_from_slice(&sym_value.to_le_bytes());
@@ -185,7 +208,7 @@ pub fn write_elf(asm: &Assembler) -> Vec<u8> {
         symtab_off,
         symtab_data.len() as u64,
         4,
-        1,
+        first_global,
         8,
         24,
     );

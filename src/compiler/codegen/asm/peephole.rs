@@ -127,6 +127,7 @@ fn pass_dead_labels(asms: &mut Vec<Asm>) -> bool {
     while i < asms.len() {
         if let Asm::Label(lbl) = &asms[i] {
             if !referenced.contains(lbl) && !globals.contains(lbl) {
+                if lbl == "vec_new" {}
                 asms.remove(i);
                 changed = true;
                 continue;
