@@ -2,7 +2,7 @@
     "name": "alum-vscode",
     "displayName": "alum-vscode",
     "description": "Alum Programming Language - Syntax highlighting and language support for VSCode",
-    "version": "0.9.3",
+    "version": "0.9.4",
     "engines": {
         "vscode": "^1.107.0"
     },
@@ -30,5 +30,15 @@
                 "path": "./syntaxes/alum.tmLanguage.json"
             }
         ]
+    },
+    "main": "index.js",
+    "scripts": {
+        "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "devDependencies": {
+        "@vscode/vsce": "^3.9.2"
     }
 }
