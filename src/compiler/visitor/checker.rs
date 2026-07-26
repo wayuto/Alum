@@ -334,7 +334,7 @@ impl TypeChecker {
             | Expr::Le(_, _, _)
             | Expr::Gt(_, _, _)
             | Expr::Ge(_, _, _) => Type::Named("bool".to_string()),
-            Expr::And(_, _, _) | Expr::Or(_, _, _) | Expr::LAnd(_, _, _) | Expr::LOr(_, _, _) | Expr::Not(_, _) => {
+            Expr::LAnd(_, _, _) | Expr::LOr(_, _, _) | Expr::Not(_, _) => {
                 Type::Named("bool".to_string())
             }
             Expr::StrCat(_, _, _) => Type::Named("string".to_string()),
@@ -766,21 +766,6 @@ impl TypeChecker {
                 } else if !Self::is_numeric_type(&lhs_type) || !Self::is_numeric_type(&rhs_type) {
                     return Err(CheckerError::InvalidOperation {
                         op: "comparison".to_string(),
-                        type_name: format!("{:?} and {:?}", lhs_type, rhs_type),
-                        span: span,
-                    });
-                }
-
-                Ok(Type::Named("bool".to_string()))
-            }
-
-            Expr::And(lhs, rhs, _) | Expr::Or(lhs, rhs, _) => {
-                let lhs_type = self.check_expr(lhs)?;
-                let rhs_type = self.check_expr(rhs)?;
-
-                if !Self::is_bool_type(&lhs_type) || !Self::is_bool_type(&rhs_type) {
-                    return Err(CheckerError::InvalidOperation {
-                        op: "logical".to_string(),
                         type_name: format!("{:?} and {:?}", lhs_type, rhs_type),
                         span: span,
                     });

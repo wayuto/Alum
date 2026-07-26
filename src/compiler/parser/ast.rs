@@ -70,8 +70,6 @@ impl Expr {
             | Expr::FLe(_, _, s)
             | Expr::FGt(_, _, s)
             | Expr::FGe(_, _, s)
-            | Expr::And(_, _, s)
-            | Expr::Or(_, _, s)
             | Expr::Not(_, s)
             | Expr::StrCat(_, _, s)
             | Expr::Var(_, s)
@@ -142,8 +140,6 @@ pub enum Expr {
     FLe(Box<Expr>, Box<Expr>, Span),
     FGt(Box<Expr>, Box<Expr>, Span),
     FGe(Box<Expr>, Box<Expr>, Span),
-    And(Box<Expr>, Box<Expr>, Span),
-    Or(Box<Expr>, Box<Expr>, Span),
     Neg(Box<Expr>, Span),
     FNeg(Box<Expr>, Span),
     Not(Box<Expr>, Span),
@@ -370,22 +366,6 @@ impl Expr {
             }
             Expr::FGe(l, r, _) => {
                 write!(f, "{}FGe(", indent_str)?;
-                write!(f, "\n")?;
-                l.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n")?;
-                r.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
-            Expr::And(l, r, _) => {
-                write!(f, "{}And(", indent_str)?;
-                write!(f, "\n")?;
-                l.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n")?;
-                r.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
-            Expr::Or(l, r, _) => {
-                write!(f, "{}Or(", indent_str)?;
                 write!(f, "\n")?;
                 l.fmt_with_indent(f, indent + 1)?;
                 write!(f, "\n")?;

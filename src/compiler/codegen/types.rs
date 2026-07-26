@@ -12,7 +12,7 @@ pub enum CodeGenError {
     MissingOperand { message: String },
     InvalidOperand { message: String },
     UnsupportedOperation { message: String },
-    NasmError(String),
+    AssemblyError(String),
 }
 
 impl Display for CodeGenError {
@@ -33,7 +33,7 @@ impl Display for CodeGenError {
             CodeGenError::UnsupportedOperation { message } => {
                 write!(f, "Unsupported operation: {}", message)
             }
-            CodeGenError::NasmError(msg) => write!(f, "NASM error: {}", msg),
+            CodeGenError::AssemblyError(msg) => write!(f, "Assembly error: {}", msg),
         }
     }
 }

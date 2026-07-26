@@ -6,6 +6,7 @@ use std::{collections::HashMap, iter::zip, mem::take};
 
 #[derive(Debug, Clone)]
 struct Symbol {
+    #[allow(dead_code)]
     pub name: String,
     pub ir_type: IRType,
 }
@@ -296,16 +297,6 @@ impl IRGen {
                     Box::new(process_expr(*r, lambda_counter, lambda_map)),
                     crate::compiler::Span::new(0, 0),
                 ),
-                Expr::And(l, r, _) => Expr::And(
-                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                    crate::compiler::Span::new(0, 0),
-                ),
-                Expr::Or(l, r, _) => Expr::Or(
-                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
-                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
-                    crate::compiler::Span::new(0, 0),
-                ),
                 Expr::Not(e, _) => Expr::Not(
                     Box::new(process_expr(*e, lambda_counter, lambda_map)),
                     crate::compiler::Span::new(0, 0),
@@ -520,8 +511,6 @@ impl IRGen {
             Expr::FLe(l, r, _) => Ok((Op::FLe, l, r)),
             Expr::FGt(l, r, _) => Ok((Op::FGt, l, r)),
             Expr::FGe(l, r, _) => Ok((Op::FGe, l, r)),
-            Expr::And(l, r, _) => Ok((Op::And, l, r)),
-            Expr::Or(l, r, _) => Ok((Op::Or, l, r)),
             Expr::Xor(l, r, _) => Ok((Op::Xor, l, r)),
             Expr::LAnd(l, r, _) => Ok((Op::LAnd, l, r)),
             Expr::LOr(l, r, _) => Ok((Op::LOr, l, r)),
@@ -769,8 +758,6 @@ impl IRGen {
             | Expr::FLe(_, _, _)
             | Expr::FGt(_, _, _)
             | Expr::FGe(_, _, _)
-            | Expr::And(_, _, _)
-            | Expr::Or(_, _, _)
             | Expr::Xor(_, _, _)
             | Expr::LAnd(_, _, _)
             | Expr::LOr(_, _, _)

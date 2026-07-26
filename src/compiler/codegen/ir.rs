@@ -50,8 +50,6 @@ pub enum Op {
     FLt,
     Le,
     FLe,
-    And,
-    Or,
     LAnd,
     LOr,
     Xor,
@@ -80,8 +78,6 @@ pub enum Op {
     Malloc,
     StoreAt,
     LoadAt,
-    StrLen,
-    MemCopy,
     StrCat,
     Lea,
 }

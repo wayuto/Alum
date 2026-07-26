@@ -6,7 +6,7 @@ Alum is a modern, systems programming language designed for simplicity and perfo
 
 - **Simple Syntax**: Clean, readable syntax inspired by modern languages
 - **Static Typing**: Type safety with explicit type annotations
-- **Native Compilation**: Compiles directly to machine code via NASM + LLD
+- **Native Compilation**: Compiles directly to machine code via built-in assembler + LLD
 - **Fast Compilation**: Efficient compilation pipeline
 - **FFI Support**: Interoperability with C for low-level operations
 - **Build Tool**: Integrated build system (almk) for project management
@@ -18,7 +18,6 @@ Alum is a modern, systems programming language designed for simplicity and perfo
 ### Prerequisites
 
 - Rust toolchain (2024 edition)
-- NASM (Netwide Assembler) — required for assembling the generated machine code
 
 ### Build from Source
 
@@ -539,22 +538,22 @@ Source Code (.al)
 └───────────────┘
         │
         ▼
-┌───────────────┐
-│ Code Generator│  →  Emits x86-64 NASM assembly from IR
-└───────────────┘
+┌──────────────────┐
+│ Code Generator   │  →  Emits x86-64 instructions (Asm IR)
+└──────────────────┘
         │
         ▼
-┌───────────────┐
-│   Assembler   │  →  nasm assembles .asm to .o (ELF64)
-└───────────────┘
+┌──────────────────┐
+│   Assembler      │  →  Encodes Asm IR → x86-64 machine code → ELF .o
+└──────────────────┘
         │
         ▼
   Object File (.o)
         │
         ▼
-┌───────────────┐
-│    Linker     │  →  LLD links object file with standard library
-└───────────────┘
+┌──────────────────┐
+│    Linker        │  →  LLD links object file with standard library
+└──────────────────┘
         │
         ▼
   Executable File
@@ -568,8 +567,8 @@ Source Code (.al)
 4. **Type Checking**: Validates type safety and semantic rules
 5. **Optimization**: Performs constant folding, dead code elimination, and IR optimizations
 6. **IR Generation**: Lowers AST to a platform-agnostic intermediate representation
-7. **Code Generation**: Emits x86-64 assembly (NASM syntax) from IR
-8. **Assembly**: NASM assembles the `.asm` file to an ELF64 object file (`.o`)
+7. **Code Generation**: Emits x86-64 instructions as typed `Asm` IR
+8. **Assembly**: Built-in assembler encodes `Asm` IR to x86-64 machine code and produces an ELF64 object file (`.o`)
 9. **Linking**: LLD links object files with the standard library to produce an executable
 
 **Optimizations performed:**

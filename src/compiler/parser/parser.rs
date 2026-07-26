@@ -770,7 +770,7 @@ impl<'a> Parser<'a> {
                     let operand = self.factor()?;
                     return Ok(Expr::Neg(Box::new(operand), span));
                 }
-                Ok((Token::PLUS, span)) => {
+                Ok((Token::PLUS, _span)) => {
                     self.next()?;
                     let operand = self.factor()?;
                     return Ok(operand);

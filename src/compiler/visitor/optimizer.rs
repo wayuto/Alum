@@ -99,10 +99,8 @@ impl Optimizer {
             | Expr::FLe(l, r, _)
             | Expr::FGt(l, r, _)
             | Expr::FGe(l, r, _)
-            | Expr::And(l, r, _)
-             | Expr::Or(l, r, _)
-             | Expr::LAnd(l, r, _)
-             | Expr::LOr(l, r, _)
+            | Expr::LAnd(l, r, _)
+            | Expr::LOr(l, r, _)
             | Expr::StrCat(l, r, _) => {
                 self.optimize_expr(l);
                 self.optimize_expr(r);
@@ -238,20 +236,6 @@ impl Optimizer {
                 (Expr::Float(a, _), Expr::Float(b, _)) => Some(Expr::Bool(a >= b, Span::new(0, 0))),
                 _ => None,
             },
-            Expr::And(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Bool(true, _), e) => Some(e.clone()),
-                (Expr::Bool(false, _), _) => Some(Expr::Bool(false, Span::new(0, 0))),
-                (e, Expr::Bool(true, _)) => Some(e.clone()),
-                (_, Expr::Bool(false, _)) => Some(Expr::Bool(false, Span::new(0, 0))),
-                _ => None,
-            },
-            Expr::Or(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Bool(true, _), _) => Some(Expr::Bool(true, Span::new(0, 0))),
-                (Expr::Bool(false, _), e) => Some(e.clone()),
-                (_, Expr::Bool(true, _)) => Some(Expr::Bool(true, Span::new(0, 0))),
-                (e, Expr::Bool(false, _)) => Some(e.clone()),
-                _ => None,
-            },
             Expr::LAnd(l, r, _) => match (l.as_ref(), r.as_ref()) {
                 (Expr::Bool(true, _), e) => Some(e.clone()),
                 (Expr::Bool(false, _), _) => Some(Expr::Bool(false, Span::new(0, 0))),
@@ -381,10 +365,8 @@ impl Optimizer {
             | Expr::FLe(l, r, _)
             | Expr::FGt(l, r, _)
             | Expr::FGe(l, r, _)
-            | Expr::And(l, r, _)
-             | Expr::Or(l, r, _)
-             | Expr::LAnd(l, r, _)
-             | Expr::LOr(l, r, _)
+            | Expr::LAnd(l, r, _)
+            | Expr::LOr(l, r, _)
             | Expr::StrCat(l, r, _) => {
                 self.dce(l);
                 self.dce(r);
@@ -427,10 +409,8 @@ impl Optimizer {
             | Expr::FLe(l, r, _)
             | Expr::FGt(l, r, _)
             | Expr::FGe(l, r, _)
-            | Expr::And(l, r, _)
-             | Expr::Or(l, r, _)
-             | Expr::LAnd(l, r, _)
-             | Expr::LOr(l, r, _) => self.is_pure(l) && self.is_pure(r),
+            | Expr::LAnd(l, r, _)
+            | Expr::LOr(l, r, _) => self.is_pure(l) && self.is_pure(r),
             Expr::Not(e, _) | Expr::Neg(e, _) | Expr::FNeg(e, _) => self.is_pure(e),
             Expr::Index(l, r, _) => self.is_pure(l) && self.is_pure(r),
             Expr::ArrayLiteral(elems, _) => elems.iter().all(|e| self.is_pure(e)),
