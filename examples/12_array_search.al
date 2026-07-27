@@ -1,5 +1,5 @@
-$import "io.al"
-$import "convert.al"
+$import "io.ah"
+$import "convert.ah"
 
 // Array Search Example
 // Demonstrates searching for elements in an array
@@ -45,23 +45,23 @@ fun main(): int {
     // Find minimum and maximum
     println("\nFinding min and max:")
 
-    let min_val: int = numbers[0]
-    let max_val: int = numbers[0]
+    let min_.ah: int = numbers[0]
+    let max_.ah: int = numbers[0]
 
     for i in 1..n {
-        if numbers[i] < min_val {
-            min_val = numbers[i]
+        if numbers[i] < min_.ah {
+            min_.ah = numbers[i]
         }
-        if numbers[i] > max_val {
-            max_val = numbers[i]
+        if numbers[i] > max_.ah {
+            max_.ah = numbers[i]
         }
     }
 
     print("Minimum: ")
-    println(itoa(min_val))
+    println(itoa(min_.ah))
 
     print("Maximum: ")
-    println(itoa(max_val))
+    println(itoa(max_.ah))
 
     return 0
 }

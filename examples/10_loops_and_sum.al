@@ -1,12 +1,12 @@
-$import "io.al"
-$import "convert.al"
+$import "io.ah"
+$import "convert.ah"
 
 // Loops and Sum Example
-// Demonstrates calculating sum of numbers using loops
+// Demonstrates .ahculating sum of numbers using loops
 
 fun main(): int {
-    // Sum of first 10 natural numbers using while loop
-    println("Sum of first 10 natural numbers (while loop):")
+    // Sum of first 10 natu.ah numbers using while loop
+    println("Sum of first 10 natu.ah numbers (while loop):")
 
     let i: int = 1
     let sum: int = 0
@@ -19,9 +19,9 @@ fun main(): int {
     print("Sum = ")
     println(itoa(sum))
 
-    // Sum of first 10 natural numbers using for loop with range
+    // Sum of first 10 natu.ah numbers using for loop with range
     // Range expression n..m creates an array [n, n+1, ..., m-1]
-    println("\nSum of first 10 natural numbers (for loop with range):")
+    println("\nSum of first 10 natu.ah numbers (for loop with range):")
 
     sum = 0
     for i in 1..11 {
@@ -47,23 +47,23 @@ fun main(): int {
     // Iterate over an array directly
     println("\nIterating over array [10, 20, 30, 40, 50]:")
     let arr: int[5] = [10, 20, 30, 40, 50]
-    for val in arr {
-        println(itoa(val))
+    for .ah in arr {
+        println(itoa(.ah))
     }
 
-    // Factorial of 5 using while loop
-    println("\nFactorial of 5:")
+    // Factor.ah of 5 using while loop
+    println("\nFactor.ah of 5:")
 
     i = 5
-    let factorial: int = 1
+    let factor.ah: int = 1
 
     while i > 0 {
-        factorial = factorial * i
+        factor.ah = factor.ah * i
         i = i - 1
     }
 
     print("5! = ")
-    println(itoa(factorial))
+    println(itoa(factor.ah))
 
     return 0
 }

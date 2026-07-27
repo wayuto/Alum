@@ -1,6 +1,6 @@
-$import "io.al"
-$import "convert.al"
-$import "vec.al"
+$import "io.ah"
+$import "convert.ah"
+$import "vec.ah"
 
 // Vector Example
 

@@ -44,7 +44,7 @@ This will:
 Create a file `hello.al`:
 
 ```al
-$import "io.al"
+$import "io.ah"
 
 fun main(): int {
     println("Hello, World!")
@@ -68,7 +68,7 @@ alc -r hello.al
 ### Basic Example
 
 ```al
-$import "convert.al"
+$import "convert.ah"
 
 fun main(): int {
     let x: int = 10
@@ -237,7 +237,7 @@ Alum supports pointers for direct memory access and manipulation. Pointers are d
 
 **Declaration and Usage:**
 ```al
-$import "memory.al"
+$import "memory.ah"
 
 fun main(): int {
     let value: int = 42
@@ -300,7 +300,7 @@ Alum provides a dynamic array (Vec) for storing collections of elements that can
 
 **Importing Vec:**
 ```al
-$import "vec.al"
+$import "vec.ah"
 ```
 
 **Creating a Vec:**
@@ -313,8 +313,8 @@ fun main(): int {
 
 **Vec Operations:**
 ```al
-$import "vec.al"
-$import "convert.al"
+$import "vec.ah"
+$import "convert.ah"
 
 fun main(): int {
     let vec: Vec = vec_new()
@@ -346,7 +346,7 @@ struct Point {
     y: int
 }
 
-$import "vec.al"
+$import "vec.ah"
 
 fun main(): int {
     let vec: Vec = vec_new()
@@ -494,7 +494,7 @@ $define ALUM_LIB 1
 $endif
 
 // Import modules
-$import "io.al"
+$import "io.ah"
 ```
 
 **Macro Usage:**

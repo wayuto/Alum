@@ -1,6 +1,6 @@
-$import "io.al"
-$import "convert.al"
-$import "math.al"
+$import "io.ah"
+$import "convert.ah"
+$import "math.ah"
 
 // Math Operations Example
 // Demonstrates math module functions
@@ -32,17 +32,17 @@ fun main(): int {
     // Math functions
     println("\nMath Functions:")
     
-    let abs_val: int = abs(b)
+    let abs_.ah: int = abs(b)
     print("abs(-5) = ")
-    println(itoa(abs_val))
+    println(itoa(abs_.ah))
     
-    let max_val: int = max(a, c)
+    let max_.ah: int = max(a, c)
     print("max(10, 3) = ")
-    println(itoa(max_val))
+    println(itoa(max_.ah))
     
-    let min_val: int = min(b, c)
+    let min_.ah: int = min(b, c)
     print("min(-5, 3) = ")
-    println(itoa(min_val))
+    println(itoa(min_.ah))
     
     let square: int = sqrt(a)
     print("sqrt(10) = ")
@@ -52,9 +52,9 @@ fun main(): int {
     print("pow(3, 2) = ")
     println(itoa(power))
     
-    let factorial: int = fact(5)
+    let factor.ah: int = fact(5)
     print("fact(5) = ")
-    println(itoa(factorial))
+    println(itoa(factor.ah))
     
     return 0
 }

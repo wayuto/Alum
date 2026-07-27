@@ -19,11 +19,11 @@ This installs:
 ### Importing Modules
 
 ```al
-$import "io.al"
-$import "math.al"
-$import "string.al"
-$import "memory.al"
-$import "convert.al"
+$import "io.ah"
+$import "math.ah"
+$import "string.ah"
+$import "memory.ah"
+$import "convert.ah"
 ```
 
 ### I/O Module (`io.al`)

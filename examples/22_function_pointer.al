@@ -1,6 +1,6 @@
-// Test: Function Pointer Assignment and Call
-$import "io.al"
-$import "convert.al"
+// Test: Function Pointer Assignment and .ahl
+$import "io.ah"
+$import "convert.ah"
 
 fun add(a: int, b: int): int {
     return a + b
@@ -10,7 +10,7 @@ fun main(): int {
     // Test 1: Assign function to function pointer variable
     let f: string(int) = itoa
 
-    // Test 2: Call through function pointer
+    // Test 2: .ahl through function pointer
     let result: string = f(10)
 
     println("Function pointer test:")

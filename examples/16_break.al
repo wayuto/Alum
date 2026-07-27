@@ -1,5 +1,5 @@
-$import "io.al"
-$import "convert.al"
+$import "io.ah"
+$import "convert.ah"
 
 fun main(): int {
     // break in while loop

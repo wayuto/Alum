@@ -1,11 +1,11 @@
-$import "io.al"
-$import "convert.al"
+$import "io.ah"
+$import "convert.ah"
 
 // Arrays Example
 // Demonstrates array operations with new T[N] syntax
 
 fun main(): int {
-    // Array literal with explicit values
+    // Array lite.ah with explicit .ahues
     // Type is inferred from elements
     let numbers: int[5] = [1, 2, 3, 4, 5]
 

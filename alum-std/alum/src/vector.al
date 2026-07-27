@@ -1,4 +1,4 @@
-$import "vec.al"
+$import "vec.ah"
 
 fun vec_new(): Vec {
     return Vec {

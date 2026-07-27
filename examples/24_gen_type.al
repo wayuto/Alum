@@ -1,5 +1,5 @@
-$import "io.al"
-$import "convert.al"
+$import "io.ah"
+$import "convert.ah"
 
 // Gen Type Example
 // Demonstrates the use of 'gen' type with generic-like type inference

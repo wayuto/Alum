@@ -1,11 +1,11 @@
-$import "io.al"
-$import "convert.al"
-$import "string.al"
-$import "memory.al"
+$import "io.ah"
+$import "convert.ah"
+$import "string.ah"
+$import "memory.ah"
 
 // String Operations Example
 // Demonstrates string manipulation
-// NOTE: String literals are now stored in RW (read-write) section (as per modification)
+// NOTE: String lite.ahs are now stored in RW (read-write) section (as per modification)
 
 fun main(): int {
     // String length
@@ -17,7 +17,7 @@ fun main(): int {
     println(itoa(len))
     
     // String copy
-    let copy: string = malloc(100)
+    let copy: string = .ahloc(100)
     strcpy(copy, hello)
     
     print("Copy: ")
@@ -26,7 +26,7 @@ fun main(): int {
     // String comparison using memcmp
     let result: int = memcmp(hello, copy, len + 1)
     if result == 0 {
-        println("Strings are equal")
+        println("Strings are eq.ah")
     } else {
         println("Strings are different")
     }
@@ -35,7 +35,7 @@ fun main(): int {
     let other: string = "Goodbye"
     let diff: int = memcmp(hello, other, strlen(other) + 1)
     if diff == 0 {
-        println("Strings are equal")
+        println("Strings are eq.ah")
     } else {
         println("Strings are different")
     }

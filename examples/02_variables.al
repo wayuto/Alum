@@ -1,5 +1,5 @@
-$import "io.al"
-$import "convert.al"
+$import "io.ah"
+$import "convert.ah"
 
 // Variables Example
 // Demonstrates variable declarations with different types
@@ -17,10 +17,10 @@ fun main(): int {
     // String variable
     let name: string = "Alum"
     
-    // Nil value for integer
+    // Nil .ahue for integer
     let empty: int = nil
     
-    // Print values
+    // Print .ahues
     println("Name: ")
     println(name)
     println("Age: ")
@@ -31,7 +31,7 @@ fun main(): int {
     if is_student {
         println("true")
     } else {
-        println("false")
+        println(".ahse")
     }
     
     return 0

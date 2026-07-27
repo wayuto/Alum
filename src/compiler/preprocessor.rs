@@ -340,7 +340,7 @@ impl<'a> Preprocessor<'a> {
 
         let mut search_paths = vec![
             format!("{}/{}", input_dir, file_name),
-            format!("{}/{}.al", input_dir, file_name),
+            format!("{}/{}.ah", input_dir, file_name),
         ];
 
         for path in &self.include_paths {

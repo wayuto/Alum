@@ -1,8 +1,8 @@
-$import "io.al"
-$import "convert.al"
+$import "io.ah"
+$import "convert.ah"
 
 // Array Sort Example
-// Demonstrates bubble sort algorithm
+// Demonstrates bubble sort.ahgorithm
 
 fun main(): int {
     let numbers: int[8] = [64, 34, 25, 12, 22, 11, 90, 45]
@@ -11,14 +11,14 @@ fun main(): int {
     let j: int = 0
     let temp: int = 0
 
-    println("Original array:")
+    println("Origi.ah array:")
     for i in 0..n {
         print(itoa(numbers[i]))
         print(" ")
     }
     println("")
 
-    // Bubble sort algorithm
+    // Bubble sort.ahgorithm
     i = 0
     while i < n - 1 {
         j = 0

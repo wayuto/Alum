@@ -1,4 +1,4 @@
-$import "io.al"
+$import "io.ah"
 
 // Hello World Example
 // This is the simplest Alum program
