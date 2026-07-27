@@ -66,6 +66,7 @@ fn register_is_used_after(asms: &[Asm], start: usize, reg: Reg) -> bool {
         | Asm::Xorpd(r, _) => *r == reg,
         Asm::Push(r) | Asm::Pop(r) | Asm::Neg(r) | Asm::Inc(r) | Asm::Dec(r) => *r == reg,
         Asm::Call(Operand::Reg(r)) => *r == reg,
+        Asm::Ret => reg == Reg::Rax,
         _ => false,
     })
 }
@@ -320,5 +321,36 @@ mod tests {
             asms[1],
             Asm::Mov(Operand::Mem(_), Operand::Reg(Reg::Rax))
         ));
+    }
+
+    #[test]
+    fn preserves_imm_to_reg_for_return_value() {
+        let mut asms = vec![
+            Asm::Mov(Operand::Reg(Reg::Rax), Operand::Imm(0)),
+            Asm::Mov(
+                Operand::Mem(Mem {
+                    base: Some(Reg::Rbp),
+                    index: None,
+                    scale: 0,
+                    disp: -24,
+                    size: None,
+                }),
+                Operand::Reg(Reg::Rax),
+            ),
+            Asm::Ret,
+        ];
+
+        optimize(&mut asms);
+
+        assert_eq!(asms.len(), 3);
+        assert!(matches!(
+            asms[0],
+            Asm::Mov(Operand::Reg(Reg::Rax), Operand::Imm(0))
+        ));
+        assert!(matches!(
+            asms[1],
+            Asm::Mov(Operand::Mem(_), Operand::Reg(Reg::Rax))
+        ));
+        assert!(matches!(asms[2], Asm::Ret));
     }
 }
