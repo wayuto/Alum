@@ -11,6 +11,7 @@ pub fn optimize(asms: &mut Vec<Asm>) {
         changed |= pass_add_sub_xor_zero(asms);
         changed |= pass_push_pop(asms);
         changed |= pass_dead_labels(asms);
+        changed |= pass_mov_mov_swap(asms);
 
         if !changed {
             break;
@@ -67,11 +68,6 @@ fn register_is_used_after(asms: &[Asm], start: usize, reg: Reg) -> bool {
         Asm::Call(Operand::Reg(r)) => *r == reg,
         _ => false,
     })
-}
-
-fn pass_redundant_load_store(asms: &mut Vec<Asm>) -> bool {
-    let _ = asms;
-    false
 }
 
 fn pass_redundant_mov(asms: &mut Vec<Asm>) -> bool {
