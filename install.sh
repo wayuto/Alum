@@ -16,7 +16,7 @@ almk build
 
 echo "Installing alum-std headers..."
 sudo mkdir -p /usr/local/include/alum
-sudo cp "$LOCATION/alum-std/alum/headers/"*.al /usr/local/include/alum/
+sudo cp "$LOCATION/alum-std/alum/headers/"*.ah /usr/local/include/alum/
 
 echo "Building Rust runtime (libalum_std.a)..."
 cd "$LOCATION/alum-std"
