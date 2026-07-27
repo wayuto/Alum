@@ -585,7 +585,6 @@ impl AsmCodeGen {
                 for reg in caller_saved {
                     self.invalidate_cached_reg(reg);
                 }
-                // Preserve non-volatile general purpose registers and any xmm values that are not caller-saved.
                 self.invalidate_cached_reg("xmm0");
                 self.invalidate_cached_reg("xmm1");
                 self.invalidate_cached_reg("xmm2");
