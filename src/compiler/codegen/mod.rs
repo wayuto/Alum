@@ -23,6 +23,6 @@ impl CodeGen {
         let mut asm_gen = codegen::AsmCodeGen::new(ir_program);
         let asm_items = asm_gen.compile()?;
 
-        asm::assemble_to_obj(&asm_items).map_err(|e| CodeGenError::AssemblyError(e))
+        asm::assemble2obj(&asm_items).map_err(|e| CodeGenError::AssemblyError(e))
     }
 }

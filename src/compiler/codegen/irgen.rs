@@ -71,11 +71,11 @@ impl Context {
         })
     }
 
-    fn type_to_ir_type(typ: &Type) -> IRType {
+    fn type2ir_type(typ: &Type) -> IRType {
         match typ {
             Type::Named(name) => match name.as_str() {
-                "int" | "i64" | "isize" | "usize" => IRType::Int,
-                "float" | "f64" => IRType::Float,
+                "int" => IRType::Int,
+                "float" => IRType::Float,
                 "bool" => IRType::Bool,
                 "string" => IRType::String,
                 "void" => IRType::Void,
@@ -163,7 +163,7 @@ impl IRGen {
         }
     }
 
-    fn convert_lambdas_to_functions(&mut self, program: Program) -> Program {
+    fn lambda2function(&mut self, program: Program) -> Program {
         let mut new_body = Vec::new();
         let mut lambda_map: HashMap<String, Expr> = HashMap::new();
 
@@ -429,7 +429,7 @@ impl IRGen {
     }
 
     pub fn compile(&mut self, program: Program) -> Result<IRProgram, CodeGenError> {
-        let program = self.convert_lambdas_to_functions(program);
+        let program = self.lambda2function(program);
 
         for expr in &program.body {
             match expr {
@@ -623,7 +623,7 @@ impl IRGen {
             Expr::VarDecl(name, typ, value, _) => {
                 let value = self.compile_expr(*value, ctx)?;
                 let value_type = ctx.get_operand_type(&value, &self.constants)?;
-                let var_ir_type = Context::type_to_ir_type(&typ);
+                let var_ir_type = Context::type2ir_type(&typ);
 
                 let var_ir_type = match &typ {
                     Type::Array(_, declared_len) if *declared_len > 0 => {
@@ -1337,7 +1337,7 @@ impl IRGen {
             Expr::Index(arr, idx, _) => {
                 let elem_ir_type = match &*arr {
                     Expr::Var(name, _) => match ctx.get_var_high_type(name) {
-                        Some(Type::Array(elem_type, _)) => Context::type_to_ir_type(elem_type),
+                        Some(Type::Array(elem_type, _)) => Context::type2ir_type(elem_type),
                         _ => IRType::Int,
                     },
                     _ => IRType::Int,
@@ -1695,9 +1695,9 @@ impl IRGen {
     ) -> Result<(), CodeGenError> {
         let ir_params: Vec<(Operand, IRType)> = params
             .iter()
-            .map(|(name, typ)| (Operand::Var(name.clone()), Context::type_to_ir_type(typ)))
+            .map(|(name, typ)| (Operand::Var(name.clone()), Context::type2ir_type(typ)))
             .collect();
-        let ir_ret_type = Context::type_to_ir_type(&ret_type);
+        let ir_ret_type = Context::type2ir_type(&ret_type);
         self.functions.push(IRFunction {
             name,
             params: ir_params,
@@ -1774,10 +1774,10 @@ impl IRGen {
             .enumerate()
             .map(|(i, (_, typ))| {
                 let param_name = format!("a{}", i);
-                (Operand::Var(param_name), Context::type_to_ir_type(&typ))
+                (Operand::Var(param_name), Context::type2ir_type(&typ))
             })
             .collect();
-        let ir_ret_type = Context::type_to_ir_type(&ret_type);
+        let ir_ret_type = Context::type2ir_type(&ret_type);
         let signature = IRFunction {
             name: name.clone(),
             params: ir_params,

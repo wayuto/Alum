@@ -767,11 +767,11 @@ impl AsmCodeGen {
                 let dst = code.dst.as_ref().unwrap();
                 let src1 = code.src1.as_ref().unwrap();
                 let src2 = code.src2.as_ref().unwrap();
-                let off_tmp = self.load_to_temp(src1)?;
+                let off_tmp = self.load2temp(src1)?;
                 self.push_text(Asm::Mov(Operand::Reg(Reg::Rdi), m_rbp(off_tmp)));
                 self.push_text(Asm::Call(Operand::PLT("strlen".to_string())));
                 self.push_text(Asm::Mov(Operand::Reg(Reg::Rbx), Operand::Reg(Reg::Rax)));
-                let off_tmp2 = self.load_to_temp(src2)?;
+                let off_tmp2 = self.load2temp(src2)?;
                 self.push_text(Asm::Mov(Operand::Reg(Reg::Rdi), m_rbp(off_tmp2)));
                 self.push_text(Asm::Call(Operand::PLT("strlen".to_string())));
                 self.push_text(Asm::Lea(
@@ -821,11 +821,11 @@ impl AsmCodeGen {
         }
     }
 
-    fn load_to_temp(&self, op: &IROperand) -> Result<usize, CodeGenError> {
+    fn load2temp(&self, op: &IROperand) -> Result<usize, CodeGenError> {
         match op {
             IROperand::Var(_) | IROperand::Temp(_, _) => self.get_offset(op),
             _ => Err(CodeGenError::InvalidOperand {
-                message: "load_to_temp not supported".to_string(),
+                message: "load2temp not supported".to_string(),
             }),
         }
     }
