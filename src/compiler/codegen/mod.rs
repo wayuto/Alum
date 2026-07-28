@@ -1,8 +1,8 @@
 mod asm;
 mod codegen;
-mod operand;
 mod compile_code;
 mod compile_fn;
+mod operand;
 mod types;
 
 use crate::compiler::irgen::IRGen;

@@ -1,8 +1,8 @@
+use super::context::Context;
 use super::ir::{IRConst, IRFunction, IRProgram, Op};
 use crate::compiler::codegen::CodeGenError;
 use crate::compiler::parser::{Expr, Program, Type};
 use std::{collections::HashMap, mem::take};
-use super::context::Context;
 
 pub struct IRGen {
     pub(super) functions: Vec<IRFunction>,
@@ -22,7 +22,6 @@ impl IRGen {
             lambda_counter: 0,
         }
     }
-
 
     pub fn compile(&mut self, program: Program) -> Result<IRProgram, CodeGenError> {
         let program = self.lambda2function(program);
@@ -119,4 +118,3 @@ impl IRGen {
         }
     }
 }
-

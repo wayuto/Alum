@@ -1,5 +1,5 @@
-use std::fmt;
 use crate::compiler::parser::{Expr, Program};
+use std::fmt;
 
 impl fmt::Display for Program {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

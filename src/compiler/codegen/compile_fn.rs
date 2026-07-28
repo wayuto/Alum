@@ -1,8 +1,8 @@
-use crate::compiler::irgen::ir::{IRFunction, IRType, Op, Operand as IROperand};
 use super::codegen::AsmCodeGen;
 use super::codegen::{m_rbp, parse_reg};
 use super::types::CodeGenError;
 use crate::compiler::codegen::asm::*;
+use crate::compiler::irgen::ir::{IRFunction, IRType, Op, Operand as IROperand};
 
 impl AsmCodeGen {
     pub(super) fn compile_fn(&mut self, func: IRFunction) -> Result<(), CodeGenError> {

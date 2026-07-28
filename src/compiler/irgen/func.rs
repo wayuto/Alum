@@ -1,6 +1,6 @@
+use super::context::{Context, Symbol};
 use super::ir::{IRFunction, IRType, Instruction, Op, Operand};
 use super::irgen::IRGen;
-use super::context::{Context, Symbol};
 use crate::compiler::codegen::CodeGenError;
 use crate::compiler::parser::{Expr, Type};
 use std::mem::take;

@@ -1,6 +1,6 @@
-use crate::compiler::irgen::ir::{Operand as IROperand, IRProgram};
 use super::types::CodeGenError;
 use crate::compiler::codegen::asm::*;
+use crate::compiler::irgen::ir::{IRProgram, Operand as IROperand};
 use ordered_float::OrderedFloat;
 use std::collections::{HashMap, HashSet};
 use std::mem::take;

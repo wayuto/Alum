@@ -74,11 +74,7 @@ impl fmt::Display for CheckerError {
                 )
             }
             CheckerError::NonStructMemberAccess(type_name, _) => {
-                write!(
-                    f,
-                    "Cannot access member on non-struct type: {}",
-                    type_name
-                )
+                write!(f, "Cannot access member on non-struct type: {}", type_name)
             }
             CheckerError::InvalidOperation { op, type_name, .. } => {
                 write!(f, "Invalid operation '{}' on type {}", op, type_name)
