@@ -1,6 +1,6 @@
 use crate::compiler::{
     CompilerError, SourceMap, codegen::CodeGen, lexer::Lexer, parser::Parser,
-    preprocessor::Preprocessor, visitor::checker::TypeChecker, visitor::optimizer::Optimizer,
+    preprocessor::Preprocessor, visitor::TypeChecker, visitor::optimizer::Optimizer,
 };
 use std::fs;
 

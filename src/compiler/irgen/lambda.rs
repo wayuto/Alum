@@ -1,0 +1,270 @@
+use super::irgen::IRGen;
+use crate::compiler::parser::{Expr, Program};
+use std::collections::HashMap;
+
+impl IRGen {
+    pub(super) fn lambda2function(&mut self, program: Program) -> Program {
+        let mut new_body = Vec::new();
+        let mut lambda_map: HashMap<String, Expr> = HashMap::new();
+
+        fn process_expr(
+            expr: Expr,
+            lambda_counter: &mut u32,
+            lambda_map: &mut HashMap<String, Expr>,
+        ) -> Expr {
+            match expr {
+                Expr::Lambda(params, body, ret_type, _) => {
+                    let lambda_name = format!("_lambda_{}", lambda_counter);
+                    *lambda_counter += 1;
+
+                    let lambda_func = Expr::FuncDecl(
+                        lambda_name.clone(),
+                        params,
+                        ret_type,
+                        body,
+                        crate::compiler::Span::new(0, 0),
+                    );
+                    lambda_map.insert(lambda_name.clone(), lambda_func);
+
+                    Expr::Var(lambda_name, crate::compiler::Span::new(0, 0))
+                }
+                Expr::Block(body, _) => Expr::Block(
+                    body.into_iter()
+                        .map(|e| process_expr(e, lambda_counter, lambda_map))
+                        .collect(),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::Add(l, r, _) => Expr::Add(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::Sub(l, r, _) => Expr::Sub(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::Mul(l, r, _) => Expr::Mul(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::Div(l, r, _) => Expr::Div(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::Mod(l, r, _) => Expr::Mod(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::FAdd(l, r, _) => Expr::FAdd(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::FSub(l, r, _) => Expr::FSub(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::FMul(l, r, _) => Expr::FMul(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::FDiv(l, r, _) => Expr::FDiv(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::Eq(l, r, _) => Expr::Eq(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::Ne(l, r, _) => Expr::Ne(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::Lt(l, r, _) => Expr::Lt(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::Le(l, r, _) => Expr::Le(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::Gt(l, r, _) => Expr::Gt(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::Ge(l, r, _) => Expr::Ge(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::FEq(l, r, _) => Expr::FEq(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::FNe(l, r, _) => Expr::FNe(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::FLt(l, r, _) => Expr::FLt(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::FLe(l, r, _) => Expr::FLe(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::FGt(l, r, _) => Expr::FGt(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::FGe(l, r, _) => Expr::FGe(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::Not(e, _) => Expr::Not(
+                    Box::new(process_expr(*e, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::StrCat(l, r, _) => Expr::StrCat(
+                    Box::new(process_expr(*l, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*r, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::VarDecl(name, ty, val, _) => Expr::VarDecl(
+                    name,
+                    ty,
+                    Box::new(process_expr(*val, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::VarAssign(name, val, _) => Expr::VarAssign(
+                    name,
+                    Box::new(process_expr(*val, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::Call(func, args, _) => Expr::Call(
+                    Box::new(process_expr(*func, lambda_counter, lambda_map)),
+                    args.into_iter()
+                        .map(|a| process_expr(a, lambda_counter, lambda_map))
+                        .collect(),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::Return(e, _) => Expr::Return(
+                    Box::new(process_expr(*e, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::If(cond, then_branch, else_branch, _) => Expr::If(
+                    Box::new(process_expr(*cond, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*then_branch, lambda_counter, lambda_map)),
+                    else_branch.map(|e| Box::new(process_expr(*e, lambda_counter, lambda_map))),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::While(cond, body, _) => Expr::While(
+                    Box::new(process_expr(*cond, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*body, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::For(var, array, body, _) => Expr::For(
+                    var,
+                    Box::new(process_expr(*array, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*body, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::Index(arr, idx, _) => Expr::Index(
+                    Box::new(process_expr(*arr, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*idx, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::IndexAssign(arr, val, _) => Expr::IndexAssign(
+                    Box::new(process_expr(*arr, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*val, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::ArrayLiteral(elements, _) => Expr::ArrayLiteral(
+                    elements
+                        .into_iter()
+                        .map(|e| process_expr(e, lambda_counter, lambda_map))
+                        .collect(),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::ArrayFill(ty, len, _) => Expr::ArrayFill(
+                    ty,
+                    Box::new(process_expr(*len, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::Range(start, end, _) => Expr::Range(
+                    Box::new(process_expr(*start, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*end, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::StructLiteral(name, fields, _) => Expr::StructLiteral(
+                    name,
+                    fields
+                        .into_iter()
+                        .map(|(n, e)| (n, process_expr(e, lambda_counter, lambda_map)))
+                        .collect(),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::MemberAccess(obj, field, _) => Expr::MemberAccess(
+                    Box::new(process_expr(*obj, lambda_counter, lambda_map)),
+                    field,
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::MemberAssign(obj, field, val, _) => Expr::MemberAssign(
+                    Box::new(process_expr(*obj, lambda_counter, lambda_map)),
+                    field,
+                    Box::new(process_expr(*val, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::AddressOf(expr, _) => Expr::AddressOf(
+                    Box::new(process_expr(*expr, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::Deref(expr, _) => Expr::Deref(
+                    Box::new(process_expr(*expr, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::DerefAssign(ptr, val, _) => Expr::DerefAssign(
+                    Box::new(process_expr(*ptr, lambda_counter, lambda_map)),
+                    Box::new(process_expr(*val, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                Expr::FuncDecl(name, params, ret_type, body, _) => Expr::FuncDecl(
+                    name,
+                    params,
+                    ret_type,
+                    Box::new(process_expr(*body, lambda_counter, lambda_map)),
+                    crate::compiler::Span::new(0, 0),
+                ),
+                _ => expr,
+            }
+        }
+
+        for expr in program.body {
+            let processed = process_expr(expr, &mut self.lambda_counter, &mut lambda_map);
+            new_body.push(processed);
+        }
+
+        let lambda_funcs: Vec<Expr> = lambda_map.into_values().collect();
+        new_body.splice(0..0, lambda_funcs);
+
+        Program { body: new_body }
+    }
+}

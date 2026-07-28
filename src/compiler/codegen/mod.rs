@@ -1,9 +1,11 @@
 mod asm;
 mod codegen;
-mod ir;
-mod irgen;
+mod operand;
+mod compile_code;
+mod compile_fn;
 mod types;
 
+use crate::compiler::irgen::IRGen;
 use crate::compiler::parser::Program;
 pub use types::CodeGenError;
 
@@ -17,7 +19,7 @@ impl CodeGen {
     }
 
     pub fn generate(self) -> Result<Vec<u8>, CodeGenError> {
-        let mut ir_gen = irgen::IRGen::new();
+        let mut ir_gen = IRGen::new();
         let ir_program = ir_gen.compile(self.ast)?;
 
         let mut asm_gen = codegen::AsmCodeGen::new(ir_program);

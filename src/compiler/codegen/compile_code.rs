@@ -1,0 +1,597 @@
+use crate::compiler::irgen::ir::{IRConst, IRType, Instruction, Op, Operand as IROperand};
+use super::codegen::AsmCodeGen;
+use super::codegen::{m_base, m_base_disp, m_rbp, m_rbp_q, m_sib, rel};
+use super::types::CodeGenError;
+use crate::compiler::codegen::asm::*;
+
+impl AsmCodeGen {
+    pub(super) fn compile_code(&mut self, code: Instruction) -> Result<(), CodeGenError> {
+        match code.op {
+            Op::Move => {
+                let src = code.src1.as_ref().unwrap();
+                let dst = code.dst.as_ref().unwrap();
+                self.load(src, "rax")?;
+                if match src {
+                    IROperand::Var(_) | IROperand::Temp(_, _) => {
+                        self.get_offset(src)? != self.get_offset(dst)?
+                    }
+                    _ => true,
+                } {
+                    self.store_dst(dst, Reg::Rax)?;
+                } else {
+                    self.regs.insert("rax".to_string(), Some(dst.clone()));
+                }
+                Ok(())
+            }
+            Op::FMove => {
+                let src = code.src1.as_ref().unwrap();
+                let dst = code.dst.as_ref().unwrap();
+                self.load(src, "xmm0")?;
+                if match src {
+                    IROperand::Var(_) | IROperand::Temp(_, _) => {
+                        self.get_offset(src)? != self.get_offset(dst)?
+                    }
+                    _ => true,
+                } {
+                    self.store_dst_xmm(dst, Reg::Xmm0)?;
+                } else {
+                    self.regs.insert("xmm0".to_string(), Some(dst.clone()));
+                }
+                Ok(())
+            }
+            Op::Load | Op::Store => {
+                let src = code.src1.as_ref().unwrap();
+                let dst = code.dst.as_ref().unwrap();
+                self.load(src, "rax")?;
+                self.store_dst(dst, Reg::Rax)?;
+                Ok(())
+            }
+            Op::FLoad | Op::FStore => {
+                let src = code.src1.as_ref().unwrap();
+                let dst = code.dst.as_ref().unwrap();
+                self.load(src, "xmm0")?;
+                self.store_dst_xmm(dst, Reg::Xmm0)?;
+                Ok(())
+            }
+            Op::Add | Op::Sub | Op::Mul | Op::Div | Op::LAnd | Op::LOr | Op::Xor => {
+                let dst = code.dst.as_ref().unwrap();
+                let src1 = code.src1.as_ref().unwrap();
+                let src2 = code.src2.as_ref().unwrap();
+                self.load(src1, "rax")?;
+                if matches!(code.op, Op::Div) {
+                    self.load(src2, "rbx")?;
+                    self.push_text(Asm::Cqo);
+                    self.push_text(Asm::Idiv(Reg::Rbx));
+                } else {
+                    let asm_op = match code.op {
+                        Op::Add => Asm::Add,
+                        Op::Sub => Asm::Sub,
+                        Op::Mul => Asm::Imul,
+                        Op::LAnd => Asm::And,
+                        Op::LOr => Asm::Or,
+                        Op::Xor => Asm::Xor,
+                        _ => unreachable!(),
+                    };
+                    match src2 {
+                        IROperand::ConstIdx(idx) => {
+                            if let IRConst::Int(v) = &self.program.constants[*idx] {
+                                self.push_text(asm_op(Operand::Reg(Reg::Rax), Operand::Imm(*v)));
+                            }
+                        }
+                        IROperand::Var(_) | IROperand::Temp(_, _) => {
+                            self.push_text(asm_op(
+                                Operand::Reg(Reg::Rax),
+                                m_rbp_q(self.get_offset(src2)?),
+                            ));
+                        }
+                        _ => {
+                            self.load(src2, "rbx")?;
+                            self.push_text(asm_op(Operand::Reg(Reg::Rax), Operand::Reg(Reg::Rbx)));
+                        }
+                    }
+                }
+                self.store_dst(dst, Reg::Rax)?;
+                self.regs.remove("rax");
+                self.regs.remove("rdx");
+                if matches!(code.op, Op::Div) {
+                    self.regs.remove("rbx");
+                }
+                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::Mod => {
+                let dst = code.dst.as_ref().unwrap();
+                let src1 = code.src1.as_ref().unwrap();
+                let src2 = code.src2.as_ref().unwrap();
+                self.load(src1, "rax")?;
+                self.load(src2, "rbx")?;
+                self.push_text(Asm::Cqo);
+                self.push_text(Asm::Idiv(Reg::Rbx));
+                self.invalidate_cached_operand(dst, Some("rdx"));
+                self.push_text(Asm::Mov(
+                    m_rbp(self.get_offset(dst)?),
+                    Operand::Reg(Reg::Rdx),
+                ));
+                self.invalidate_cached_reg("rax");
+                self.invalidate_cached_reg("rdx");
+                self.invalidate_cached_reg("rbx");
+                self.regs.insert("rdx".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::FAdd | Op::FSub | Op::FMul | Op::FDiv => {
+                let dst = code.dst.as_ref().unwrap();
+                let src1 = code.src1.as_ref().unwrap();
+                let src2 = code.src2.as_ref().unwrap();
+                let asm_op = match code.op {
+                    Op::FAdd => Asm::Addsd,
+                    Op::FSub => Asm::Subsd,
+                    Op::FMul => Asm::Mulsd,
+                    Op::FDiv => Asm::Divsd,
+                    _ => unreachable!(),
+                };
+                self.load(src1, "xmm0")?;
+                let src2_op = match src2 {
+                    IROperand::ConstIdx(idx) => {
+                        if let IRConst::Float(f) = &self.program.constants[*idx] {
+                            let lbl = self.alloc_flt(*f);
+                            rel(lbl)
+                        } else {
+                            unreachable!()
+                        }
+                    }
+                    IROperand::Var(_) | IROperand::Temp(_, _) => m_rbp_q(self.get_offset(src2)?),
+                    _ => {
+                        self.load(src2, "xmm1")?;
+                        Operand::Reg(Reg::Xmm1)
+                    }
+                };
+                self.push_text(asm_op(Operand::Reg(Reg::Xmm0), src2_op));
+                self.push_text(Asm::Movsd(
+                    m_rbp(self.get_offset(dst)?),
+                    Operand::Reg(Reg::Xmm0),
+                ));
+                self.regs.insert("xmm0".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::Eq | Op::Ne | Op::Gt | Op::Ge | Op::Lt | Op::Le => {
+                let dst = code.dst.as_ref().unwrap();
+                let src1 = code.src1.as_ref().unwrap();
+                let src2 = code.src2.as_ref().unwrap();
+                self.load(src1, "rax")?;
+                self.load(src2, "rbx")?;
+                self.push_text(Asm::Cmp(Operand::Reg(Reg::Rax), Operand::Reg(Reg::Rbx)));
+                let set_op = match code.op {
+                    Op::Eq => Asm::Sete,
+                    Op::Ne => Asm::Setne,
+                    Op::Gt => Asm::Setg,
+                    Op::Ge => Asm::Setge,
+                    Op::Lt => Asm::Setl,
+                    Op::Le => Asm::Setle,
+                    _ => unreachable!(),
+                };
+                self.push_text(set_op(Reg::Rax));
+                self.push_text(Asm::Movzx(Reg::Rax, Reg::Rax));
+                self.push_text(Asm::Mov(
+                    m_rbp(self.get_offset(dst)?),
+                    Operand::Reg(Reg::Rax),
+                ));
+                self.invalidate_cached_reg("rax");
+                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::FEq | Op::FNe | Op::FGt | Op::FGe | Op::FLt | Op::FLe => {
+                let dst = code.dst.as_ref().unwrap();
+                let src1 = code.src1.as_ref().unwrap();
+                let src2 = code.src2.as_ref().unwrap();
+                self.load(src1, "xmm0")?;
+                self.load(src2, "xmm1")?;
+                self.push_text(Asm::Ucomisd(Reg::Xmm0, Reg::Xmm1));
+                let set_op = match code.op {
+                    Op::FEq => Asm::Sete,
+                    Op::FNe => Asm::Setne,
+                    Op::FGt => Asm::Seta,
+                    Op::FGe => Asm::Setae,
+                    Op::FLt => Asm::Setb,
+                    Op::FLe => Asm::Setbe,
+                    _ => unreachable!(),
+                };
+                self.push_text(set_op(Reg::Rax));
+                self.push_text(Asm::Movzx(Reg::Rax, Reg::Rax));
+                self.push_text(Asm::Mov(
+                    m_rbp(self.get_offset(dst)?),
+                    Operand::Reg(Reg::Rax),
+                ));
+                self.invalidate_cached_reg("rax");
+                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::Neg | Op::Inc | Op::Dec | Op::SizeOf => {
+                let dst = code.dst.as_ref().unwrap();
+                let src1 = code.src1.as_ref().unwrap();
+                self.load(src1, "rax")?;
+                match code.op {
+                    Op::Neg => self.push_text(Asm::Neg(Reg::Rax)),
+                    Op::Inc => self.push_text(Asm::Inc(Reg::Rax)),
+                    Op::Dec => self.push_text(Asm::Dec(Reg::Rax)),
+                    Op::SizeOf => {
+                        self.push_text(Asm::Mov(Operand::Reg(Reg::Rax), m_base_disp(Reg::Rax, -8)))
+                    }
+                    _ => unreachable!(),
+                }
+                self.push_text(Asm::Mov(
+                    m_rbp(self.get_offset(dst)?),
+                    Operand::Reg(Reg::Rax),
+                ));
+                self.invalidate_cached_reg("rax");
+                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::Not => {
+                let dst = code.dst.as_ref().unwrap();
+                let src1 = code.src1.as_ref().unwrap();
+                self.load(src1, "rax")?;
+                self.push_text(Asm::Xor(Operand::Reg(Reg::Rax), Operand::Imm(1)));
+                self.push_text(Asm::Mov(
+                    m_rbp(self.get_offset(dst)?),
+                    Operand::Reg(Reg::Rax),
+                ));
+                self.invalidate_cached_reg("rax");
+                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::FNeg => {
+                let dst = code.dst.as_ref().unwrap();
+                let src1 = code.src1.as_ref().unwrap();
+                self.load(src1, "xmm0")?;
+                self.push_text(Asm::Xorpd(Reg::Xmm0, rel("neg_mask".to_string())));
+                self.push_text(Asm::Movsd(
+                    m_rbp(self.get_offset(dst)?),
+                    Operand::Reg(Reg::Xmm0),
+                ));
+                self.invalidate_cached_reg("xmm0");
+                self.regs.insert("xmm0".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::Range => {
+                let dst = code.dst.as_ref().unwrap();
+                let src1 = code.src1.as_ref().unwrap();
+                let src2 = code.src2.as_ref().unwrap();
+                self.load(src1, "rdi")?;
+                self.load(src2, "rsi")?;
+                let end_lbl = self.new_label("range_end");
+                let fill_lbl = self.new_label("range_fill");
+                let skip_lbl = self.new_label("range_skip");
+                self.push_text(Asm::Push(Reg::Rdi));
+                self.push_text(Asm::Push(Reg::Rsi));
+                self.push_text(Asm::Mov(Operand::Reg(Reg::Rax), Operand::Reg(Reg::Rsi)));
+                self.push_text(Asm::Sub(Operand::Reg(Reg::Rax), Operand::Reg(Reg::Rdi)));
+                self.push_text(Asm::Cmp(Operand::Reg(Reg::Rax), Operand::Imm(0)));
+                self.push_text(Asm::Jge(skip_lbl.clone()));
+                self.push_text(Asm::Xor(Operand::Reg(Reg::Rax), Operand::Reg(Reg::Rax)));
+                self.push_text(Asm::Label(skip_lbl));
+                self.push_text(Asm::Push(Reg::Rax));
+                self.push_text(Asm::Sub(Operand::Reg(Reg::Rsp), Operand::Imm(8)));
+                self.push_text(Asm::Lea(
+                    Operand::Reg(Reg::Rdi),
+                    Operand::Mem(Mem {
+                        base: None,
+                        index: Some(Reg::Rax),
+                        scale: 8,
+                        disp: 8,
+                        size: None,
+                    }),
+                ));
+                self.push_text(Asm::Call(Operand::PLT("malloc".to_string())));
+                self.push_text(Asm::Add(Operand::Reg(Reg::Rsp), Operand::Imm(8)));
+                self.push_text(Asm::Pop(Reg::Rdx));
+                self.push_text(Asm::Mov(m_base(Reg::Rax), Operand::Reg(Reg::Rdx)));
+                self.push_text(Asm::Add(Operand::Reg(Reg::Rax), Operand::Imm(8)));
+                self.push_text(Asm::Xor(Operand::Reg(Reg::Rcx), Operand::Reg(Reg::Rcx)));
+                self.push_text(Asm::Pop(Reg::Rsi));
+                self.push_text(Asm::Pop(Reg::Rdi));
+                self.push_text(Asm::Label(fill_lbl.clone()));
+                self.push_text(Asm::Cmp(Operand::Reg(Reg::Rcx), Operand::Reg(Reg::Rdx)));
+                self.push_text(Asm::Jge(end_lbl.clone()));
+                self.push_text(Asm::Mov(Operand::Reg(Reg::R8), Operand::Reg(Reg::Rdi)));
+                self.push_text(Asm::Add(Operand::Reg(Reg::R8), Operand::Reg(Reg::Rcx)));
+                self.push_text(Asm::Mov(
+                    m_sib(Reg::Rax, Reg::Rcx, 8, 0),
+                    Operand::Reg(Reg::R8),
+                ));
+                self.push_text(Asm::Inc(Reg::Rcx));
+                self.push_text(Asm::Jmp(fill_lbl));
+                self.push_text(Asm::Label(end_lbl));
+                self.push_text(Asm::Mov(
+                    m_rbp(self.get_offset(dst)?),
+                    Operand::Reg(Reg::Rax),
+                ));
+                self.invalidate_cached_reg("rax");
+                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::Arg(n) => {
+                let op = code.src1.as_ref().unwrap();
+                if n < 6 {
+                    let reg = self.arg_reg[n].clone();
+                    self.load(op, &reg)?;
+                } else {
+                    self.load(op, "rax")?;
+                    self.push_text(Asm::Push(Reg::Rax));
+                }
+                Ok(())
+            }
+            Op::FArg(n) => {
+                let op = code.src1.as_ref().unwrap();
+                if n < 8 {
+                    self.curr_flt_reg = n + 1;
+                    let reg = self.flt_arg_reg[n].clone();
+                    self.load(op, &reg)?;
+                } else {
+                    self.curr_flt_reg = 8;
+                    self.load(op, "xmm0")?;
+                    self.push_text(Asm::Sub(Operand::Reg(Reg::Rsp), Operand::Imm(8)));
+                    self.push_text(Asm::Movsd(m_base(Reg::Rsp), Operand::Reg(Reg::Xmm0)));
+                }
+                Ok(())
+            }
+            Op::Call => {
+                let dst = code.dst.as_ref().unwrap();
+                let src1 = code.src1.as_ref().unwrap();
+                match src1 {
+                    IROperand::Function(name) => {
+                        if self.curr_flt_reg > 0 {
+                            self.push_text(Asm::Mov(
+                                Operand::Reg(Reg::Rax),
+                                Operand::Imm(self.curr_flt_reg as i64),
+                            ));
+                        } else {
+                            self.push_text(Asm::Xor(
+                                Operand::Reg(Reg::Rax),
+                                Operand::Reg(Reg::Rax),
+                            ));
+                        }
+                        self.curr_flt_reg = 0;
+                        if self.internals.contains(name) {
+                            self.push_text(Asm::Call(Operand::Label(name.clone())));
+                        } else {
+                            self.push_text(Asm::Call(Operand::PLT(name.clone())));
+                        }
+                    }
+                    _ => {
+                        self.load(src1, "rax")?;
+                        self.push_text(Asm::Call(Operand::Reg(Reg::Rax)));
+                    }
+                }
+                let caller_saved = ["rax", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11"];
+                for reg in caller_saved {
+                    self.invalidate_cached_reg(reg);
+                }
+                self.invalidate_cached_reg("xmm0");
+                self.invalidate_cached_reg("xmm1");
+                self.invalidate_cached_reg("xmm2");
+                self.invalidate_cached_reg("xmm3");
+                self.invalidate_cached_reg("xmm4");
+                self.invalidate_cached_reg("xmm5");
+                self.invalidate_cached_reg("xmm6");
+                self.invalidate_cached_reg("xmm7");
+                let is_float = match dst {
+                    IROperand::Temp(_, IRType::Float) => true,
+                    _ => false,
+                };
+                if is_float {
+                    self.push_text(Asm::Movsd(
+                        m_rbp(self.get_offset(dst)?),
+                        Operand::Reg(Reg::Xmm0),
+                    ));
+                    self.regs.insert("xmm0".to_string(), Some(dst.clone()));
+                } else {
+                    self.push_text(Asm::Mov(
+                        m_rbp(self.get_offset(dst)?),
+                        Operand::Reg(Reg::Rax),
+                    ));
+                    self.regs.insert("rax".to_string(), Some(dst.clone()));
+                }
+                Ok(())
+            }
+            Op::Label(lbl) => {
+                self.push_text(Asm::Label(lbl));
+                self.regs.clear();
+                Ok(())
+            }
+            Op::Jump => {
+                if let IROperand::Label(lbl) = code.src1.as_ref().unwrap() {
+                    self.push_text(Asm::Jmp(lbl.clone()));
+                }
+                Ok(())
+            }
+            Op::JumpIfFalse => {
+                let src1 = code.src1.as_ref().unwrap();
+                let lbl = match code.src2.as_ref().unwrap() {
+                    IROperand::Label(s) => s.clone(),
+                    _ => {
+                        return Err(CodeGenError::InvalidOperand {
+                            message: "JumpIfFalse src2 must be a Label".to_string(),
+                        });
+                    }
+                };
+                self.load(src1, "rax")?;
+                self.push_text(Asm::Cmp(Operand::Reg(Reg::Rax), Operand::Imm(0)));
+                self.push_text(Asm::Je(lbl));
+                Ok(())
+            }
+            Op::ArrayAccess => {
+                let dst = code.dst.as_ref().unwrap();
+                let src1 = code.src1.as_ref().unwrap();
+                let src2 = code.src2.as_ref().unwrap();
+                self.load(src1, "r10")?;
+                self.load(src2, "rcx")?;
+                self.push_text(Asm::Lea(
+                    Operand::Reg(Reg::Rax),
+                    m_sib(Reg::R10, Reg::Rcx, 8, 0),
+                ));
+                self.push_text(Asm::Mov(Operand::Reg(Reg::Rax), m_base(Reg::Rax)));
+                self.push_text(Asm::Mov(
+                    m_rbp(self.get_offset(dst)?),
+                    Operand::Reg(Reg::Rax),
+                ));
+                self.invalidate_cached_reg("rax");
+                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::ArrayAssign => {
+                let dst = code.dst.as_ref().unwrap();
+                let src1 = code.src1.as_ref().unwrap();
+                let src2 = code.src2.as_ref().unwrap();
+                self.load(dst, "r10")?;
+                self.load(src1, "rcx")?;
+                self.load(src2, "rax")?;
+                self.push_text(Asm::Lea(
+                    Operand::Reg(Reg::Rdx),
+                    m_sib(Reg::R10, Reg::Rcx, 8, 0),
+                ));
+                self.push_text(Asm::Mov(m_base(Reg::Rdx), Operand::Reg(Reg::Rax)));
+                Ok(())
+            }
+            Op::Lea => {
+                let dst = code.dst.as_ref().unwrap();
+                let src1 = code.src1.as_ref().unwrap();
+                let offset = self.get_offset(src1)?;
+                self.push_text(Asm::Lea(Operand::Reg(Reg::Rax), m_rbp(offset)));
+                self.push_text(Asm::Mov(
+                    m_rbp(self.get_offset(dst)?),
+                    Operand::Reg(Reg::Rax),
+                ));
+                self.invalidate_volatile_registers();
+                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::Malloc => {
+                let dst = code.dst.as_ref().unwrap();
+                let src1 = code.src1.as_ref().unwrap();
+                self.load(src1, "rdi")?;
+                self.push_text(Asm::Call(Operand::PLT("malloc".to_string())));
+                self.push_text(Asm::Mov(
+                    m_rbp(self.get_offset(dst)?),
+                    Operand::Reg(Reg::Rax),
+                ));
+                self.invalidate_cached_reg("rax");
+                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::StoreAt => {
+                let dst = code.dst.as_ref().unwrap();
+                let src1 = code.src1.as_ref().unwrap();
+                let src2 = code.src2.as_ref().unwrap();
+                self.load(dst, "r10")?;
+                self.load(src2, "rax")?;
+                match src1 {
+                    IROperand::ConstIdx(idx) => {
+                        if let IRConst::Int(offset) = &self.program.constants[*idx] {
+                            if *offset == 0 {
+                                self.push_text(Asm::Mov(m_base(Reg::R10), Operand::Reg(Reg::Rax)));
+                            } else {
+                                self.push_text(Asm::Mov(
+                                    m_base_disp(Reg::R10, *offset as i32),
+                                    Operand::Reg(Reg::Rax),
+                                ));
+                            }
+                        }
+                    }
+                    _ => {
+                        self.load(src1, "r11")?;
+                        self.push_text(Asm::Add(Operand::Reg(Reg::R10), Operand::Reg(Reg::R11)));
+                        self.push_text(Asm::Mov(m_base(Reg::R10), Operand::Reg(Reg::Rax)));
+                    }
+                }
+                Ok(())
+            }
+            Op::LoadAt => {
+                let dst = code.dst.as_ref().unwrap();
+                let src1 = code.src1.as_ref().unwrap();
+                let src2 = code.src2.as_ref().unwrap();
+                self.load(src1, "r10")?;
+                let src_op = match src2 {
+                    IROperand::ConstIdx(idx) => {
+                        if let IRConst::Int(offset) = &self.program.constants[*idx] {
+                            if *offset == 0 {
+                                m_base(Reg::R10)
+                            } else {
+                                m_base_disp(Reg::R10, *offset as i32)
+                            }
+                        } else {
+                            unreachable!()
+                        }
+                    }
+                    _ => {
+                        self.load(src2, "r11")?;
+                        self.push_text(Asm::Add(Operand::Reg(Reg::R10), Operand::Reg(Reg::R11)));
+                        m_base(Reg::R10)
+                    }
+                };
+                self.push_text(Asm::Mov(Operand::Reg(Reg::Rax), src_op));
+                self.push_text(Asm::Mov(
+                    m_rbp(self.get_offset(dst)?),
+                    Operand::Reg(Reg::Rax),
+                ));
+                self.regs.clear();
+                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::StrCat => {
+                let dst = code.dst.as_ref().unwrap();
+                let src1 = code.src1.as_ref().unwrap();
+                let src2 = code.src2.as_ref().unwrap();
+                let off_tmp = self.load2temp(src1)?;
+                self.push_text(Asm::Mov(Operand::Reg(Reg::Rdi), m_rbp(off_tmp)));
+                self.push_text(Asm::Call(Operand::PLT("strlen".to_string())));
+                self.push_text(Asm::Mov(Operand::Reg(Reg::Rbx), Operand::Reg(Reg::Rax)));
+                let off_tmp2 = self.load2temp(src2)?;
+                self.push_text(Asm::Mov(Operand::Reg(Reg::Rdi), m_rbp(off_tmp2)));
+                self.push_text(Asm::Call(Operand::PLT("strlen".to_string())));
+                self.push_text(Asm::Lea(
+                    Operand::Reg(Reg::Rdi),
+                    Operand::Mem(Mem {
+                        base: Some(Reg::Rbx),
+                        index: Some(Reg::Rax),
+                        scale: 1,
+                        disp: 1,
+                        size: None,
+                    }),
+                ));
+                self.push_text(Asm::Call(Operand::PLT("malloc".to_string())));
+                self.push_text(Asm::Mov(Operand::Reg(Reg::R15), Operand::Reg(Reg::Rax)));
+                self.push_text(Asm::Mov(Operand::Reg(Reg::Rdi), Operand::Reg(Reg::R15)));
+                self.push_text(Asm::Mov(Operand::Reg(Reg::Rsi), m_rbp(off_tmp)));
+                self.push_text(Asm::Call(Operand::PLT("strcpy".to_string())));
+                self.push_text(Asm::Mov(Operand::Reg(Reg::Rdi), Operand::Reg(Reg::R15)));
+                self.push_text(Asm::Call(Operand::PLT("strlen".to_string())));
+                self.push_text(Asm::Lea(
+                    Operand::Reg(Reg::Rdi),
+                    Operand::Mem(Mem {
+                        base: Some(Reg::R15),
+                        index: Some(Reg::Rax),
+                        scale: 1,
+                        disp: 0,
+                        size: None,
+                    }),
+                ));
+                self.push_text(Asm::Mov(Operand::Reg(Reg::Rsi), m_rbp(off_tmp2)));
+                self.push_text(Asm::Call(Operand::PLT("strcpy".to_string())));
+                self.push_text(Asm::Mov(
+                    m_rbp(self.get_offset(dst)?),
+                    Operand::Reg(Reg::R15),
+                ));
+                self.invalidate_volatile_registers();
+                self.regs.insert("r15".to_string(), Some(dst.clone()));
+                Ok(())
+            }
+            Op::Return(reg) => {
+                if let Some(ref val) = code.src1 {
+                    self.load(val, &reg)?;
+                }
+                self.push_text(Asm::Jmp(self.ret_label.clone()));
+                Ok(())
+            }
+        }
+    }
+}
