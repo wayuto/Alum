@@ -1,8 +1,10 @@
 use super::context::Context;
 use super::ir::{IRConst, IRType, Instruction, Op, Operand};
-use super::irgen::IRGen;
-use crate::compiler::codegen::CodeGenError;
-use crate::compiler::parser::{Expr, Type};
+use crate::compiler::{
+    codegen::CodeGenError,
+    irgen::IRGen,
+    parser::{Expr, Type},
+};
 use ordered_float::OrderedFloat;
 use std::iter::zip;
 

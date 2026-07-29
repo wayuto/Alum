@@ -1,8 +1,9 @@
-use super::codegen::AsmCodeGen;
-use super::codegen::{m_base_disp, m_rbp, m_rbp_q, parse_reg, rel};
+use super::codegen::{AsmCodeGen, m_base_disp, m_rbp, m_rbp_q, parse_reg, rel};
 use super::error::CodeGenError;
-use crate::compiler::codegen::asm::*;
-use crate::compiler::irgen::ir::{IRConst, Operand as IROperand};
+use crate::compiler::{
+    codegen::asm::*,
+    irgen::ir::{IRConst, Operand as IROperand},
+};
 use ordered_float::OrderedFloat;
 
 impl AsmCodeGen {

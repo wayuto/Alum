@@ -1,15 +1,9 @@
 use super::error::CheckerError;
-use crate::compiler::parser::{Expr, Program, Type};
+use crate::compiler::{
+    parser::{Expr, Program, Type},
+    visitor::TypeChecker,
+};
 use std::collections::HashMap;
-
-pub struct TypeChecker {
-    pub(super) type_stack: Vec<HashMap<String, Type>>,
-    pub(super) functions: HashMap<String, (Vec<Type>, Type)>,
-    pub(super) structs: HashMap<String, Vec<(String, Type)>>,
-    pub(super) typedefs: HashMap<String, Type>,
-    pub(super) type_var_counter: usize,
-    pub(super) type_bindings: HashMap<usize, Type>,
-}
 
 impl TypeChecker {
     pub fn new() -> Self {

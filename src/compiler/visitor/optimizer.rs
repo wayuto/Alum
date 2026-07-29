@@ -1,5 +1,7 @@
-use crate::compiler::Span;
-use crate::compiler::parser::{Expr, Program};
+use crate::compiler::{
+    Span,
+    parser::{Expr, Program},
+};
 
 pub struct Optimizer {}
 

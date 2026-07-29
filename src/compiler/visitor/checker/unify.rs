@@ -1,7 +1,5 @@
-use super::checker::TypeChecker;
 use super::error::CheckerError;
-use crate::compiler::Span;
-use crate::compiler::parser::Type;
+use crate::compiler::{Span, parser::Type, visitor::TypeChecker};
 
 impl TypeChecker {
     pub(super) fn resolve_type_var(&self, ty: &Type) -> Type {

@@ -1,5 +1,7 @@
-use super::irgen::IRGen;
-use crate::compiler::parser::{Expr, Program};
+use crate::compiler::{
+    irgen::IRGen,
+    parser::{Expr, Program},
+};
 use std::collections::HashMap;
 
 impl IRGen {

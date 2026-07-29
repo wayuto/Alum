@@ -1,28 +1,13 @@
 use super::context::Context;
-use super::ir::{IRConst, IRFunction, IRProgram, Op};
-use crate::compiler::codegen::CodeGenError;
-use crate::compiler::parser::{Expr, Program, Type};
-use std::{collections::HashMap, mem::take};
-
-pub struct IRGen {
-    pub(super) functions: Vec<IRFunction>,
-    pub(super) constants: Vec<IRConst>,
-    constant_pool: HashMap<IRConst, usize>,
-    pub(super) structs: HashMap<String, Vec<(String, Type)>>,
-    pub(super) lambda_counter: u32,
-}
+use super::ir::{IRConst, IRProgram, Op};
+use crate::compiler::{
+    codegen::CodeGenError,
+    irgen::IRGen,
+    parser::{Expr, Program, Type},
+};
+use std::mem::take;
 
 impl IRGen {
-    pub fn new() -> Self {
-        Self {
-            functions: Vec::new(),
-            constants: Vec::new(),
-            constant_pool: HashMap::new(),
-            structs: HashMap::new(),
-            lambda_counter: 0,
-        }
-    }
-
     pub fn compile(&mut self, program: Program) -> Result<IRProgram, CodeGenError> {
         let program = self.lambda2function(program);
 

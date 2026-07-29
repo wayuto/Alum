@@ -1,26 +1,10 @@
 use super::error::LexerError;
-use crate::compiler::{Span, lexer::Token};
-use std::str::Chars;
-
-pub struct Lexer<'a> {
-    chars: Chars<'a>,
-    current: Option<char>,
-    line: usize,
-    col: usize,
-}
+use crate::compiler::{
+    Span,
+    lexer::{Lexer, Token},
+};
 
 impl<'a> Lexer<'a> {
-    pub fn new(src: &'a str) -> Self {
-        let mut chars = src.chars();
-        let current = chars.next();
-        Self {
-            chars,
-            current,
-            line: 1,
-            col: 1,
-        }
-    }
-
     fn bump(&mut self) {
         self.current = self.chars.next();
         self.col += 1;

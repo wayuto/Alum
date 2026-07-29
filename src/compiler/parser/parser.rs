@@ -2,17 +2,9 @@ use super::error::ParserError;
 use crate::compiler::{
     Span,
     lexer::{Lexer, LexerError, Token},
-    parser::{Expr, Program, Type},
+    parser::{Expr, Parser, Program, Type},
 };
 use std::collections::HashMap;
-use std::iter::Peekable;
-
-pub struct Parser<'a> {
-    lex: Peekable<Lexer<'a>>,
-    last_span: Span,
-    typedefs: HashMap<String, Type>,
-    structs: HashMap<String, Vec<(String, Type)>>,
-}
 
 impl<'a> Parser<'a> {
     pub fn new(lex: Lexer<'a>) -> Self {

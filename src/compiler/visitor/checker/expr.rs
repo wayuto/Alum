@@ -1,8 +1,8 @@
-use super::checker::TypeChecker;
 use super::error::CheckerError;
 use crate::compiler::{
     Span,
     parser::{Expr, Type},
+    visitor::TypeChecker,
 };
 
 impl TypeChecker {

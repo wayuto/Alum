@@ -5,9 +5,9 @@ mod compile_fn;
 mod error;
 mod operand;
 
-use crate::compiler::irgen::IRGen;
-use crate::compiler::parser::Program;
 pub use error::CodeGenError;
+
+use crate::compiler::{irgen::IRGen, parser::Program};
 
 pub struct CodeGen {
     ast: Program,

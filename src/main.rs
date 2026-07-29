@@ -1,9 +1,12 @@
 mod cli;
 mod compiler;
+
 use clap::Parser;
-use cli::build::DEFAULT_STD_LIB_PATH;
-use cli::link::{create_shared_library, create_static_library, link};
-use cli::{Cli, build, exec_run};
+use cli::{
+    build::DEFAULT_STD_LIB_PATH,
+    link::{create_shared_library, create_static_library, link},
+    {Cli, build, exec_run},
+};
 
 fn main() {
     if let Err(e) = run() {

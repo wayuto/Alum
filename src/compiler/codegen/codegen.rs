@@ -1,9 +1,13 @@
 use super::error::CodeGenError;
-use crate::compiler::codegen::asm::*;
-use crate::compiler::irgen::ir::{IRProgram, Operand as IROperand};
+use crate::compiler::{
+    codegen::asm::*,
+    irgen::ir::{IRProgram, Operand as IROperand},
+};
 use ordered_float::OrderedFloat;
-use std::collections::{HashMap, HashSet};
-use std::mem::take;
+use std::{
+    collections::{HashMap, HashSet},
+    mem::take,
+};
 
 pub(super) fn parse_reg(s: &str) -> Reg {
     match s {
