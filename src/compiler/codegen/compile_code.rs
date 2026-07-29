@@ -1,5 +1,5 @@
 use super::codegen::{
-    AsmCodeGen, {m_base, m_base_disp, m_rbp, m_sib, rel},
+    AsmCodeGen, {m_base, m_base_disp, m_rbp, m_sib, parse_reg, rel},
 };
 use super::error::CodeGenError;
 use crate::compiler::{
@@ -13,28 +13,28 @@ impl AsmCodeGen {
             Op::Move => {
                 let src = code.src1.as_ref().unwrap();
                 let dst = code.dst.as_ref().unwrap();
-                self.load(src, "rax")?;
+                self.load(src, Reg::Rax)?;
                 self.store_dst(dst, Reg::Rax)?;
                 Ok(())
             }
             Op::FMove => {
                 let src = code.src1.as_ref().unwrap();
                 let dst = code.dst.as_ref().unwrap();
-                self.load(src, "xmm0")?;
+                self.load(src, Reg::Xmm0)?;
                 self.store_dst_xmm(dst, Reg::Xmm0)?;
                 Ok(())
             }
             Op::Load | Op::Store => {
                 let src = code.src1.as_ref().unwrap();
                 let dst = code.dst.as_ref().unwrap();
-                self.load(src, "rax")?;
+                self.load(src, Reg::Rax)?;
                 self.store_dst(dst, Reg::Rax)?;
                 Ok(())
             }
             Op::FLoad | Op::FStore => {
                 let src = code.src1.as_ref().unwrap();
                 let dst = code.dst.as_ref().unwrap();
-                self.load(src, "xmm0")?;
+                self.load(src, Reg::Xmm0)?;
                 self.store_dst_xmm(dst, Reg::Xmm0)?;
                 Ok(())
             }
@@ -42,9 +42,9 @@ impl AsmCodeGen {
                 let dst = code.dst.as_ref().unwrap();
                 let src1 = code.src1.as_ref().unwrap();
                 let src2 = code.src2.as_ref().unwrap();
-                self.load(src1, "rax")?;
+                self.load(src1, Reg::Rax)?;
                 if matches!(code.op, Op::Div) {
-                    self.load(src2, "rbx")?;
+                    self.load(src2, Reg::Rbx)?;
                     self.push_text(Asm::Cqo);
                     self.push_text(Asm::Idiv(Reg::Rbx));
                 } else {
@@ -68,33 +68,33 @@ impl AsmCodeGen {
                             self.push_text(asm_op(Operand::Reg(Reg::Rax), loc));
                         }
                         _ => {
-                            self.load(src2, "rbx")?;
+                            self.load(src2, Reg::Rbx)?;
                             self.push_text(asm_op(Operand::Reg(Reg::Rax), Operand::Reg(Reg::Rbx)));
                         }
                     }
                 }
                 self.store_dst(dst, Reg::Rax)?;
-                self.regs.remove("rax");
-                self.regs.remove("rdx");
+                self.regs.remove(&Reg::Rax);
+                self.regs.remove(&Reg::Rdx);
                 if matches!(code.op, Op::Div) {
-                    self.regs.remove("rbx");
+                    self.regs.remove(&Reg::Rbx);
                 }
-                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                self.regs.insert(Reg::Rax, Some(dst.clone()));
                 Ok(())
             }
             Op::Mod => {
                 let dst = code.dst.as_ref().unwrap();
                 let src1 = code.src1.as_ref().unwrap();
                 let src2 = code.src2.as_ref().unwrap();
-                self.load(src1, "rax")?;
-                self.load(src2, "rbx")?;
+                self.load(src1, Reg::Rax)?;
+                self.load(src2, Reg::Rbx)?;
                 self.push_text(Asm::Cqo);
                 self.push_text(Asm::Idiv(Reg::Rbx));
                 self.store_dst(dst, Reg::Rdx)?;
-                self.invalidate_cached_reg("rax");
-                self.invalidate_cached_reg("rdx");
-                self.invalidate_cached_reg("rbx");
-                self.regs.insert("rdx".to_string(), Some(dst.clone()));
+                self.invalidate_cached_reg(Reg::Rax);
+                self.invalidate_cached_reg(Reg::Rdx);
+                self.invalidate_cached_reg(Reg::Rbx);
+                self.regs.insert(Reg::Rdx, Some(dst.clone()));
                 Ok(())
             }
             Op::FAdd | Op::FSub | Op::FMul | Op::FDiv => {
@@ -108,7 +108,7 @@ impl AsmCodeGen {
                     Op::FDiv => Asm::Divsd,
                     _ => unreachable!(),
                 };
-                self.load(src1, "xmm0")?;
+                self.load(src1, Reg::Xmm0)?;
                 let src2_op = match src2 {
                     IROperand::ConstIdx(idx) => {
                         if let IRConst::Float(f) = &self.program.constants[*idx] {
@@ -122,21 +122,21 @@ impl AsmCodeGen {
                         self.get_location(src2)?
                     }
                     _ => {
-                        self.load(src2, "xmm1")?;
+                        self.load(src2, Reg::Xmm1)?;
                         Operand::Reg(Reg::Xmm1)
                     }
                 };
                 self.push_text(asm_op(Operand::Reg(Reg::Xmm0), src2_op));
                 self.store_dst_xmm(dst, Reg::Xmm0)?;
-                self.regs.insert("xmm0".to_string(), Some(dst.clone()));
+                self.regs.insert(Reg::Xmm0, Some(dst.clone()));
                 Ok(())
             }
             Op::Eq | Op::Ne | Op::Gt | Op::Ge | Op::Lt | Op::Le => {
                 let dst = code.dst.as_ref().unwrap();
                 let src1 = code.src1.as_ref().unwrap();
                 let src2 = code.src2.as_ref().unwrap();
-                self.load(src1, "rax")?;
-                self.load(src2, "rbx")?;
+                self.load(src1, Reg::Rax)?;
+                self.load(src2, Reg::Rbx)?;
                 self.push_text(Asm::Cmp(Operand::Reg(Reg::Rax), Operand::Reg(Reg::Rbx)));
                 let set_op = match code.op {
                     Op::Eq => Asm::Sete,
@@ -150,16 +150,16 @@ impl AsmCodeGen {
                 self.push_text(set_op(Reg::Rax));
                 self.push_text(Asm::Movzx(Reg::Rax, Reg::Rax));
                 self.store_dst(dst, Reg::Rax)?;
-                self.invalidate_cached_reg("rax");
-                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                self.invalidate_cached_reg(Reg::Rax);
+                self.regs.insert(Reg::Rax, Some(dst.clone()));
                 Ok(())
             }
             Op::FEq | Op::FNe | Op::FGt | Op::FGe | Op::FLt | Op::FLe => {
                 let dst = code.dst.as_ref().unwrap();
                 let src1 = code.src1.as_ref().unwrap();
                 let src2 = code.src2.as_ref().unwrap();
-                self.load(src1, "xmm0")?;
-                self.load(src2, "xmm1")?;
+                self.load(src1, Reg::Xmm0)?;
+                self.load(src2, Reg::Xmm1)?;
                 self.push_text(Asm::Ucomisd(Reg::Xmm0, Reg::Xmm1));
                 let set_op = match code.op {
                     Op::FEq => Asm::Sete,
@@ -173,14 +173,14 @@ impl AsmCodeGen {
                 self.push_text(set_op(Reg::Rax));
                 self.push_text(Asm::Movzx(Reg::Rax, Reg::Rax));
                 self.store_dst(dst, Reg::Rax)?;
-                self.invalidate_cached_reg("rax");
-                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                self.invalidate_cached_reg(Reg::Rax);
+                self.regs.insert(Reg::Rax, Some(dst.clone()));
                 Ok(())
             }
             Op::Neg | Op::Inc | Op::Dec | Op::SizeOf => {
                 let dst = code.dst.as_ref().unwrap();
                 let src1 = code.src1.as_ref().unwrap();
-                self.load(src1, "rax")?;
+                self.load(src1, Reg::Rax)?;
                 match code.op {
                     Op::Neg => self.push_text(Asm::Neg(Reg::Rax)),
                     Op::Inc => self.push_text(Asm::Inc(Reg::Rax)),
@@ -191,36 +191,36 @@ impl AsmCodeGen {
                     _ => unreachable!(),
                 }
                 self.store_dst(dst, Reg::Rax)?;
-                self.invalidate_cached_reg("rax");
-                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                self.invalidate_cached_reg(Reg::Rax);
+                self.regs.insert(Reg::Rax, Some(dst.clone()));
                 Ok(())
             }
             Op::Not => {
                 let dst = code.dst.as_ref().unwrap();
                 let src1 = code.src1.as_ref().unwrap();
-                self.load(src1, "rax")?;
+                self.load(src1, Reg::Rax)?;
                 self.push_text(Asm::Xor(Operand::Reg(Reg::Rax), Operand::Imm(1)));
                 self.store_dst(dst, Reg::Rax)?;
-                self.invalidate_cached_reg("rax");
-                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                self.invalidate_cached_reg(Reg::Rax);
+                self.regs.insert(Reg::Rax, Some(dst.clone()));
                 Ok(())
             }
             Op::FNeg => {
                 let dst = code.dst.as_ref().unwrap();
                 let src1 = code.src1.as_ref().unwrap();
-                self.load(src1, "xmm0")?;
+                self.load(src1, Reg::Xmm0)?;
                 self.push_text(Asm::Xorpd(Reg::Xmm0, rel("neg_mask".to_string())));
                 self.store_dst_xmm(dst, Reg::Xmm0)?;
-                self.invalidate_cached_reg("xmm0");
-                self.regs.insert("xmm0".to_string(), Some(dst.clone()));
+                self.invalidate_cached_reg(Reg::Xmm0);
+                self.regs.insert(Reg::Xmm0, Some(dst.clone()));
                 Ok(())
             }
             Op::Range => {
                 let dst = code.dst.as_ref().unwrap();
                 let src1 = code.src1.as_ref().unwrap();
                 let src2 = code.src2.as_ref().unwrap();
-                self.load(src1, "rdi")?;
-                self.load(src2, "rsi")?;
+                self.load(src1, Reg::Rdi)?;
+                self.load(src2, Reg::Rsi)?;
                 let end_lbl = self.new_label("range_end");
                 let fill_lbl = self.new_label("range_fill");
                 let skip_lbl = self.new_label("range_skip");
@@ -265,17 +265,17 @@ impl AsmCodeGen {
                 self.push_text(Asm::Jmp(fill_lbl));
                 self.push_text(Asm::Label(end_lbl));
                 self.store_dst(dst, Reg::Rax)?;
-                self.invalidate_cached_reg("rax");
-                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                self.invalidate_cached_reg(Reg::Rax);
+                self.regs.insert(Reg::Rax, Some(dst.clone()));
                 Ok(())
             }
             Op::Arg(n) => {
                 let op = code.src1.as_ref().unwrap();
                 if n < 6 {
-                    let reg = self.arg_reg[n].clone();
-                    self.load(op, &reg)?;
+                    let reg = parse_reg(&self.arg_reg[n]);
+                    self.load(op, reg)?;
                 } else {
-                    self.load(op, "rax")?;
+                    self.load(op, Reg::Rax)?;
                     self.push_text(Asm::Push(Reg::Rax));
                 }
                 Ok(())
@@ -284,11 +284,11 @@ impl AsmCodeGen {
                 let op = code.src1.as_ref().unwrap();
                 if n < 8 {
                     self.curr_flt_reg = n + 1;
-                    let reg = self.flt_arg_reg[n].clone();
-                    self.load(op, &reg)?;
+                    let reg = parse_reg(&self.flt_arg_reg[n]);
+                    self.load(op, reg)?;
                 } else {
                     self.curr_flt_reg = 8;
-                    self.load(op, "xmm0")?;
+                    self.load(op, Reg::Xmm0)?;
                     self.push_text(Asm::Sub(Operand::Reg(Reg::Rsp), Operand::Imm(8)));
                     self.push_text(Asm::Movsd(m_base(Reg::Rsp), Operand::Reg(Reg::Xmm0)));
                 }
@@ -318,32 +318,31 @@ impl AsmCodeGen {
                         }
                     }
                     _ => {
-                        self.load(src1, "rax")?;
+                        self.load(src1, Reg::Rax)?;
                         self.push_text(Asm::Call(Operand::Reg(Reg::Rax)));
                     }
                 }
-                let caller_saved = ["rax", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11"];
-                for reg in caller_saved {
-                    self.invalidate_cached_reg(reg);
+                for reg in &[Reg::Rax, Reg::Rcx, Reg::Rdx, Reg::Rsi, Reg::Rdi, Reg::R8, Reg::R9, Reg::R10, Reg::R11] {
+                    self.invalidate_cached_reg(*reg);
                 }
-                self.invalidate_cached_reg("xmm0");
-                self.invalidate_cached_reg("xmm1");
-                self.invalidate_cached_reg("xmm2");
-                self.invalidate_cached_reg("xmm3");
-                self.invalidate_cached_reg("xmm4");
-                self.invalidate_cached_reg("xmm5");
-                self.invalidate_cached_reg("xmm6");
-                self.invalidate_cached_reg("xmm7");
+                self.invalidate_cached_reg(Reg::Xmm0);
+                self.invalidate_cached_reg(Reg::Xmm1);
+                self.invalidate_cached_reg(Reg::Xmm2);
+                self.invalidate_cached_reg(Reg::Xmm3);
+                self.invalidate_cached_reg(Reg::Xmm4);
+                self.invalidate_cached_reg(Reg::Xmm5);
+                self.invalidate_cached_reg(Reg::Xmm6);
+                self.invalidate_cached_reg(Reg::Xmm7);
                 let is_float = match dst {
                     IROperand::Temp(_, IRType::Float) => true,
                     _ => false,
                 };
                 if is_float {
                     self.store_dst_xmm(dst, Reg::Xmm0)?;
-                    self.regs.insert("xmm0".to_string(), Some(dst.clone()));
+                    self.regs.insert(Reg::Xmm0, Some(dst.clone()));
                 } else {
                     self.store_dst(dst, Reg::Rax)?;
-                    self.regs.insert("rax".to_string(), Some(dst.clone()));
+                    self.regs.insert(Reg::Rax, Some(dst.clone()));
                 }
                 Ok(())
             }
@@ -368,7 +367,7 @@ impl AsmCodeGen {
                         });
                     }
                 };
-                self.load(src1, "rax")?;
+                self.load(src1, Reg::Rax)?;
                 self.push_text(Asm::Cmp(Operand::Reg(Reg::Rax), Operand::Imm(0)));
                 self.push_text(Asm::Je(lbl));
                 Ok(())
@@ -377,25 +376,25 @@ impl AsmCodeGen {
                 let dst = code.dst.as_ref().unwrap();
                 let src1 = code.src1.as_ref().unwrap();
                 let src2 = code.src2.as_ref().unwrap();
-                self.load(src1, "r10")?;
-                self.load(src2, "rcx")?;
+                self.load(src1, Reg::R10)?;
+                self.load(src2, Reg::Rcx)?;
                 self.push_text(Asm::Lea(
                     Operand::Reg(Reg::Rax),
                     m_sib(Reg::R10, Reg::Rcx, 8, 0),
                 ));
                 self.push_text(Asm::Mov(Operand::Reg(Reg::Rax), m_base(Reg::Rax)));
                 self.store_dst(dst, Reg::Rax)?;
-                self.invalidate_cached_reg("rax");
-                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                self.invalidate_cached_reg(Reg::Rax);
+                self.regs.insert(Reg::Rax, Some(dst.clone()));
                 Ok(())
             }
             Op::ArrayAssign => {
                 let dst = code.dst.as_ref().unwrap();
                 let src1 = code.src1.as_ref().unwrap();
                 let src2 = code.src2.as_ref().unwrap();
-                self.load(dst, "r10")?;
-                self.load(src1, "rcx")?;
-                self.load(src2, "rax")?;
+                self.load(dst, Reg::R10)?;
+                self.load(src1, Reg::Rcx)?;
+                self.load(src2, Reg::Rax)?;
                 self.push_text(Asm::Lea(
                     Operand::Reg(Reg::Rdx),
                     m_sib(Reg::R10, Reg::Rcx, 8, 0),
@@ -410,25 +409,25 @@ impl AsmCodeGen {
                 self.push_text(Asm::Lea(Operand::Reg(Reg::Rax), m_rbp(offset)));
                 self.store_dst(dst, Reg::Rax)?;
                 self.invalidate_volatile_registers();
-                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                self.regs.insert(Reg::Rax, Some(dst.clone()));
                 Ok(())
             }
             Op::Malloc => {
                 let dst = code.dst.as_ref().unwrap();
                 let src1 = code.src1.as_ref().unwrap();
-                self.load(src1, "rdi")?;
+                self.load(src1, Reg::Rdi)?;
                 self.push_text(Asm::Call(Operand::PLT("malloc".to_string())));
                 self.store_dst(dst, Reg::Rax)?;
-                self.invalidate_cached_reg("rax");
-                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                self.invalidate_cached_reg(Reg::Rax);
+                self.regs.insert(Reg::Rax, Some(dst.clone()));
                 Ok(())
             }
             Op::StoreAt => {
                 let dst = code.dst.as_ref().unwrap();
                 let src1 = code.src1.as_ref().unwrap();
                 let src2 = code.src2.as_ref().unwrap();
-                self.load(dst, "r10")?;
-                self.load(src2, "rax")?;
+                self.load(dst, Reg::R10)?;
+                self.load(src2, Reg::Rax)?;
                 match src1 {
                     IROperand::ConstIdx(idx) => {
                         if let IRConst::Int(offset) = &self.program.constants[*idx] {
@@ -443,7 +442,7 @@ impl AsmCodeGen {
                         }
                     }
                     _ => {
-                        self.load(src1, "r11")?;
+                        self.load(src1, Reg::R11)?;
                         self.push_text(Asm::Add(Operand::Reg(Reg::R10), Operand::Reg(Reg::R11)));
                         self.push_text(Asm::Mov(m_base(Reg::R10), Operand::Reg(Reg::Rax)));
                     }
@@ -454,7 +453,7 @@ impl AsmCodeGen {
                 let dst = code.dst.as_ref().unwrap();
                 let src1 = code.src1.as_ref().unwrap();
                 let src2 = code.src2.as_ref().unwrap();
-                self.load(src1, "r10")?;
+                self.load(src1, Reg::R10)?;
                 let src_op = match src2 {
                     IROperand::ConstIdx(idx) => {
                         if let IRConst::Int(offset) = &self.program.constants[*idx] {
@@ -468,7 +467,7 @@ impl AsmCodeGen {
                         }
                     }
                     _ => {
-                        self.load(src2, "r11")?;
+                        self.load(src2, Reg::R11)?;
                         self.push_text(Asm::Add(Operand::Reg(Reg::R10), Operand::Reg(Reg::R11)));
                         m_base(Reg::R10)
                     }
@@ -476,7 +475,7 @@ impl AsmCodeGen {
                 self.push_text(Asm::Mov(Operand::Reg(Reg::Rax), src_op));
                 self.store_dst(dst, Reg::Rax)?;
                 self.regs.clear();
-                self.regs.insert("rax".to_string(), Some(dst.clone()));
+                self.regs.insert(Reg::Rax, Some(dst.clone()));
                 Ok(())
             }
             Op::StrCat => {
@@ -521,12 +520,12 @@ impl AsmCodeGen {
                 self.push_text(Asm::Call(Operand::PLT("strcpy".to_string())));
                 self.store_dst(dst, Reg::R15)?;
                 self.invalidate_volatile_registers();
-                self.regs.insert("r15".to_string(), Some(dst.clone()));
+                self.regs.insert(Reg::R15, Some(dst.clone()));
                 Ok(())
             }
             Op::Return(reg) => {
                 if let Some(ref val) = code.src1 {
-                    self.load(val, &reg)?;
+                    self.load(val, parse_reg(&reg))?;
                 }
                 self.push_text(Asm::Jmp(self.ret_label.clone()));
                 Ok(())

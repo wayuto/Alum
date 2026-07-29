@@ -329,7 +329,7 @@ pub fn allocate_registers(
         program_constants,
     );
 
-    let int_pool: Vec<Reg> = vec![Reg::R12, Reg::R13, Reg::R14];
+    let int_pool: Vec<Reg> = vec![Reg::R12, Reg::R13, Reg::R14, Reg::R15];
 
     let int_intervals: Vec<Interval> = intervals
         .iter()
@@ -358,7 +358,11 @@ pub fn allocate_registers(
 
     let registers = int_registers;
 
-    let mut used_callee_saved: Vec<Reg> = registers.values().copied().collect();
+    let mut used_callee_saved: Vec<Reg> = registers
+        .values()
+        .copied()
+        .filter(|r| r.reg_id() >= 12)
+        .collect();
     used_callee_saved.sort_by_key(|r| r.reg_id());
     used_callee_saved.dedup();
 

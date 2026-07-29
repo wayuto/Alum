@@ -1,11 +1,11 @@
 $import "io.ah"
 $import "convert.ah"
 
-// Factor.ah Comparison Example
-// Compares iterative vs recursive factor.ah implementations
+// Factorial Comparison Example
+// Compares iterative vs recursive factorial implementations
 
-// Iterative factor.ah
-fun factor.ah_iterative(n: int): int {
+// Iterative factorial
+fun factorial_iterative(n: int): int {
     let result: int = 1
     let i: int = 1
     
@@ -17,24 +17,24 @@ fun factor.ah_iterative(n: int): int {
     return result
 }
 
-// Recursive factor.ah
-fun factor.ah_recursive(n: int): int {
+// Recursive factorial
+fun factorial_recursive(n: int): int {
     if n <= 1 {
         return 1
     } else {
-        return n * factor.ah_recursive(n - 1)
+        return n * factorial_recursive(n - 1)
     }
 }
 
 fun main(): int {
     let num: int = 6
-    
-    println("Factor.ah Comparison:")
+
+    println("Factorial Comparison:")
     print("Number: ")
     println(itoa(num))
-    
-    let iter_result: int = factor.ah_iterative(num)
-    let recur_result: int = factor.ah_recursive(num)
+
+    let iter_result: int = factorial_iterative(num)
+    let recur_result: int = factorial_recursive(num)
     
     print("Iterative: ")
     println(itoa(iter_result))

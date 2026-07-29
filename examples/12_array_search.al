@@ -45,23 +45,23 @@ fun main(): int {
     // Find minimum and maximum
     println("\nFinding min and max:")
 
-    let min_.ah: int = numbers[0]
-    let max_.ah: int = numbers[0]
+    let min_val: int = numbers[0]
+    let max_val: int = numbers[0]
 
     for i in 1..n {
-        if numbers[i] < min_.ah {
-            min_.ah = numbers[i]
+        if numbers[i] < min_val {
+            min_val = numbers[i]
         }
-        if numbers[i] > max_.ah {
-            max_.ah = numbers[i]
+        if numbers[i] > max_val {
+            max_val = numbers[i]
         }
     }
 
     print("Minimum: ")
-    println(itoa(min_.ah))
+    println(itoa(min_val))
 
     print("Maximum: ")
-    println(itoa(max_.ah))
+    println(itoa(max_val))
 
     return 0
 }

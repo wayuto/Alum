@@ -114,7 +114,7 @@ pub struct AsmCodeGen {
     pub(super) arg_reg: Vec<String>,
     pub(super) flt_arg_reg: Vec<String>,
     pub(super) ret_label: String,
-    pub(super) regs: HashMap<String, Option<IROperand>>,
+    pub(super) regs: HashMap<Reg, Option<IROperand>>,
     pub(super) curr_fn: String,
     pub(super) curr_flt_reg: usize,
     pub(super) internals: HashSet<String>,

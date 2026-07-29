@@ -59,8 +59,14 @@ impl AsmCodeGen {
                             if !self.spill_vars.contains_key(&temp_key)
                                 && !self.vars.contains_key(&temp_key)
                             {
-                                offset += 8;
-                                self.vars.insert(temp_key, offset);
+                                let needs_slot = match self.alloc_regs.get(&temp_key) {
+                                    Some(reg) => reg.reg_id() < 12,
+                                    None => true,
+                                };
+                                if needs_slot {
+                                    offset += 8;
+                                    self.vars.insert(temp_key, offset);
+                                }
                             }
                         }
                         _ => {}
@@ -70,6 +76,20 @@ impl AsmCodeGen {
             register_op(&inst.dst);
             register_op(&inst.src1);
             register_op(&inst.src2);
+        }
+
+        for inst in &func.instructions {
+            if matches!(inst.op, Op::StrCat) {
+                for src in [&inst.src1, &inst.src2] {
+                    if let Some(IROperand::Temp(id, _)) = src {
+                        let temp_key = format!("_tmp_{}", id);
+                        if !self.vars.contains_key(&temp_key) {
+                            offset += 8;
+                            self.vars.insert(temp_key, offset);
+                        }
+                    }
+                }
+            }
         }
 
         let frame_size = ((offset + 15) & !15).max(stack_size);
@@ -109,7 +129,7 @@ impl AsmCodeGen {
                         if *alloc_reg != arg_reg {
                             self.push_text(Asm::Movsd(Operand::Reg(*alloc_reg), Operand::Reg(arg_reg)));
                         }
-                        self.regs.insert(alloc_reg.to_string(), Some(param.clone()));
+                        self.regs.insert(*alloc_reg, Some(param.clone()));
                         flt_idx += 1;
                     }
                 } else {
@@ -118,7 +138,7 @@ impl AsmCodeGen {
                         if *alloc_reg != arg_reg {
                             self.push_text(Asm::Mov(Operand::Reg(*alloc_reg), Operand::Reg(arg_reg)));
                         }
-                        self.regs.insert(alloc_reg.to_string(), Some(param.clone()));
+                        self.regs.insert(*alloc_reg, Some(param.clone()));
                         int_idx += 1;
                     }
                 }
@@ -126,16 +146,16 @@ impl AsmCodeGen {
                 let off = self.get_offset(param)?;
                 if matches!(ty, IRType::Float) {
                     if flt_idx < 8 {
-                        let reg = format!("xmm{}", flt_idx);
-                        self.push_text(Asm::Movsd(m_rbp(off), Operand::Reg(parse_reg(&reg))));
-                        self.regs.insert(reg, Some(param.clone()));
+                        let arg_reg = parse_reg(&format!("xmm{}", flt_idx));
+                        self.push_text(Asm::Movsd(m_rbp(off), Operand::Reg(arg_reg)));
+                        self.regs.insert(arg_reg, Some(param.clone()));
                         flt_idx += 1;
                     }
                 } else {
                     if int_idx < 6 {
-                        let reg = self.arg_reg[int_idx].clone();
-                        self.push_text(Asm::Mov(m_rbp(off), Operand::Reg(parse_reg(&reg))));
-                        self.regs.insert(reg, Some(param.clone()));
+                        let arg_reg = parse_reg(&self.arg_reg[int_idx]);
+                        self.push_text(Asm::Mov(m_rbp(off), Operand::Reg(arg_reg)));
+                        self.regs.insert(arg_reg, Some(param.clone()));
                         int_idx += 1;
                     }
                 }
@@ -147,7 +167,7 @@ impl AsmCodeGen {
             match &code.op {
                 Op::Return(reg_name) => {
                     if let Some(ref val) = code.src1 {
-                        self.load(val, reg_name)?;
+                        self.load(val, parse_reg(reg_name))?;
                     }
                     self.push_text(Asm::Jmp(self.ret_label.clone()));
                 }

@@ -6,8 +6,8 @@ $import "memory.ah"
 // Demonstrates reading user input
 
 fun main(): int {
-    let name: string = .ahloc(100)
-    let age_str: string = .ahloc(100)
+    let name: string = malloc(100)
+    let age_str: string = malloc(100)
     let age: int = 0
     
     // Get user's name
@@ -19,14 +19,14 @@ fun main(): int {
     age_str = input("")
     age = atoi(age_str)
     
-    // Display perso.ahized message
+    // Display personalized message
     println("\nHello, ")
     println(name)
     print("You are ")
     print(itoa(age))
     println(" years old.")
     
-    // .ahculate age in 5 years
+    // Calculate age in 5 years
     let future_age: int = age + 5
     print("In 5 years, you will be ")
     print(itoa(future_age))

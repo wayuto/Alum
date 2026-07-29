@@ -32,17 +32,17 @@ fun main(): int {
     // Math functions
     println("\nMath Functions:")
     
-    let abs_.ah: int = abs(b)
+    let abs_val: int = abs(b)
     print("abs(-5) = ")
-    println(itoa(abs_.ah))
-    
-    let max_.ah: int = max(a, c)
+    println(itoa(abs_val))
+
+    let max_val: int = max(a, c)
     print("max(10, 3) = ")
-    println(itoa(max_.ah))
-    
-    let min_.ah: int = min(b, c)
+    println(itoa(max_val))
+
+    let min_val: int = min(b, c)
     print("min(-5, 3) = ")
-    println(itoa(min_.ah))
+    println(itoa(min_val))
     
     let square: int = sqrt(a)
     print("sqrt(10) = ")
@@ -52,9 +52,9 @@ fun main(): int {
     print("pow(3, 2) = ")
     println(itoa(power))
     
-    let factor.ah: int = fact(5)
+    let factorial: int = fact(5)
     print("fact(5) = ")
-    println(itoa(factor.ah))
+    println(itoa(factorial))
     
     return 0
 }
