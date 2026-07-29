@@ -1,6 +1,6 @@
 use super::codegen::AsmCodeGen;
 use super::codegen::{m_base, m_base_disp, m_rbp, m_rbp_q, m_sib, rel};
-use super::types::CodeGenError;
+use super::error::CodeGenError;
 use crate::compiler::codegen::asm::*;
 use crate::compiler::irgen::ir::{IRConst, IRType, Instruction, Op, Operand as IROperand};
 

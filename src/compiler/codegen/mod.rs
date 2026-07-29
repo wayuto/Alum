@@ -2,12 +2,12 @@ mod asm;
 mod codegen;
 mod compile_code;
 mod compile_fn;
+mod error;
 mod operand;
-mod types;
 
 use crate::compiler::irgen::IRGen;
 use crate::compiler::parser::Program;
-pub use types::CodeGenError;
+pub use error::CodeGenError;
 
 pub struct CodeGen {
     ast: Program,
