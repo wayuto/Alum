@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::fmt::{Display, Formatter, Result};
 
 #[derive(Debug, Clone)]
 pub enum LexerError {
@@ -19,7 +19,7 @@ pub enum LexerError {
 }
 
 impl Display for LexerError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         match self {
             LexerError::UnexpectedChar {
                 expected,

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Span {
     pub line: usize,
@@ -12,14 +14,14 @@ impl Span {
 
 #[derive(Debug, Clone)]
 pub struct SourceMap {
-    pub files: std::collections::HashMap<String, String>,
+    pub files: HashMap<String, String>,
     out_to_src: Vec<(String, usize)>,
 }
 
 impl SourceMap {
     pub fn new() -> Self {
         SourceMap {
-            files: std::collections::HashMap::new(),
+            files: HashMap::new(),
             out_to_src: vec![],
         }
     }

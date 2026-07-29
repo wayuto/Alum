@@ -2,7 +2,7 @@ use crate::compiler::{
     Span,
     lexer::{LexerError, Token},
 };
-use std::fmt::Display;
+use std::fmt::{Display, Formatter, Result};
 
 #[derive(Debug)]
 pub enum ParserError {
@@ -15,7 +15,7 @@ pub enum ParserError {
 }
 
 impl Display for ParserError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         match self {
             ParserError::UnexpectedToken {
                 expected,

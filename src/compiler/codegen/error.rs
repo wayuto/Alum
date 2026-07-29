@@ -1,5 +1,5 @@
 use crate::compiler::Span;
-use std::fmt::Display;
+use std::fmt::{Display, Formatter, Result};
 
 #[derive(Debug, Clone)]
 pub enum CodeGenError {
@@ -16,7 +16,7 @@ pub enum CodeGenError {
 }
 
 impl Display for CodeGenError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         match self {
             CodeGenError::UndefinedVariable { name, .. } => {
                 write!(f, "Undefined variable: '{}'", name)

@@ -1,30 +1,32 @@
 mod cli;
 mod compiler;
 
+use crate::compiler::CompilerError;
 use clap::Parser;
 use cli::{
     build::DEFAULT_STD_LIB_PATH,
     link::{create_shared_library, create_static_library, link},
     {Cli, build, exec_run},
 };
+use std::{error::Error, process::exit};
 
 fn main() {
     if let Err(e) = run() {
-        if let Some(ce) = e.downcast_ref::<compiler::CompilerError>() {
+        if let Some(ce) = e.downcast_ref::<CompilerError>() {
             eprint!("{}", ce.diagnose());
         } else {
             eprintln!("Error: {}", e);
         }
-        std::process::exit(1);
+        exit(1);
     }
 }
 
-fn run() -> Result<(), Box<dyn std::error::Error>> {
+fn run() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
 
     if cli.input.is_empty() {
         eprintln!("Error: No input files specified");
-        std::process::exit(1);
+        exit(1);
     }
 
     if cli.run {
@@ -52,7 +54,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             None
         };
 
-        let obj_file = build::build(
+        let obj_file = build(
             input.clone(),
             cli.ast,
             obj_output,

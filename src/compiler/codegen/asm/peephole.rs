@@ -1,5 +1,5 @@
 use super::types::*;
-use std::collections::HashSet;
+use std::{collections::HashSet, iter::once};
 
 pub fn optimize(asms: &mut Vec<Asm>) {
     loop {
@@ -30,10 +30,7 @@ fn pass_mov_imm_to_mem_merge(asms: &mut Vec<Asm>) -> bool {
                 Asm::Mov(Operand::Reg(r1), Operand::Imm(v)),
                 Asm::Mov(Operand::Mem(m), Operand::Reg(r2)),
             ) if r1 == r2 && !register_is_used_after(asms, i + 2, r1) => {
-                asms.splice(
-                    i..i + 2,
-                    std::iter::once(Asm::Mov(Operand::Mem(m), Operand::Imm(v))),
-                );
+                asms.splice(i..i + 2, once(Asm::Mov(Operand::Mem(m), Operand::Imm(v))));
                 changed = true;
                 continue;
             }
