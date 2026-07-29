@@ -21,6 +21,9 @@ pub(super) fn parse_reg(s: &str) -> Reg {
         "r9" => Reg::R9,
         "r10" => Reg::R10,
         "r11" => Reg::R11,
+        "r12" => Reg::R12,
+        "r13" => Reg::R13,
+        "r14" => Reg::R14,
         "r15" => Reg::R15,
         "rsp" => Reg::Rsp,
         "rbp" => Reg::Rbp,
@@ -103,6 +106,8 @@ pub struct AsmCodeGen {
     pub(super) text_asms: Vec<Asm>,
     pub(super) data_asms: Vec<Asm>,
     pub(super) vars: HashMap<String, usize>,
+    pub(super) alloc_regs: HashMap<String, Reg>,
+    pub(super) spill_vars: HashMap<String, usize>,
     pub(super) lbl_cnt: usize,
     pub(super) str_cache: HashMap<String, String>,
     pub(super) flt_cache: HashMap<OrderedFloat<f64>, String>,
@@ -113,6 +118,7 @@ pub struct AsmCodeGen {
     pub(super) curr_fn: String,
     pub(super) curr_flt_reg: usize,
     pub(super) internals: HashSet<String>,
+    pub(super) used_callee_saved: Vec<Reg>,
 }
 
 impl AsmCodeGen {
@@ -128,6 +134,8 @@ impl AsmCodeGen {
             text_asms: Vec::new(),
             data_asms: Vec::new(),
             vars: HashMap::new(),
+            alloc_regs: HashMap::new(),
+            spill_vars: HashMap::new(),
             lbl_cnt: 0,
             str_cache: HashMap::new(),
             flt_cache: HashMap::new(),
@@ -162,6 +170,7 @@ impl AsmCodeGen {
             curr_fn: String::new(),
             curr_flt_reg: 0,
             internals,
+            used_callee_saved: Vec::new(),
         }
     }
 

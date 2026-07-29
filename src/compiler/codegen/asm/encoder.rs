@@ -236,9 +236,6 @@ impl Assembler {
             Ret => {
                 self.emit_slice(section, &[0xc3]);
             }
-            Leave => {
-                self.emit_slice(section, &[0xc9]);
-            }
             Jmp(lbl) => {
                 self.emit_slice(section, &[0xe9]);
                 self.emit_reloc(section, RelocKind::Pc32, lbl.clone(), -4);
@@ -458,10 +455,10 @@ impl Assembler {
     ) -> Result<(), String> {
         match src {
             Operand::Reg(s) => {
-                self.emit_rex(section, true, s.rex_b(), false, r.rex_b());
+                self.emit_rex(section, true, r.rex_b(), false, s.rex_b());
                 self.emit_slice(
                     section,
-                    &[0x0f, 0xaf, self.modrm(3, s.reg_id() & 7, r.reg_id() & 7)],
+                    &[0x0f, 0xaf, self.modrm(3, r.reg_id() & 7, s.reg_id() & 7)],
                 );
             }
             Operand::Mem(m) => {

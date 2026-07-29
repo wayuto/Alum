@@ -6,13 +6,63 @@ use crate::compiler::{
 };
 use ordered_float::OrderedFloat;
 
+fn key(op: &IROperand) -> String {
+    match op {
+        IROperand::Var(name) => name.clone(),
+        IROperand::Temp(id, _) => format!("_tmp_{}", id),
+        _ => panic!("unsupported operand key: {:?}", op),
+    }
+}
+
 impl AsmCodeGen {
-    pub(super) fn load2temp(&self, op: &IROperand) -> Result<usize, CodeGenError> {
+    pub(super) fn load2temp(&mut self, op: &IROperand) -> Result<usize, CodeGenError> {
         match op {
-            IROperand::Var(_) | IROperand::Temp(_, _) => self.get_offset(op),
+            IROperand::Var(_) | IROperand::Temp(_, _) => {
+                let k = key(op);
+                if let Some(reg) = self.alloc_regs.get(&k) {
+                    let off = self.get_offset(op)?;
+                    self.push_text(Asm::Mov(m_rbp(off), Operand::Reg(*reg)));
+                }
+                self.get_offset(op)
+            }
             _ => Err(CodeGenError::InvalidOperand {
                 message: "load2temp not supported".to_string(),
             }),
+        }
+    }
+
+    pub(super) fn get_location(&mut self, op: &IROperand) -> Result<Operand, CodeGenError> {
+        match op {
+            IROperand::ConstIdx(idx) => {
+                let constant = &self.program.constants[*idx];
+                match constant {
+                    IRConst::Int(v) => Ok(Operand::Imm(*v)),
+                    IRConst::Float(f) => {
+                        let lbl = self.alloc_flt(*f);
+                        Ok(rel(lbl))
+                    }
+                    IRConst::Str(s) => {
+                        let lbl = self.alloc_str(s.clone());
+                        Ok(rel(lbl))
+                    }
+                    IRConst::Array(_, _) => Err(CodeGenError::InvalidOperand {
+                        message: "array constant as location".to_string(),
+                    }),
+                }
+            }
+            IROperand::Var(_) | IROperand::Temp(_, _) => {
+                let k = key(op);
+                if let Some(reg) = self.alloc_regs.get(&k) {
+                    Ok(Operand::Reg(*reg))
+                } else if let Some(off) = self.spill_vars.get(&k) {
+                    Ok(m_rbp_q(*off))
+                } else {
+                    let off = self.get_offset(op)?;
+                    Ok(m_rbp_q(off))
+                }
+            }
+            IROperand::Function(name) => Ok(rel(name.clone())),
+            IROperand::Label(name) => Ok(Operand::Label(name.clone())),
         }
     }
 
@@ -25,6 +75,7 @@ impl AsmCodeGen {
 
         let dst_reg = parse_reg(reg);
         let is_xmm = dst_reg.is_xmm();
+
         if let Some((src_reg, _)) = self.regs.iter().find(|(src, cached_op)| {
             *src != reg && cached_op.as_ref() == Some(op) && parse_reg(src).is_xmm() == is_xmm
         }) {
@@ -36,6 +87,23 @@ impl AsmCodeGen {
             }
             self.regs.insert(reg.to_string(), Some(op.clone()));
             return Ok(());
+        }
+
+        if matches!(op, IROperand::Var(_) | IROperand::Temp(_, _)) {
+            let k = key(op);
+            if let Some(alloc_reg) = self.alloc_regs.get(&k) {
+                if *alloc_reg == dst_reg {
+                    self.regs.insert(reg.to_string(), Some(op.clone()));
+                    return Ok(());
+                }
+                if is_xmm {
+                    self.push_text(Asm::Movsd(Operand::Reg(dst_reg), Operand::Reg(*alloc_reg)));
+                } else {
+                    self.push_text(Asm::Mov(Operand::Reg(dst_reg), Operand::Reg(*alloc_reg)));
+                }
+                self.regs.insert(reg.to_string(), Some(op.clone()));
+                return Ok(());
+            }
         }
 
         match op {
@@ -102,7 +170,7 @@ impl AsmCodeGen {
     }
 
     pub(super) fn invalidate_caller_saved_xmm(&mut self) {
-        for i in 0..16 {
+        for i in 0..8 {
             self.invalidate_cached_reg(&format!("xmm{}", i));
         }
     }
@@ -113,6 +181,16 @@ impl AsmCodeGen {
     }
 
     pub(super) fn store_dst(&mut self, dst: &IROperand, reg: Reg) -> Result<(), CodeGenError> {
+        let k = key(dst);
+        let alloc_reg = self.alloc_regs.get(&k).copied();
+        if let Some(alloc_reg) = alloc_reg {
+            self.invalidate_cached_operand(dst, Some(alloc_reg.to_string().as_str()));
+            if alloc_reg != reg {
+                self.push_text(Asm::Mov(Operand::Reg(alloc_reg), Operand::Reg(reg)));
+            }
+            self.regs.insert(alloc_reg.to_string(), Some(dst.clone()));
+            return Ok(());
+        }
         self.invalidate_cached_operand(dst, Some(reg.to_string().as_str()));
         self.push_text(Asm::Mov(m_rbp(self.get_offset(dst)?), Operand::Reg(reg)));
         self.regs.insert(reg.to_string(), Some(dst.clone()));
@@ -120,6 +198,16 @@ impl AsmCodeGen {
     }
 
     pub(super) fn store_dst_xmm(&mut self, dst: &IROperand, reg: Reg) -> Result<(), CodeGenError> {
+        let k = key(dst);
+        let alloc_reg = self.alloc_regs.get(&k).copied();
+        if let Some(alloc_reg) = alloc_reg {
+            self.invalidate_cached_operand(dst, Some(alloc_reg.to_string().as_str()));
+            if alloc_reg != reg {
+                self.push_text(Asm::Movsd(Operand::Reg(alloc_reg), Operand::Reg(reg)));
+            }
+            self.regs.insert(alloc_reg.to_string(), Some(dst.clone()));
+            return Ok(());
+        }
         self.invalidate_cached_operand(dst, Some(reg.to_string().as_str()));
         self.push_text(Asm::Movsd(m_rbp(self.get_offset(dst)?), Operand::Reg(reg)));
         self.regs.insert(reg.to_string(), Some(dst.clone()));
@@ -166,6 +254,10 @@ impl AsmCodeGen {
     }
 
     pub(super) fn get_offset(&self, op: &IROperand) -> Result<usize, CodeGenError> {
+        let k = key(op);
+        if let Some(off) = self.spill_vars.get(&k) {
+            return Ok(*off);
+        }
         match op {
             IROperand::Var(name) => self
                 .vars

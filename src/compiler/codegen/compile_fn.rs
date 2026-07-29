@@ -1,9 +1,18 @@
 use super::codegen::{AsmCodeGen, m_rbp, parse_reg};
 use super::error::CodeGenError;
+use super::regalloc;
 use crate::compiler::{
     codegen::asm::*,
     irgen::ir::{IRFunction, IRType, Op, Operand as IROperand},
 };
+
+fn key(op: &IROperand) -> String {
+    match op {
+        IROperand::Var(name) => name.clone(),
+        IROperand::Temp(id, _) => format!("_tmp_{}", id),
+        _ => panic!("unsupported operand key: {:?}", op),
+    }
+}
 
 impl AsmCodeGen {
     pub(super) fn compile_fn(&mut self, func: IRFunction) -> Result<(), CodeGenError> {
@@ -13,15 +22,26 @@ impl AsmCodeGen {
         }
 
         self.vars.clear();
+        self.alloc_regs.clear();
+        self.spill_vars.clear();
         self.regs.clear();
-        let mut offset = 0;
 
+        let alloc = regalloc::allocate_registers(&func, &self.program.constants);
+        self.alloc_regs = alloc.registers;
+        self.spill_vars = alloc.spill_offsets;
+        self.used_callee_saved = alloc.used_callee_saved;
+        let stack_size = alloc.stack_size;
+
+        let mut offset = stack_size;
         for (param, _) in &func.params {
-            if let IROperand::Var(name) = param {
-                if !self.vars.contains_key(name) {
-                    offset += 8;
-                    self.vars.insert(name.clone(), offset);
+            match param {
+                IROperand::Var(name) => {
+                    if !self.vars.contains_key(name) {
+                        offset += 8;
+                        self.vars.insert(name.clone(), offset);
+                    }
                 }
+                _ => {}
             }
         }
         for inst in &func.instructions {
@@ -36,7 +56,9 @@ impl AsmCodeGen {
                         }
                         IROperand::Temp(id, _) => {
                             let temp_key = format!("_tmp_{}", id);
-                            if !self.vars.contains_key(&temp_key) {
+                            if !self.spill_vars.contains_key(&temp_key)
+                                && !self.vars.contains_key(&temp_key)
+                            {
                                 offset += 8;
                                 self.vars.insert(temp_key, offset);
                             }
@@ -50,40 +72,72 @@ impl AsmCodeGen {
             register_op(&inst.src2);
         }
 
-        let stack_size = (offset + 15) & !15;
+        let frame_size = ((offset + 15) & !15).max(stack_size);
+        let final_stack_size = if frame_size > 0 {
+            (frame_size + 15) & !15
+        } else {
+            0
+        };
+
         if func.is_pub {
             self.push_text(Asm::Global(func.name.clone()));
         }
         self.push_text(Asm::Label(func.name.clone()));
         self.push_text(Asm::Push(Reg::Rbp));
+        let used_regs = self.used_callee_saved.clone();
+        for reg in &used_regs {
+            self.push_text(Asm::Push(*reg));
+        }
         self.push_text(Asm::Mov(Operand::Reg(Reg::Rbp), Operand::Reg(Reg::Rsp)));
-        if stack_size > 0 {
-            self.push_text(Asm::Sub(
-                Operand::Reg(Reg::Rsp),
-                Operand::Imm(stack_size as i64),
-            ));
+
+        if final_stack_size > 0 {
+            self.push_text(Asm::Sub(Operand::Reg(Reg::Rsp), Operand::Imm(final_stack_size as i64)));
         }
 
         self.curr_fn = func.name.clone();
         self.ret_label = format!(".L_{}_exit", func.name);
 
+        let alloc_regs = self.alloc_regs.clone();
         let mut int_idx = 0;
         let mut flt_idx = 0;
         for (param, ty) in &func.params {
-            let off = self.get_offset(param)?;
-            if matches!(ty, IRType::Float) {
-                if flt_idx < 8 {
-                    let reg = format!("xmm{}", flt_idx);
-                    self.push_text(Asm::Movsd(m_rbp(off), Operand::Reg(parse_reg(&reg))));
-                    self.regs.insert(reg, Some(param.clone()));
-                    flt_idx += 1;
+            let k = key(param);
+            if let Some(alloc_reg) = alloc_regs.get(&k) {
+                if matches!(ty, IRType::Float) {
+                    if flt_idx < 8 {
+                        let arg_reg = parse_reg(&format!("xmm{}", flt_idx));
+                        if *alloc_reg != arg_reg {
+                            self.push_text(Asm::Movsd(Operand::Reg(*alloc_reg), Operand::Reg(arg_reg)));
+                        }
+                        self.regs.insert(alloc_reg.to_string(), Some(param.clone()));
+                        flt_idx += 1;
+                    }
+                } else {
+                    if int_idx < 6 {
+                        let arg_reg = parse_reg(&self.arg_reg[int_idx]);
+                        if *alloc_reg != arg_reg {
+                            self.push_text(Asm::Mov(Operand::Reg(*alloc_reg), Operand::Reg(arg_reg)));
+                        }
+                        self.regs.insert(alloc_reg.to_string(), Some(param.clone()));
+                        int_idx += 1;
+                    }
                 }
             } else {
-                if int_idx < 6 {
-                    let reg = self.arg_reg[int_idx].clone();
-                    self.push_text(Asm::Mov(m_rbp(off), Operand::Reg(parse_reg(&reg))));
-                    self.regs.insert(reg, Some(param.clone()));
-                    int_idx += 1;
+                let off = self.get_offset(param)?;
+                if matches!(ty, IRType::Float) {
+                    if flt_idx < 8 {
+                        let reg = format!("xmm{}", flt_idx);
+                        self.push_text(Asm::Movsd(m_rbp(off), Operand::Reg(parse_reg(&reg))));
+                        self.regs.insert(reg, Some(param.clone()));
+                        flt_idx += 1;
+                    }
+                } else {
+                    if int_idx < 6 {
+                        let reg = self.arg_reg[int_idx].clone();
+                        self.push_text(Asm::Mov(m_rbp(off), Operand::Reg(parse_reg(&reg))));
+                        self.regs.insert(reg, Some(param.clone()));
+                        int_idx += 1;
+                    }
                 }
             }
         }
@@ -108,7 +162,12 @@ impl AsmCodeGen {
         }
 
         self.push_text(Asm::Label(self.ret_label.clone()));
-        self.push_text(Asm::Leave);
+        self.push_text(Asm::Mov(Operand::Reg(Reg::Rsp), Operand::Reg(Reg::Rbp)));
+        let used_regs_rev: Vec<Reg> = self.used_callee_saved.iter().rev().copied().collect();
+        for reg in &used_regs_rev {
+            self.push_text(Asm::Pop(*reg));
+        }
+        self.push_text(Asm::Pop(Reg::Rbp));
         self.push_text(Asm::Ret);
         Ok(())
     }

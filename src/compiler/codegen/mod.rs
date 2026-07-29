@@ -4,6 +4,7 @@ mod compile_code;
 mod compile_fn;
 mod error;
 mod operand;
+mod regalloc;
 
 pub use error::CodeGenError;
 

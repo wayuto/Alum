@@ -12,6 +12,9 @@ pub enum Reg {
     R9,
     R10,
     R11,
+    R12,
+    R13,
+    R14,
     R15,
     Rsp,
     Rbp,
@@ -46,6 +49,9 @@ impl fmt::Display for Reg {
             Reg::R9 => write!(f, "r9"),
             Reg::R10 => write!(f, "r10"),
             Reg::R11 => write!(f, "r11"),
+            Reg::R12 => write!(f, "r12"),
+            Reg::R13 => write!(f, "r13"),
+            Reg::R14 => write!(f, "r14"),
             Reg::R15 => write!(f, "r15"),
             Reg::Rsp => write!(f, "rsp"),
             Reg::Rbp => write!(f, "rbp"),
@@ -106,6 +112,9 @@ impl Reg {
             Reg::R9 => 9,
             Reg::R10 => 10,
             Reg::R11 => 11,
+            Reg::R12 => 12,
+            Reg::R13 => 13,
+            Reg::R14 => 14,
             Reg::R15 => 15,
             Reg::Xmm0 => 0,
             Reg::Xmm1 => 1,
@@ -127,7 +136,7 @@ impl Reg {
     }
 
     pub fn rex_b(self) -> bool {
-        matches!(self, Reg::R8 | Reg::R9 | Reg::R10 | Reg::R11 | Reg::R15)
+        matches!(self, Reg::R8 | Reg::R9 | Reg::R10 | Reg::R11 | Reg::R12 | Reg::R13 | Reg::R14 | Reg::R15)
     }
 }
 
@@ -191,7 +200,6 @@ pub enum Asm {
     Pop(Reg),
     Call(Operand),
     Ret,
-    Leave,
     Jmp(String),
     Je(String),
     Jge(String),
