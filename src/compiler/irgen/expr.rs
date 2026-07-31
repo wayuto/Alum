@@ -1392,7 +1392,7 @@ impl IRGen {
                 if Some(fname.as_str()) == field_name.as_deref() {
                     let byte = match ftype {
                         Type::Primitive(Primitive::String) => true,
-                        Type::Array(elem) => false,
+                        Type::Array(_elem) => false,
                         Type::Pointer(inner) => Self::ptr_scale(&inner) == 1,
                         _ => false,
                     };
