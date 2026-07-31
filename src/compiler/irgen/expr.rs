@@ -989,7 +989,7 @@ impl IRGen {
                         });
                     }
                 };
-                let (elem_type, byte) = self.index_info(&arr, ctx);
+                let (_elem_type, byte) = self.index_info(&arr, ctx);
                 let arr_op = self.compile_expr(*arr, ctx)?;
                 let offset = self.compile_expr(*idx, ctx)?;
                 let val = self.compile_expr(*value, ctx)?;
@@ -1315,39 +1315,6 @@ impl IRGen {
         IRType::Int
     }
 
-    fn ptr_arith_scale(&self, op: &Op, l: &Expr, r: &Expr, ctx: &Context) -> Option<(usize, bool)> {
-        if !matches!(op, Op::Add | Op::Sub) {
-            return None;
-        }
-        let int_like = |e: &Expr| match e {
-            Expr::Int(_, _) => true,
-            _ => matches!(
-                self.expr_high_type(e, ctx),
-                Some(Type::Primitive(Primitive::Int))
-            ),
-        };
-        let pointee_of = |e: &Expr| -> Option<Type> {
-            match self.expr_high_type(e, ctx) {
-                Some(Type::Pointer(inner)) => Some(*inner),
-                _ => None,
-            }
-        };
-
-        if let Some(pointee) = pointee_of(l) {
-            if int_like(r) {
-                return Some((Self::ptr_scale(&pointee), true));
-            }
-        }
-        if *op == Op::Add {
-            if let Some(pointee) = pointee_of(r) {
-                if int_like(l) {
-                    return Some((Self::ptr_scale(&pointee), false));
-                }
-            }
-        }
-        None
-    }
-
     fn ptr_scale(ty: &Type) -> usize {
         match ty {
             Type::Primitive(Primitive::Void) => 1,
@@ -1391,6 +1358,7 @@ impl IRGen {
                     return (Some(*inner.clone()), Self::ptr_scale(inner) == 1);
                 }
                 Some(Type::Struct(sname, ta)) => (sname.clone(), ta.clone(), None),
+                #[allow(warnings)]
                 Some(Type::Pointer(box_ty)) => {
                     if let Type::Struct(sname, ta) = box_ty.as_ref() {
                         (sname.clone(), ta.clone(), None)
@@ -1424,10 +1392,7 @@ impl IRGen {
                 if Some(fname.as_str()) == field_name.as_deref() {
                     let byte = match ftype {
                         Type::Primitive(Primitive::String) => true,
-                        Type::Array(elem) => {
-                            let concrete = elem.substitute(&type_args);
-                            false
-                        }
+                        Type::Array(elem) => false,
                         Type::Pointer(inner) => Self::ptr_scale(&inner) == 1,
                         _ => false,
                     };
