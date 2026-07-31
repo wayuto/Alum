@@ -3,7 +3,7 @@ $import "convert.ah"
 $import "helper.ah"
 
 // Alum/C Mixed Programming Example
-// Demonstrates .ahling C functions from Alum
+// Demonstrates calling C functions from Alum
 
 fun main(): int {
     let sum: int = c_add(10, 20)
@@ -14,9 +14,9 @@ fun main(): int {
     print("c_multiply(5, 6) = ")
     println(itoa(product))
     
-    let factor.ah: int = c_.ahculate_factor.ah(5)
-    print("c_.ahculate_factor.ah(5) = ")
-    println(itoa(factor.ah))
+    let factorial: int = c_calculate_factorial(5)
+    print("c_calculate_factorial(5) = ")
+    println(itoa(factorial))
     
     return 0
 }

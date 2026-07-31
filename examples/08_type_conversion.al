@@ -50,7 +50,7 @@ fun main(): int {
     print("\" as float: ")
     println(ftoa(parsed_float))
     
-    // Arithmetic on converted .ahues
+    // Arithmetic on converted values
     let sum: int = parsed_int + parsed_int
     print("Sum of parsed integers: ")
     println(itoa(sum))

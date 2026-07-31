@@ -270,16 +270,22 @@ impl Expr {
                 val.fmt_with_indent(f, indent + 1)?;
                 write!(f, "\n{})", indent_str)
             }
-            Expr::FuncDecl(name, params, ret_type, body, _) => {
+            Expr::FuncDecl(name, type_params, params, ret_type, body, _) => {
                 let param_str: Vec<String> = params
                     .iter()
                     .map(|(n, t)| format!("{}: {}", n, t))
                     .collect();
+                let tp_str = if type_params.is_empty() {
+                    String::new()
+                } else {
+                    format!("<{}>", type_params.join(", "))
+                };
                 write!(
                     f,
-                    "{}FuncDecl(\"{}\" ({}) -> {}",
+                    "{}FuncDecl(\"{}{}\" ({}) -> {}",
                     indent_str,
                     name,
+                    tp_str,
                     param_str.join(", "),
                     ret_type
                 )?;
@@ -301,7 +307,7 @@ impl Expr {
                     ret_type
                 )
             }
-            Expr::Call(func, args, _) => {
+            Expr::Call(func, _, args, _) => {
                 write!(f, "{}Call(", indent_str)?;
                 write!(f, "\n")?;
                 func.fmt_with_indent(f, indent + 1)?;
@@ -396,21 +402,33 @@ impl Expr {
                 write!(f, "\n{})", indent_str)
             }
             Expr::TypeDef(_) => write!(f, "{}TypeDef", indent_str),
-            Expr::Struct(name, fields, _) => {
+            Expr::Struct(name, type_params, fields, _) => {
                 let field_str: Vec<String> = fields
                     .iter()
                     .map(|(n, t)| format!("{}: {}", n, t))
                     .collect();
+                let tp_str = if type_params.is_empty() {
+                    String::new()
+                } else {
+                    format!("<{}>", type_params.join(", "))
+                };
                 write!(
                     f,
-                    "{}Struct(\"{}\" {{ {} }})",
+                    "{}Struct(\"{}{}\" {{ {} }})",
                     indent_str,
                     name,
+                    tp_str,
                     field_str.join(", ")
                 )
             }
-            Expr::StructLiteral(name, fields, _) => {
-                write!(f, "{}StructLiteral(\"{}\" {{", indent_str, name)?;
+            Expr::StructLiteral(name, type_args, fields, _) => {
+                let ta_str = if type_args.is_empty() {
+                    String::new()
+                } else {
+                    let args: Vec<String> = type_args.iter().map(|t| t.to_string()).collect();
+                    format!("<{}>", args.join(", "))
+                };
+                write!(f, "{}StructLiteral(\"{}{}\" {{", indent_str, name, ta_str)?;
                 for (i, (fname, fval)) in fields.iter().enumerate() {
                     write!(f, "\n  {}{}: ", indent_str, fname)?;
                     write!(f, "\n")?;

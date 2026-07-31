@@ -11,20 +11,47 @@ impl TypeChecker {
                     ty.clone()
                 }
             }
-            Type::Array(inner, len) => Type::Array(Box::new(self.resolve_type_var(inner)), *len),
+            Type::Array(inner) => Type::Array(Box::new(self.resolve_type_var(inner))),
+            Type::Pointer(inner) => Type::Pointer(Box::new(self.resolve_type_var(inner))),
             Type::Function(params, ret) => Type::Function(
-                params
-                    .iter()
-                    .map(|p| Box::new(self.resolve_type_var(p)))
-                    .collect(),
+                params.iter().map(|p| self.resolve_type_var(p)).collect(),
                 Box::new(self.resolve_type_var(ret)),
+            ),
+            Type::Struct(name, args) => Type::Struct(
+                name.clone(),
+                args.iter().map(|t| self.resolve_type_var(t)).collect(),
             ),
             _ => ty.clone(),
         }
     }
 
+    pub(super) fn occurs_check(&self, var_id: usize, ty: &Type) -> bool {
+        match ty {
+            Type::TypeVar(id) => {
+                if *id == var_id {
+                    return true;
+                }
+                match self.type_bindings.get(id) {
+                    Some(bound) => self.occurs_check(var_id, bound),
+                    None => false,
+                }
+            }
+            Type::Array(inner) => self.occurs_check(var_id, inner),
+            Type::Pointer(inner) => self.occurs_check(var_id, inner),
+            Type::Function(params, ret) => {
+                params.iter().any(|p| self.occurs_check(var_id, p))
+                    || self.occurs_check(var_id, ret)
+            }
+            Type::Struct(_, args) => args.iter().any(|t| self.occurs_check(var_id, t)),
+            _ => false,
+        }
+    }
+
     pub(super) fn bind_type_var(&mut self, var_id: usize, ty: &Type) {
         let resolved_ty = self.resolve_type_var(ty);
+        if self.occurs_check(var_id, &resolved_ty) {
+            return;
+        }
         self.type_bindings.insert(var_id, resolved_ty);
     }
 
@@ -41,18 +68,11 @@ impl TypeChecker {
                 self.bind_type_var(*id, &t1);
                 Ok(())
             }
-            (Type::Named(n1), Type::Named(n2)) if n1 == n2 => Ok(()),
-            (Type::Array(a1, len1), Type::Array(a2, len2)) => {
-                if *len1 != 0 && *len2 != 0 && len1 != len2 {
-                    return Err(CheckerError::TypeMismatch {
-                        expected: t1.clone(),
-                        found: t2.clone(),
-                        context: "array length mismatch".to_string(),
-                        span: Span::new(0, 0),
-                    });
-                }
-                self.unify_types(a1, a2)
-            }
+            (Type::Param(p1), Type::Param(p2)) if p1 == p2 => Ok(()),
+            (Type::Primitive(p1), Type::Primitive(p2)) if p1 == p2 => Ok(()),
+            (Type::Pointer(p), Type::Array(a)) => self.unify_types(p, a),
+            (Type::Array(a), Type::Pointer(p)) => self.unify_types(p, a),
+            (Type::Array(a1), Type::Array(a2)) => self.unify_types(a1, a2),
             (Type::Pointer(p1), Type::Pointer(p2)) => self.unify_types(p1, p2),
             (Type::Function(p1, r1), Type::Function(p2, r2)) => {
                 if p1.len() != p2.len() {
@@ -68,8 +88,12 @@ impl TypeChecker {
                 }
                 self.unify_types(r1, r2)
             }
-            (Type::Named(n), _) if n == "T" => Ok(()),
-            (_, Type::Named(n)) if n == "T" => Ok(()),
+            (Type::Struct(n1, a1), Type::Struct(n2, a2)) if n1 == n2 && a1.len() == a2.len() => {
+                for (t1, t2) in a1.iter().zip(a2.iter()) {
+                    self.unify_types(t1, t2)?;
+                }
+                Ok(())
+            }
             _ => Err(CheckerError::TypeMismatch {
                 expected: t1,
                 found: t2,

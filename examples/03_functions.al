@@ -2,7 +2,7 @@ $import "io.ah"
 $import "convert.ah"
 
 // Functions Example
-// Demonstrates function definitions and .ahls
+// Demonstrates function definitions and calls
 
 // Function that adds two integers
 fun add(a: int, b: int): int {
@@ -23,7 +23,7 @@ fun get_max(a: int, b: int): int {
     }
 }
 
-// Function with no return .ahue
+// Function with no return value
 fun greet(name: string): void {
     print("Hello, ")
     println(name)

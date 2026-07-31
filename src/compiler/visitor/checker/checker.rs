@@ -1,43 +1,114 @@
 use super::error::CheckerError;
 use crate::compiler::{
-    parser::{Expr, Program, Type},
+    parser::{Expr, Primitive, Program, Type},
     visitor::TypeChecker,
 };
 use std::collections::HashMap;
 
 impl TypeChecker {
-    pub fn new() -> Self {
-        Self {
-            type_stack: vec![HashMap::new()],
-            functions: HashMap::new(),
-            structs: HashMap::new(),
-            typedefs: HashMap::new(),
-            type_var_counter: 0,
-            type_bindings: HashMap::new(),
-        }
-    }
-
     pub(super) fn new_type_var(&mut self) -> Type {
         let id = self.type_var_counter;
         self.type_var_counter += 1;
         Type::TypeVar(id)
     }
 
+    pub(super) fn fresh_instantiate(
+        &mut self,
+        ty: &Type,
+        subst: &mut HashMap<usize, Type>,
+    ) -> Type {
+        match ty {
+            Type::Param(id) | Type::TypeVar(id) => subst
+                .entry(*id)
+                .or_insert_with(|| self.new_type_var())
+                .clone(),
+            Type::Array(inner) => Type::Array(Box::new(self.fresh_instantiate(inner, subst))),
+            Type::Pointer(inner) => Type::Pointer(Box::new(self.fresh_instantiate(inner, subst))),
+            Type::Function(params, ret) => Type::Function(
+                params
+                    .iter()
+                    .map(|p| self.fresh_instantiate(p, subst))
+                    .collect(),
+                Box::new(self.fresh_instantiate(ret, subst)),
+            ),
+            Type::Struct(name, args) => Type::Struct(
+                name.clone(),
+                args.iter()
+                    .map(|t| self.fresh_instantiate(t, subst))
+                    .collect(),
+            ),
+            _ => ty.clone(),
+        }
+    }
+
+    pub(super) fn fresh_instantiate_signature(
+        &mut self,
+        params: &[Type],
+        ret_type: &Type,
+    ) -> (Vec<Type>, Type) {
+        let mut subst = HashMap::new();
+        let resolved_params: Vec<Type> = params
+            .iter()
+            .map(|t| self.fresh_instantiate(t, &mut subst))
+            .collect();
+        let resolved_ret = self.fresh_instantiate(ret_type, &mut subst);
+        (resolved_params, resolved_ret)
+    }
+
+    pub(super) fn push_generic_params(&mut self, count: usize) {
+        let mut scope = HashMap::new();
+        for i in 0..count {
+            scope.insert(i, self.new_type_var());
+        }
+        self.generic_params.push(scope);
+    }
+
+    pub(super) fn pop_generic_params(&mut self) {
+        self.generic_params.pop();
+    }
+
+    pub(super) fn resolve_params(&self, ty: &Type) -> Type {
+        match ty {
+            Type::Param(id) => {
+                if let Some(scope) = self.generic_params.last() {
+                    if let Some(tv) = scope.get(id) {
+                        return tv.clone();
+                    }
+                }
+                ty.clone()
+            }
+            Type::Array(inner) => Type::Array(Box::new(self.resolve_params(inner))),
+            Type::Pointer(inner) => Type::Pointer(Box::new(self.resolve_params(inner))),
+            Type::Function(params, ret) => Type::Function(
+                params.iter().map(|p| self.resolve_params(p)).collect(),
+                Box::new(self.resolve_params(ret)),
+            ),
+            Type::Struct(name, args) => Type::Struct(
+                name.clone(),
+                args.iter().map(|t| self.resolve_params(t)).collect(),
+            ),
+            _ => ty.clone(),
+        }
+    }
+
     pub fn check(mut self, program: &mut Program) -> Result<(), CheckerError> {
         for expr in &program.body {
             match expr {
-                Expr::FuncDecl(name, params, ret_type, _, _) => {
+                Expr::FuncDecl(name, type_params, params, ret_type, _, _) => {
                     let param_types: Vec<Type> = params.iter().map(|(_, t)| t.clone()).collect();
-                    self.functions
-                        .insert(name.clone(), (param_types, ret_type.clone()));
+                    self.functions.insert(
+                        name.clone(),
+                        (type_params.clone(), param_types, ret_type.clone()),
+                    );
                 }
                 Expr::Extern(name, params, ret_type, _) => {
                     let param_types: Vec<Type> = params.iter().map(|(_, t)| t.clone()).collect();
                     self.functions
-                        .insert(name.clone(), (param_types, ret_type.clone()));
+                        .insert(name.clone(), (Vec::new(), param_types, ret_type.clone()));
                 }
-                Expr::Struct(name, fields, _) => {
-                    self.structs.insert(name.clone(), fields.clone());
+                Expr::Struct(name, type_params, fields, _) => {
+                    self.structs
+                        .insert(name.clone(), (type_params.clone(), fields.clone()));
                 }
                 _ => {}
             }
@@ -76,39 +147,16 @@ impl TypeChecker {
 
     pub(super) fn resolve_type(&self, ty: &Type) -> Type {
         match ty {
-            Type::Named(name) => {
-                if let Some(resolved) = self.typedefs.get(name) {
-                    self.resolve_type(resolved)
-                } else {
-                    ty.clone()
-                }
-            }
-            Type::Array(inner, len) => Type::Array(Box::new(self.resolve_type(inner)), *len),
+            Type::TypeVar(_) => self.resolve_type_var(ty),
+            Type::Array(inner) => Type::Array(Box::new(self.resolve_type(inner))),
             Type::Pointer(inner) => Type::Pointer(Box::new(self.resolve_type(inner))),
             Type::Function(params, ret) => Type::Function(
-                params
-                    .iter()
-                    .map(|p| Box::new(self.resolve_type(p)))
-                    .collect(),
+                params.iter().map(|p| self.resolve_type(p)).collect(),
                 Box::new(self.resolve_type(ret)),
             ),
-            Type::TypeVar(_) => self.resolve_type_var(ty),
-            Type::Auto => Type::Auto,
-            Type::Gen => Type::Gen,
-        }
-    }
-
-    pub(super) fn resolve_gen_types(&mut self, ty: &Type) -> Type {
-        match ty {
-            Type::Named(n) if n == "gen" => self.new_type_var(),
-            Type::Array(inner, len) => Type::Array(Box::new(self.resolve_gen_types(inner)), *len),
-            Type::Pointer(inner) => Type::Pointer(Box::new(self.resolve_gen_types(inner))),
-            Type::Function(params, ret) => Type::Function(
-                params
-                    .iter()
-                    .map(|p| Box::new(self.resolve_gen_types(p)))
-                    .collect(),
-                Box::new(self.resolve_gen_types(ret)),
+            Type::Struct(name, args) => Type::Struct(
+                name.clone(),
+                args.iter().map(|t| self.resolve_type(t)).collect(),
             ),
             _ => ty.clone(),
         }
@@ -116,18 +164,18 @@ impl TypeChecker {
 
     pub(super) fn get_expr_type(&self, expr: &Expr) -> Type {
         match expr {
-            Expr::Int(_, _) => Type::Named("int".to_string()),
-            Expr::Float(_, _) => Type::Named("float".to_string()),
-            Expr::Bool(_, _) => Type::Named("bool".to_string()),
-            Expr::String(_, _) => Type::Named("string".to_string()),
-            Expr::Nil(_) => Type::Named("void".to_string()),
+            Expr::Int(_, _) => Type::Primitive(Primitive::Int),
+            Expr::Float(_, _) => Type::Primitive(Primitive::Float),
+            Expr::Bool(_, _) => Type::Primitive(Primitive::Boolean),
+            Expr::String(_, _) => Type::Primitive(Primitive::String),
+            Expr::Nil(_) => Type::Primitive(Primitive::Void),
             Expr::Var(name, _) => self
                 .lookup_var(name)
-                .unwrap_or(Type::Named("int".to_string())),
+                .unwrap_or(Type::Primitive(Primitive::Int)),
             Expr::FAdd(_, _, _)
             | Expr::FSub(_, _, _)
             | Expr::FMul(_, _, _)
-            | Expr::FDiv(_, _, _) => Type::Named("float".to_string()),
+            | Expr::FDiv(_, _, _) => Type::Primitive(Primitive::Float),
             Expr::Add(_, _, _)
             | Expr::Sub(_, _, _)
             | Expr::Mul(_, _, _)
@@ -138,54 +186,56 @@ impl TypeChecker {
             | Expr::Inc(_, _)
             | Expr::Dec(_, _)
             | Expr::AddAssign(_, _, _)
-            | Expr::SubAssign(_, _, _) => Type::Named("int".to_string()),
-            Expr::FNeg(_, _) => Type::Named("float".to_string()),
+            | Expr::SubAssign(_, _, _) => Type::Primitive(Primitive::Int),
+            Expr::FNeg(_, _) => Type::Primitive(Primitive::Float),
             Expr::FEq(_, _, _)
             | Expr::FNe(_, _, _)
             | Expr::FLt(_, _, _)
             | Expr::FLe(_, _, _)
             | Expr::FGt(_, _, _)
-            | Expr::FGe(_, _, _) => Type::Named("bool".to_string()),
+            | Expr::FGe(_, _, _) => Type::Primitive(Primitive::Boolean),
             Expr::Eq(_, _, _)
             | Expr::Ne(_, _, _)
             | Expr::Lt(_, _, _)
             | Expr::Le(_, _, _)
             | Expr::Gt(_, _, _)
-            | Expr::Ge(_, _, _) => Type::Named("bool".to_string()),
+            | Expr::Ge(_, _, _) => Type::Primitive(Primitive::Boolean),
             Expr::LAnd(_, _, _) | Expr::LOr(_, _, _) | Expr::Not(_, _) => {
-                Type::Named("bool".to_string())
+                Type::Primitive(Primitive::Boolean)
             }
-            Expr::StrCat(_, _, _) => Type::Named("string".to_string()),
-            Expr::Call(callee, _, _) => {
+            Expr::StrCat(_, _, _) => Type::Primitive(Primitive::String),
+            Expr::Call(callee, _, _, _) => {
                 if let Expr::Var(name, _) = callee.as_ref() {
-                    if let Some((_, ret_type)) = self.functions.get(name) {
+                    if let Some((_, _, ret_type)) = self.functions.get(name) {
                         return ret_type.clone();
                     }
                 }
-                Type::Named("int".to_string())
+                Type::Primitive(Primitive::Int)
             }
-            Expr::Index(_, _, _) => Type::Named("int".to_string()),
+            Expr::Index(_, _, _) => Type::Primitive(Primitive::Int),
             Expr::MemberAccess(obj, field_name, _) => {
                 let obj_type = self.get_expr_type(obj);
                 let inner_type = match obj_type {
                     Type::Pointer(inner) => *inner,
-                    Type::Named(_) => obj_type,
-                    _ => return Type::Named("int".to_string()),
+                    Type::Struct(_, _) => obj_type,
+                    _ => return Type::Primitive(Primitive::Int),
                 };
-                if let Type::Named(struct_name) = inner_type {
-                    if let Some(fields) = self.structs.get(&struct_name) {
+                if let Type::Struct(struct_name, args) = inner_type {
+                    if let Some((_, fields)) = self.structs.get(&struct_name) {
                         for (name, ty) in fields {
                             if name == field_name {
-                                return ty.clone();
+                                return self.resolve_type(&ty.substitute(&args));
                             }
                         }
                     }
                 }
-                Type::Named("int".to_string())
+                Type::Primitive(Primitive::Int)
             }
-            Expr::StructLiteral(name, _, _) => Type::Named(name.clone()),
+            Expr::StructLiteral(name, type_args, _, _) => {
+                Type::Struct(name.clone(), type_args.clone())
+            }
             Expr::ArrayLiteral(_, _) | Expr::ArrayFill(_, _, _) => {
-                Type::Array(Box::new(Type::Named("int".to_string())), 0)
+                Type::Array(Box::new(Type::Primitive(Primitive::Int)))
             }
             Expr::AddressOf(expr, _) => {
                 let inner_type = self.get_expr_type(expr);
@@ -195,28 +245,12 @@ impl TypeChecker {
                 let ptr_type = self.get_expr_type(expr);
                 match ptr_type {
                     Type::Pointer(inner) => *inner,
-                    _ => Type::Named("int".to_string()),
+                    _ => Type::Primitive(Primitive::Int),
                 }
             }
-            Expr::DerefAssign(_, _, _) => Type::Named("void".to_string()),
-            _ => Type::Named("int".to_string()),
+            Expr::DerefAssign(_, _, _) => Type::Primitive(Primitive::Void),
+            _ => Type::Primitive(Primitive::Int),
         }
-    }
-
-    pub(super) fn is_numeric_type(ty: &Type) -> bool {
-        matches!(ty, Type::Named(n) if n == "int" || n == "float") || matches!(ty, Type::TypeVar(_))
-    }
-
-    pub(super) fn is_float_type(ty: &Type) -> bool {
-        matches!(ty, Type::Named(n) if n == "float")
-    }
-
-    pub(super) fn is_string_type(ty: &Type) -> bool {
-        matches!(ty, Type::Named(n) if n == "string")
-    }
-
-    pub(super) fn is_bool_type(ty: &Type) -> bool {
-        matches!(ty, Type::Named(n) if n == "bool")
     }
 
     pub(super) fn types_compatible(&self, expected: &Type, found: &Type) -> bool {
@@ -226,16 +260,10 @@ impl TypeChecker {
         match (&expected, &found) {
             (Type::TypeVar(_), _) => true,
             (_, Type::TypeVar(_)) => true,
-            (Type::Named(n), _) if n == "gen" => true,
-            (_, Type::Named(n)) if n == "gen" => true,
-            (Type::Named(n), _) if n == "void" => true,
-            (_, Type::Named(n)) if n == "void" => true,
-            (Type::Named(a), Type::Named(b)) => a == b,
-            (Type::Array(a, len1), Type::Array(b, len2)) => {
-                let len_compatible = *len1 == 0 || *len2 == 0 || len1 == len2;
-                len_compatible && self.types_compatible(a, b)
-            }
-            (Type::Pointer(a), Type::Array(b, _)) => self.types_compatible(a, b),
+            (Type::Param(a), Type::Param(b)) => a == b,
+            (Type::Primitive(a), Type::Primitive(b)) => a == b,
+            (Type::Array(a), Type::Array(b)) => self.types_compatible(a, b),
+            (Type::Pointer(a), Type::Array(b)) => self.types_compatible(a, b),
             (Type::Pointer(a), Type::Pointer(b)) => self.types_compatible(a, b),
             (Type::Function(exp_params, exp_ret), Type::Function(found_params, found_ret)) => {
                 if exp_params.len() != found_params.len() {
@@ -248,15 +276,22 @@ impl TypeChecker {
                 }
                 self.types_compatible(exp_ret, found_ret)
             }
+            (Type::Struct(n1, a1), Type::Struct(n2, a2)) => {
+                n1 == n2
+                    && a1.len() == a2.len()
+                    && a1
+                        .iter()
+                        .zip(a2.iter())
+                        .all(|(t1, t2)| self.types_compatible(t1, t2))
+            }
             _ => false,
         }
     }
 
     pub(super) fn validate_type(&self, ty: &Type) -> Result<(), CheckerError> {
         match ty {
-            Type::Named(_) => Ok(()),
-            Type::TypeVar(_) => Ok(()),
-            Type::Array(inner, _) => self.validate_type(inner),
+            Type::Primitive(_) | Type::TypeVar(_) | Type::Param(_) | Type::Unknown => Ok(()),
+            Type::Array(inner) => self.validate_type(inner),
             Type::Pointer(inner) => self.validate_type(inner),
             Type::Function(params, ret) => {
                 for param in params {
@@ -264,8 +299,12 @@ impl TypeChecker {
                 }
                 self.validate_type(ret)
             }
-            Type::Auto => Ok(()),
-            Type::Gen => Ok(()),
+            Type::Struct(_, args) => {
+                for arg in args {
+                    self.validate_type(arg)?;
+                }
+                Ok(())
+            }
         }
     }
 }

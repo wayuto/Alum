@@ -1,30 +1,26 @@
 $import "io.ah"
 $import "convert.ah"
 
-// Gen Type Example
-// Demonstrates the use of 'gen' type with generic-like type inference
+// Generic Type Example
+// Demonstrates generic functions with type parameters
 
-// Generic identity function - accepts and returns gen type
-fun identity(x: gen): gen {
+// Generic identity function - works for any type T
+fun identity<T>(x: T): T {
     return x
 }
 
-// Generic add function - works with gen numeric type
-fun add(a: gen, b: gen): gen {
-    return a + b
-}
-
 fun main(): int {
-    // Test 1: gen type with integer
-    let x: gen = 42
-    let result: gen = identity(x)
+    // Test 1: identity with integer
+    let x: int = 42
+    let result: int = identity(x)
     println("identity(42) = ")
     println(itoa(result))
 
-    // Test 2: Generic addition with integers
-    let sum: gen = add(10, 20)
-    println("add(10, 20) = ")
-    println(itoa(sum))
+    // Test 2: identity with float
+    let y: float = 3.14
+    let f_result: float = identity(y)
+    println("identity(3.14) = ")
+    println(ftoa(f_result))
 
     return 0
 }

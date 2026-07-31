@@ -6,37 +6,131 @@ pub struct Program {
     pub body: Vec<Expr>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Primitive {
+    Int,
+    Float,
+    String,
+    Boolean,
+    Void,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
-    Named(String),
-    Array(Box<Type>, usize),
+    Primitive(Primitive),
     Pointer(Box<Type>),
-    Function(Vec<Box<Type>>, Box<Type>),
+    Array(Box<Type>),
+    Function(Vec<Type>, Box<Type>),
+    Struct(String, Vec<Type>),
+    Param(usize),
     TypeVar(usize),
-    Auto,
+    Unknown,
+}
+
+impl Type {
+    pub fn is_float(&self) -> bool {
+        matches!(self, Type::Primitive(Primitive::Float))
+    }
+
+    pub fn is_string(&self) -> bool {
+        matches!(self, Type::Primitive(Primitive::String))
+    }
+
+    pub fn is_bool(&self) -> bool {
+        matches!(self, Type::Primitive(Primitive::Boolean))
+    }
+
+    pub fn is_numeric(&self) -> bool {
+        matches!(
+            self,
+            Type::Primitive(Primitive::Int) | Type::Primitive(Primitive::Float) | Type::TypeVar(_)
+        )
+    }
+
+    pub fn substitute(&self, args: &[Type]) -> Type {
+        match self {
+            Type::Param(id) => args.get(*id).cloned().unwrap_or_else(|| self.clone()),
+            Type::Pointer(inner) => Type::Pointer(Box::new(inner.substitute(args))),
+            Type::Array(inner) => Type::Array(Box::new(inner.substitute(args))),
+            Type::Function(params, ret) => Type::Function(
+                params.iter().map(|p| p.substitute(args)).collect(),
+                Box::new(ret.substitute(args)),
+            ),
+            Type::Struct(name, type_args) => Type::Struct(
+                name.clone(),
+                type_args.iter().map(|t| t.substitute(args)).collect(),
+            ),
+            _ => self.clone(),
+        }
+    }
+
     #[allow(dead_code)]
-    Gen,
+    pub fn contains_param(&self) -> bool {
+        match self {
+            Type::Param(_) => true,
+            Type::Pointer(inner) => inner.contains_param(),
+            Type::Array(inner) => inner.contains_param(),
+            Type::Function(params, ret) => {
+                params.iter().any(|p| p.contains_param()) || ret.contains_param()
+            }
+            Type::Struct(_, args) => args.iter().any(|t| t.contains_param()),
+            _ => false,
+        }
+    }
+
+    pub fn mangle(&self) -> String {
+        match self {
+            Type::Primitive(p) => match p {
+                Primitive::Int => "int".to_string(),
+                Primitive::Float => "float".to_string(),
+                Primitive::String => "str".to_string(),
+                Primitive::Boolean => "bool".to_string(),
+                Primitive::Void => "void".to_string(),
+            },
+            Type::Pointer(inner) => format!("ptr_{}", inner.mangle()),
+            Type::Array(inner) => format!("arr_{}", inner.mangle()),
+            Type::Function(params, ret) => {
+                let param_str: Vec<String> = params.iter().map(|p| p.mangle()).collect();
+                format!("fn_{}_{}", param_str.join("_"), ret.mangle())
+            }
+            Type::Struct(name, args) => {
+                let arg_str: Vec<String> = args.iter().map(|t| t.mangle()).collect();
+                format!("{}_{}", name, arg_str.join("_"))
+            }
+            Type::Param(id) => format!("param_{}", id),
+            Type::TypeVar(id) => format!("tv_{}", id),
+            Type::Unknown => "unknown".to_string(),
+        }
+    }
 }
 
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Type::Named(name) => write!(f, "{}", name),
-            Type::Array(inner, len) => {
-                if *len == 0 {
-                    write!(f, "{}[]", inner)
-                } else {
-                    write!(f, "{}[{}]", inner, len)
-                }
-            }
+            Type::Primitive(p) => match p {
+                Primitive::Int => write!(f, "int"),
+                Primitive::Float => write!(f, "float"),
+                Primitive::String => write!(f, "string"),
+                Primitive::Boolean => write!(f, "bool"),
+                Primitive::Void => write!(f, "void"),
+            },
+            Type::Array(inner) => write!(f, "{}[]", inner),
             Type::Pointer(inner) => write!(f, "*{}", inner),
             Type::Function(params, ret) => {
                 let param_str: Vec<String> = params.iter().map(|p| p.to_string()).collect();
                 write!(f, "{}({})", ret, param_str.join(", "))
             }
+            Type::Struct(name, args) => {
+                if args.is_empty() {
+                    write!(f, "{}", name)
+                } else {
+                    let arg_str: Vec<String> = args.iter().map(|t| t.to_string()).collect();
+                    write!(f, "{}<{}>", name, arg_str.join(", "))
+                }
+            }
+            Type::Param(id) => write!(f, "P{}", id),
             Type::TypeVar(id) => write!(f, "T{}", id),
-            Type::Auto => write!(f, "auto"),
-            Type::Gen => write!(f, "gen"),
+            Type::Unknown => write!(f, "auto"),
         }
     }
 }
@@ -75,9 +169,9 @@ impl Expr {
             | Expr::Var(_, s)
             | Expr::VarDecl(_, _, _, s)
             | Expr::VarAssign(_, _, s)
-            | Expr::FuncDecl(_, _, _, _, s)
+            | Expr::FuncDecl(_, _, _, _, _, s)
             | Expr::Extern(_, _, _, s)
-            | Expr::Call(_, _, s)
+            | Expr::Call(_, _, _, s)
             | Expr::Return(_, s)
             | Expr::If(_, _, _, s)
             | Expr::While(_, _, s)
@@ -91,8 +185,8 @@ impl Expr {
             | Expr::Range(_, _, s)
             | Expr::For(_, _, _, s)
             | Expr::TypeDef(s)
-            | Expr::Struct(_, _, s)
-            | Expr::StructLiteral(_, _, s)
+            | Expr::Struct(_, _, _, s)
+            | Expr::StructLiteral(_, _, _, s)
             | Expr::MemberAccess(_, _, s)
             | Expr::MemberAssign(_, _, _, s)
             | Expr::Lambda(_, _, _, s)
@@ -154,9 +248,16 @@ pub enum Expr {
     Var(String, Span),
     VarDecl(String, Type, Box<Expr>, Span),
     VarAssign(String, Box<Expr>, Span),
-    FuncDecl(String, Vec<(String, Type)>, Type, Box<Expr>, Span),
+    FuncDecl(
+        String,
+        Vec<String>,
+        Vec<(String, Type)>,
+        Type,
+        Box<Expr>,
+        Span,
+    ),
     Extern(String, Vec<(String, Type)>, Type, Span),
-    Call(Box<Expr>, Vec<Expr>, Span),
+    Call(Box<Expr>, Vec<Type>, Vec<Expr>, Span),
     Return(Box<Expr>, Span),
     If(Box<Expr>, Box<Expr>, Option<Box<Expr>>, Span),
     While(Box<Expr>, Box<Expr>, Span),
@@ -170,8 +271,8 @@ pub enum Expr {
     Range(Box<Expr>, Box<Expr>, Span),
     For(String, Box<Expr>, Box<Expr>, Span),
     TypeDef(Span),
-    Struct(String, Vec<(String, Type)>, Span),
-    StructLiteral(String, Vec<(String, Expr)>, Span),
+    Struct(String, Vec<String>, Vec<(String, Type)>, Span),
+    StructLiteral(String, Vec<Type>, Vec<(String, Expr)>, Span),
     MemberAccess(Box<Expr>, String, Span),
     MemberAssign(Box<Expr>, String, Box<Expr>, Span),
     Lambda(Vec<(String, Type)>, Box<Expr>, Type, Span),

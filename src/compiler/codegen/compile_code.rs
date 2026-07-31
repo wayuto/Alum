@@ -118,9 +118,7 @@ impl AsmCodeGen {
                             unreachable!()
                         }
                     }
-                    IROperand::Var(_) | IROperand::Temp(_, _) => {
-                        self.get_location(src2)?
-                    }
+                    IROperand::Var(_) | IROperand::Temp(_, _) => self.get_location(src2)?,
                     _ => {
                         self.load(src2, Reg::Xmm1)?;
                         Operand::Reg(Reg::Xmm1)
@@ -322,7 +320,17 @@ impl AsmCodeGen {
                         self.push_text(Asm::Call(Operand::Reg(Reg::Rax)));
                     }
                 }
-                for reg in &[Reg::Rax, Reg::Rcx, Reg::Rdx, Reg::Rsi, Reg::Rdi, Reg::R8, Reg::R9, Reg::R10, Reg::R11] {
+                for reg in &[
+                    Reg::Rax,
+                    Reg::Rcx,
+                    Reg::Rdx,
+                    Reg::Rsi,
+                    Reg::Rdi,
+                    Reg::R8,
+                    Reg::R9,
+                    Reg::R10,
+                    Reg::R11,
+                ] {
                     self.invalidate_cached_reg(*reg);
                 }
                 self.invalidate_cached_reg(Reg::Xmm0);

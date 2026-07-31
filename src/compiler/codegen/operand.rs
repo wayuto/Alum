@@ -45,7 +45,7 @@ impl AsmCodeGen {
                         let lbl = self.alloc_str(s.clone());
                         Ok(rel(lbl))
                     }
-                    IRConst::Array(_, _) => Err(CodeGenError::InvalidOperand {
+                    IRConst::Array(_) => Err(CodeGenError::InvalidOperand {
                         message: "array constant as location".to_string(),
                     }),
                 }
@@ -124,8 +124,8 @@ impl AsmCodeGen {
                         let lbl = self.alloc_str(s.clone());
                         self.push_text(Asm::Lea(Operand::Reg(dst_reg), rel(lbl)));
                     }
-                    IRConst::Array(len, arr) => {
-                        self.alloc_arr(*len, arr.clone(), reg)?;
+                    IRConst::Array(arr) => {
+                        self.alloc_arr(arr.len(), arr.clone(), reg)?;
                     }
                 }
             }

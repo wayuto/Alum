@@ -6,7 +6,7 @@ pub enum IRType {
     Float,
     String,
     Bool,
-    Array(Option<usize>),
+    Array,
     Void,
 }
 
@@ -15,7 +15,7 @@ pub enum IRConst {
     Int(i64),
     Float(OrderedFloat<f64>),
     Str(String),
-    Array(usize, Vec<Operand>),
+    Array(Vec<Operand>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

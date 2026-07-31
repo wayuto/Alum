@@ -17,10 +17,10 @@ fun main(): int {
     // String variable
     let name: string = "Alum"
     
-    // Nil .ahue for integer
+    // Nil value for integer
     let empty: int = nil
     
-    // Print .ahues
+    // Print values
     println("Name: ")
     println(name)
     println("Age: ")
@@ -31,7 +31,7 @@ fun main(): int {
     if is_student {
         println("true")
     } else {
-        println(".ahse")
+        println("false")
     }
     
     return 0

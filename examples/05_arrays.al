@@ -5,7 +5,7 @@ $import "convert.ah"
 // Demonstrates array operations with new T[N] syntax
 
 fun main(): int {
-    // Array lite.ah with explicit .ahues
+    // Array literal with explicit values
     // Type is inferred from elements
     let numbers: int[5] = [1, 2, 3, 4, 5]
 

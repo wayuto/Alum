@@ -10,9 +10,11 @@ impl<'a> Parser<'a> {
     pub fn new(lex: Lexer<'a>) -> Self {
         Self {
             lex: lex.peekable(),
+            lookahead: Vec::new(),
             last_span: Span::new(1, 1),
             typedefs: HashMap::new(),
             structs: HashMap::new(),
+            type_param_scopes: Vec::new(),
         }
     }
 
@@ -47,7 +49,7 @@ impl<'a> Parser<'a> {
                         self.next()?;
                         self.parse_type()?
                     } else {
-                        Type::Auto
+                        Type::Unknown
                     };
                     let (token, span) = self.next()?;
                     if token != Token::EQ {
@@ -73,16 +75,32 @@ impl<'a> Parser<'a> {
                             });
                         }
                     };
+                    let type_params = if matches!(self.peek(), Some(Ok((Token::LT, _)))) {
+                        self.next()?;
+                        let params = self.get_type_params_list()?;
+                        self.expect(Token::GT)?;
+                        params
+                    } else {
+                        Vec::new()
+                    };
+                    if !type_params.is_empty() {
+                        self.push_type_params(&type_params);
+                    }
                     self.expect(Token::LPAREN)?;
                     let params = self.get_params_list()?;
                     self.expect(Token::RPAREN)?;
                     self.expect(Token::COLON)?;
                     let ret_type = self.parse_type()?;
+                    let body = self.expr()?;
+                    if !type_params.is_empty() {
+                        self.type_param_scopes.pop();
+                    }
                     Ok(Expr::FuncDecl(
                         name,
+                        type_params,
                         params,
                         ret_type,
-                        Box::new(self.expr()?),
+                        Box::new(body),
                         span,
                     ))
                 }
@@ -203,6 +221,17 @@ impl<'a> Parser<'a> {
                             });
                         }
                     };
+                    let type_params = if matches!(self.peek(), Some(Ok((Token::LT, _)))) {
+                        self.next()?;
+                        let params = self.get_type_params_list()?;
+                        self.expect(Token::GT)?;
+                        params
+                    } else {
+                        Vec::new()
+                    };
+                    if !type_params.is_empty() {
+                        self.push_type_params(&type_params);
+                    }
                     self.expect(Token::LBRACE)?;
                     let mut fields = Vec::new();
                     loop {
@@ -242,8 +271,12 @@ impl<'a> Parser<'a> {
                             }
                         }
                     }
-                    self.structs.insert(name.clone(), fields.clone());
-                    Ok(Expr::Struct(name, fields, span))
+                    if !type_params.is_empty() {
+                        self.type_param_scopes.pop();
+                    }
+                    self.structs
+                        .insert(name.clone(), (type_params.clone(), fields.clone()));
+                    Ok(Expr::Struct(name, type_params, fields, span))
                 }
 
                 Ok((_, _)) => {
@@ -372,7 +405,7 @@ impl<'a> Parser<'a> {
                             }
                         }
                     }
-                    callee = Expr::Call(Box::new(callee), args, Span::new(0, 0));
+                    callee = Expr::Call(Box::new(callee), Vec::new(), args, Span::new(0, 0));
                 }
                 Some(Ok((Token::LBRACKET, _))) => {
                     self.next()?;
@@ -599,7 +632,9 @@ impl<'a> Parser<'a> {
 
                     let is_fill_syntax = match self.peek() {
                         Some(Ok((Token::TYPE(_), _))) => true,
-                        Some(Ok((Token::IDENT(s), _))) if s == "gen" => true,
+                        Some(Ok((Token::IDENT(_), _))) => {
+                            matches!(self.peek_n(1), Some(Ok((Token::SEMICOLON, _))))
+                        }
                         _ => false,
                     };
 
@@ -648,8 +683,56 @@ impl<'a> Parser<'a> {
                     let name = s.clone();
                     self.next()?;
 
-                    if let Some(Ok((Token::LBRACE, _))) = self.peek() {
-                        if self.structs.contains_key(&name) {
+                    if self.structs.contains_key(&name) {
+                        if let Some(Ok((Token::LT, _))) = self.peek() {
+                            self.next()?;
+                            let type_args = self.get_type_args_list()?;
+                            self.expect(Token::GT)?;
+                            if let Some(Ok((Token::LBRACE, _))) = self.peek() {
+                                self.next()?;
+                                let mut fields = Vec::new();
+                                loop {
+                                    match self.peek().cloned() {
+                                        Some(Ok((Token::RBRACE, _))) => {
+                                            self.next()?;
+                                            break;
+                                        }
+                                        Some(Ok((Token::IDENT(field_name), _))) => {
+                                            self.next()?;
+                                            self.expect(Token::COLON)?;
+                                            let field_value = self.expr()?;
+                                            fields.push((field_name, field_value));
+                                            match self.peek().cloned() {
+                                                Some(Ok((Token::COMMA, _))) => {
+                                                    self.next()?;
+                                                }
+                                                Some(Ok((Token::RBRACE, _))) => {
+                                                    self.next()?;
+                                                    break;
+                                                }
+                                                _ => {
+                                                    return Err(ParserError::UnexpectedToken {
+                                                        expected: Some(Token::COMMA),
+                                                        found: Token::EOF,
+                                                        span: self.last_span,
+                                                    });
+                                                }
+                                            }
+                                        }
+                                        _ => {
+                                            return Err(ParserError::UnexpectedToken {
+                                                expected: Some(Token::IDENT(
+                                                    "FIELD NAME".to_string(),
+                                                )),
+                                                found: Token::EOF,
+                                                span: self.last_span,
+                                            });
+                                        }
+                                    }
+                                }
+                                return Ok(Expr::StructLiteral(name, type_args, fields, span));
+                            }
+                        } else if let Some(Ok((Token::LBRACE, _))) = self.peek() {
                             self.next()?;
                             let mut fields = Vec::new();
                             loop {
@@ -689,7 +772,7 @@ impl<'a> Parser<'a> {
                                     }
                                 }
                             }
-                            return Ok(Expr::StructLiteral(name, fields, span));
+                            return Ok(Expr::StructLiteral(name, Vec::new(), fields, span));
                         }
                     }
 
@@ -800,23 +883,27 @@ impl<'a> Parser<'a> {
                         let ty = self.parse_type()?;
                         params.push((s, ty));
                     } else {
-                        let ty = if let Some(ty) = self.typedefs.get(&s) {
+                        let ty = if let Some(idx) = self.lookup_type_param(&s) {
+                            Type::Param(idx)
+                        } else if let Some(ty) = self.typedefs.get(&s) {
                             ty.clone()
                         } else {
-                            Type::Named(s)
+                            let mut args = Vec::new();
+                            if matches!(self.peek(), Some(Ok((Token::LT, _)))) {
+                                self.next()?;
+                                args = self.get_type_args_list()?;
+                                self.expect(Token::GT)?;
+                            }
+                            Type::Struct(s, args)
                         };
 
                         if matches!(self.peek(), Some(Ok((Token::LBRACKET, _)))) {
                             self.next()?;
-                            let len = if let Some(Ok((Token::INT(n), _))) = self.peek() {
-                                let len = *n as usize;
+                            if matches!(self.peek(), Some(Ok((Token::INT(_), _)))) {
                                 self.next()?;
-                                len
-                            } else {
-                                0
-                            };
+                            }
                             self.expect(Token::RBRACKET)?;
-                            params.push(("_anon".to_string(), Type::Array(Box::new(ty), len)));
+                            params.push(("_anon".to_string(), Type::Array(Box::new(ty))));
                         } else {
                             params.push(("_anon".to_string(), ty));
                         }
@@ -894,7 +981,83 @@ impl<'a> Parser<'a> {
     }
 
     fn peek(&mut self) -> Option<&Result<(Token, Span), LexerError>> {
-        self.lex.peek()
+        self.peek_n(0)
+    }
+
+    fn peek_n(&mut self, n: usize) -> Option<&Result<(Token, Span), LexerError>> {
+        while self.lookahead.len() <= n {
+            match self.lex.next() {
+                Some(tok) => self.lookahead.push(tok),
+                None => break,
+            }
+        }
+        self.lookahead.get(n)
+    }
+
+    fn lookup_type_param(&self, name: &str) -> Option<usize> {
+        self.type_param_scopes
+            .last()
+            .and_then(|scope| scope.get(name).copied())
+    }
+
+    fn push_type_params(&mut self, params: &[String]) {
+        let mut scope = HashMap::new();
+        for (i, name) in params.iter().enumerate() {
+            scope.insert(name.clone(), i);
+        }
+        self.type_param_scopes.push(scope);
+    }
+
+    fn get_type_params_list(&mut self) -> Result<Vec<String>, ParserError> {
+        let mut params = Vec::new();
+        loop {
+            let (token, span) = self.next()?;
+            match token {
+                Token::IDENT(s) => params.push(s),
+                token => {
+                    return Err(ParserError::UnexpectedToken {
+                        expected: Some(Token::IDENT("TYPE PARAM".to_string())),
+                        found: token,
+                        span,
+                    });
+                }
+            }
+            match self.peek().cloned() {
+                Some(Ok((Token::COMMA, _))) => {
+                    self.next()?;
+                }
+                Some(Ok((Token::GT, _))) => break,
+                _ => {
+                    return Err(ParserError::UnexpectedToken {
+                        expected: Some(Token::GT),
+                        found: Token::EOF,
+                        span: self.last_span,
+                    });
+                }
+            }
+        }
+        Ok(params)
+    }
+
+    fn get_type_args_list(&mut self) -> Result<Vec<Type>, ParserError> {
+        let mut args = Vec::new();
+        loop {
+            args.push(self.parse_type()?);
+            match self.peek().cloned() {
+                Some(Ok((Token::COMMA, _))) => {
+                    self.next()?;
+                }
+                Some(Ok((Token::GT, _))) => break,
+                _ => {
+                    return Err(ParserError::UnexpectedToken {
+                        expected: Some(Token::GT),
+                        found: Token::EOF,
+                        span: self.last_span,
+                    });
+                }
+            }
+        }
+        Ok(args)
     }
 
     fn parse_type(&mut self) -> Result<Type, ParserError> {
@@ -907,49 +1070,35 @@ impl<'a> Parser<'a> {
         let (first_token, span) = self.next()?;
 
         let base_type = match first_token {
-            Token::TYPE(t) => {
-                if let Some(Ok((Token::LPAREN, _))) = self.peek() {
-                    let mut params = Vec::new();
-                    self.expect(Token::LPAREN)?;
-                    loop {
-                        match self.peek() {
-                            Some(Ok((Token::RPAREN, _))) => {
-                                self.next()?;
-                                break;
-                            }
-                            Some(Ok((_, _))) => {
-                                params.push(Box::new(self.parse_type()?));
-                                match self.peek() {
-                                    Some(Ok((Token::COMMA, _))) => {
-                                        self.next()?;
-                                    }
-                                    Some(Ok((Token::RPAREN, _))) => {
-                                        self.next()?;
-                                        break;
-                                    }
-                                    _ => {
-                                        return Err(ParserError::UnexpectedToken {
-                                            expected: Some(Token::COMMA),
-                                            found: Token::EOF,
-                                            span: self.last_span,
-                                        });
-                                    }
-                                }
-                            }
-                            _ => break,
-                        }
+            Token::TYPE(t) => match t.as_str() {
+                "int" => Type::Primitive(crate::compiler::parser::Primitive::Int),
+                "float" => Type::Primitive(crate::compiler::parser::Primitive::Float),
+                "bool" => Type::Primitive(crate::compiler::parser::Primitive::Boolean),
+                "string" => Type::Primitive(crate::compiler::parser::Primitive::String),
+                "void" => Type::Primitive(crate::compiler::parser::Primitive::Void),
+                name => {
+                    let mut args = Vec::new();
+                    if matches!(self.peek(), Some(Ok((Token::LT, _)))) {
+                        self.next()?;
+                        args = self.get_type_args_list()?;
+                        self.expect(Token::GT)?;
                     }
-
-                    return Ok(Type::Function(params, Box::new(Type::Named(t))));
+                    Type::Struct(name.to_string(), args)
                 }
-
-                Type::Named(t)
-            }
+            },
             Token::IDENT(s) => {
-                if let Some(ty) = self.typedefs.get(&s) {
+                if let Some(idx) = self.lookup_type_param(&s) {
+                    Type::Param(idx)
+                } else if let Some(ty) = self.typedefs.get(&s) {
                     ty.clone()
                 } else {
-                    Type::Named(s)
+                    let mut args = Vec::new();
+                    if matches!(self.peek(), Some(Ok((Token::LT, _)))) {
+                        self.next()?;
+                        args = self.get_type_args_list()?;
+                        self.expect(Token::GT)?;
+                    }
+                    Type::Struct(s, args)
                 }
             }
             token => {
@@ -961,26 +1110,59 @@ impl<'a> Parser<'a> {
             }
         };
 
+        if let Some(Ok((Token::LPAREN, _))) = self.peek() {
+            self.next()?;
+            let mut params = Vec::new();
+            loop {
+                match self.peek() {
+                    Some(Ok((Token::RPAREN, _))) => {
+                        self.next()?;
+                        break;
+                    }
+                    Some(Ok((_, _))) => {
+                        params.push(self.parse_type()?);
+                        match self.peek() {
+                            Some(Ok((Token::COMMA, _))) => {
+                                self.next()?;
+                            }
+                            Some(Ok((Token::RPAREN, _))) => {
+                                self.next()?;
+                                break;
+                            }
+                            _ => {
+                                return Err(ParserError::UnexpectedToken {
+                                    expected: Some(Token::COMMA),
+                                    found: Token::EOF,
+                                    span: self.last_span,
+                                });
+                            }
+                        }
+                    }
+                    _ => break,
+                }
+            }
+            return Ok(Type::Function(params, Box::new(base_type)));
+        }
+
         if let Some(Ok((Token::LBRACKET, _))) = self.peek() {
             self.next()?;
-
-            let len = if let Some(Ok((Token::INT(n), _))) = self.peek() {
-                let len = *n as usize;
+            if matches!(self.peek(), Some(Ok((Token::INT(_), _)))) {
                 self.next()?;
-                len
-            } else {
-                0
-            };
-
+            }
             self.expect(Token::RBRACKET)?;
-            return Ok(Type::Array(Box::new(base_type), len));
+            return Ok(Type::Array(Box::new(base_type)));
         }
 
         Ok(base_type)
     }
 
     fn next(&mut self) -> Result<(Token, Span), ParserError> {
-        if let Some(result) = self.lex.next() {
+        let result = if !self.lookahead.is_empty() {
+            Some(self.lookahead.remove(0))
+        } else {
+            self.lex.next()
+        };
+        if let Some(result) = result {
             match result {
                 Ok((token, span)) => {
                     self.last_span = span;

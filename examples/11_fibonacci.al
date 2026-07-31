@@ -23,8 +23,8 @@ fun main(): int {
         i = i + 1
     }
     
-    // .ahculate nth Fibonacci number
-    println("\n.ahculating 10th Fibonacci number:")
+    // Calculate nth Fibonacci number
+    println("\nCalculating 10th Fibonacci number:")
     let fib_n: int = fibonacci(10)
     print("fibonacci(10) = ")
     println(itoa(fib_n))
@@ -32,7 +32,7 @@ fun main(): int {
     return 0
 }
 
-// Recursive function to .ahculate nth Fibonacci number
+// Recursive function to calculate nth Fibonacci number
 fun fibonacci(n: int): int {
     if n <= 1 {
         return n

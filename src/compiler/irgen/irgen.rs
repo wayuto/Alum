@@ -3,7 +3,7 @@ use super::ir::{IRConst, IRProgram, Op};
 use crate::compiler::{
     codegen::CodeGenError,
     irgen::IRGen,
-    parser::{Expr, Program, Type},
+    parser::{Expr, Primitive, Program, Type},
 };
 use std::mem::take;
 
@@ -13,14 +13,27 @@ impl IRGen {
 
         for expr in &program.body {
             match expr {
-                Expr::FuncDecl(name, params, ret_type, _, _) => {
-                    self.func_decl(name.clone(), params.clone(), ret_type.clone())?;
+                Expr::FuncDecl(name, type_params, params, ret_type, body, _) => {
+                    if type_params.is_empty() {
+                        self.func_decl(name.clone(), params.clone(), ret_type.clone())?;
+                    } else {
+                        self.generic_funcs.insert(
+                            name.clone(),
+                            (
+                                type_params.clone(),
+                                params.clone(),
+                                ret_type.clone(),
+                                body.clone(),
+                            ),
+                        );
+                    }
                 }
                 Expr::Extern(name, params, ret_type, _) => {
                     self.extern_decl(name.clone(), params.clone(), ret_type.clone())?;
                 }
-                Expr::Struct(name, fields, _) => {
-                    self.structs.insert(name.clone(), fields.clone());
+                Expr::Struct(name, type_params, fields, _) => {
+                    self.structs
+                        .insert(name.clone(), (type_params.clone(), fields.clone()));
                 }
                 _ => {}
             }
@@ -28,8 +41,10 @@ impl IRGen {
 
         for expr in program.body {
             match expr {
-                Expr::FuncDecl(name, params, _, body, _) => {
-                    self.compile_fn(name, params, *body)?;
+                Expr::FuncDecl(name, type_params, params, _, body, _) => {
+                    if type_params.is_empty() {
+                        self.compile_fn(name, params, *body)?;
+                    }
                 }
                 Expr::Int(_, _)
                 | Expr::Float(_, _)
@@ -42,7 +57,7 @@ impl IRGen {
                     self.compile_expr(
                         Expr::VarDecl(
                             "_global".to_string(),
-                            Type::Named("int".to_string()),
+                            Type::Primitive(Primitive::Int),
                             Box::new(expr),
                             crate::compiler::Span::new(0, 0),
                         ),

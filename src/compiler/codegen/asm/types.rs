@@ -136,7 +136,10 @@ impl Reg {
     }
 
     pub fn rex_b(self) -> bool {
-        matches!(self, Reg::R8 | Reg::R9 | Reg::R10 | Reg::R11 | Reg::R12 | Reg::R13 | Reg::R14 | Reg::R15)
+        matches!(
+            self,
+            Reg::R8 | Reg::R9 | Reg::R10 | Reg::R11 | Reg::R12 | Reg::R13 | Reg::R14 | Reg::R15
+        )
     }
 }
 

@@ -11,7 +11,7 @@ fun main(): int {
     if x > 10 {
         println("x is greater than 10")
     } else {
-        println("x is less than or eq.ah to 10")
+        println("x is less than or equal to 10")
     }
     
     // Nested if-else

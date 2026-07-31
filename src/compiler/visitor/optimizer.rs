@@ -30,7 +30,8 @@ impl Optimizer {
     fn visit(&self, expr: &mut Expr) {
         match expr {
             Expr::Block(body, _) => body.iter_mut().for_each(|e| self.optimize_expr(e)),
-            Expr::FuncDecl(_, _, _, body, _) => self.optimize_expr(body),
+            Expr::FuncDecl(_, _, _, _, body, _) => self.optimize_expr(body),
+            Expr::Lambda(_, body, _, _) => self.optimize_expr(body),
             Expr::If(cond, t, e, _) => {
                 self.optimize_expr(cond);
                 self.optimize_expr(t);
@@ -52,7 +53,7 @@ impl Optimizer {
             | Expr::AddAssign(_, v, _)
             | Expr::SubAssign(_, v, _) => self.optimize_expr(v),
             Expr::Inc(_, _) | Expr::Dec(_, _) => {}
-            Expr::Call(f, args, _) => {
+            Expr::Call(f, _, args, _) => {
                 self.optimize_expr(f);
                 args.iter_mut().for_each(|a| self.optimize_expr(a));
             }
@@ -63,7 +64,7 @@ impl Optimizer {
                 self.optimize_expr(idx);
             }
             Expr::IndexAssign(arr_idx, _, _) => self.optimize_expr(arr_idx),
-            Expr::StructLiteral(_, fields, _) => {
+            Expr::StructLiteral(_, _, fields, _) => {
                 fields.iter_mut().for_each(|(_, v)| self.optimize_expr(v));
             }
             Expr::MemberAccess(obj, _, _) => self.optimize_expr(obj),
@@ -269,7 +270,13 @@ impl Optimizer {
     fn dce(&self, expr: &mut Expr) {
         match expr {
             Expr::Block(body, _) => {
-                body.retain(|e| !self.is_pure_dead(e));
+                let last = body.len().saturating_sub(1);
+                *body = body
+                    .drain(..)
+                    .enumerate()
+                    .filter(|(i, e)| *i == last || !self.is_pure_dead(e))
+                    .map(|(_, e)| e)
+                    .collect();
                 for e in &mut *body {
                     self.dce(e);
                 }
@@ -302,14 +309,15 @@ impl Optimizer {
                 self.dce(array);
                 self.dce(body);
             }
-            Expr::FuncDecl(_, _, _, body, _) => self.dce(body),
+            Expr::FuncDecl(_, _, _, _, body, _) => self.dce(body),
+            Expr::Lambda(_, body, _, _) => self.dce(body),
             Expr::VarDecl(_, _, v, _) => self.dce(v),
             Expr::VarAssign(_, v, _) | Expr::AddAssign(_, v, _) | Expr::SubAssign(_, v, _) => {
                 self.dce(v)
             }
             Expr::Return(v, _) => self.dce(v),
             Expr::Inc(_, _) | Expr::Dec(_, _) => {}
-            Expr::Call(f, args, _) => {
+            Expr::Call(f, _, args, _) => {
                 self.dce(f);
                 for a in args {
                     self.dce(a);
@@ -329,7 +337,7 @@ impl Optimizer {
                 self.dce(arr_idx);
                 self.dce(v);
             }
-            Expr::StructLiteral(_, fields, _) => {
+            Expr::StructLiteral(_, _, fields, _) => {
                 for (_, v) in fields {
                     self.dce(v);
                 }
@@ -417,7 +425,7 @@ impl Optimizer {
             Expr::Index(l, r, _) => self.is_pure(l) && self.is_pure(r),
             Expr::ArrayLiteral(elems, _) => elems.iter().all(|e| self.is_pure(e)),
             Expr::ArrayFill(_, len, _) => self.is_pure(len),
-            Expr::StructLiteral(_, fields, _) => fields.iter().all(|(_, v)| self.is_pure(v)),
+            Expr::StructLiteral(_, _, fields, _) => fields.iter().all(|(_, v)| self.is_pure(v)),
             Expr::MemberAccess(obj, _, _) => self.is_pure(obj),
             Expr::AddressOf(expr, _) => self.is_pure(expr),
             Expr::Deref(expr, _) => self.is_pure(expr),
@@ -435,7 +443,7 @@ impl Optimizer {
                 | Expr::SubAssign(_, _, _)
                 | Expr::Inc(_, _)
                 | Expr::Dec(_, _)
-                | Expr::Call(_, _, _)
+                | Expr::Call(_, _, _, _)
                 | Expr::IndexAssign(_, _, _)
                 | Expr::MemberAssign(_, _, _, _)
                 | Expr::DerefAssign(_, _, _)

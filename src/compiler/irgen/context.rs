@@ -19,6 +19,7 @@ pub(super) struct Context {
     pub loop_end_labels: Vec<String>,
     pub loop_inc_labels: Vec<String>,
     pub var_types: HashMap<String, crate::compiler::parser::Type>,
+    pub array_lengths: HashMap<String, usize>,
     pub func_name: String,
 }
 
@@ -32,6 +33,7 @@ impl Context {
             loop_end_labels: Vec::new(),
             loop_inc_labels: Vec::new(),
             var_types: HashMap::new(),
+            array_lengths: HashMap::new(),
             func_name,
         }
     }
@@ -70,18 +72,20 @@ impl Context {
     }
 
     pub fn type2ir_type(typ: &crate::compiler::parser::Type) -> IRType {
+        use crate::compiler::parser::{Primitive, Type as HighType};
         match typ {
-            crate::compiler::parser::Type::Named(name) => match name.as_str() {
-                "int" => IRType::Int,
-                "float" => IRType::Float,
-                "bool" => IRType::Bool,
-                "string" => IRType::String,
-                "void" => IRType::Void,
-                _ => IRType::Int,
+            HighType::Primitive(p) => match p {
+                Primitive::Int => IRType::Int,
+                Primitive::Float => IRType::Float,
+                Primitive::String => IRType::String,
+                Primitive::Boolean => IRType::Bool,
+                Primitive::Void => IRType::Void,
             },
-            crate::compiler::parser::Type::Array(_, len) => IRType::Array(Some(*len)),
-            crate::compiler::parser::Type::Pointer(_) => IRType::Int,
-            _ => IRType::Int,
+            HighType::Array(_) => IRType::Array,
+            HighType::Pointer(_) => IRType::Int,
+            HighType::Function(_, _) => IRType::Int,
+            HighType::Struct(_, _) => IRType::Int,
+            HighType::Param(_) | HighType::TypeVar(_) | HighType::Unknown => IRType::Int,
         }
     }
 
@@ -95,7 +99,7 @@ impl Context {
                 IRConst::Int(_) => Ok(IRType::Int),
                 IRConst::Float(_) => Ok(IRType::Float),
                 IRConst::Str(_) => Ok(IRType::String),
-                IRConst::Array(len, _) => Ok(IRType::Array(Some(len.to_owned()))),
+                IRConst::Array(_) => Ok(IRType::Array),
             },
             Operand::Var(name) => self.get_var_type(name),
             Operand::Temp(_, t) => Ok(t.to_owned()),

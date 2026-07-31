@@ -111,7 +111,10 @@ impl AsmCodeGen {
         self.push_text(Asm::Mov(Operand::Reg(Reg::Rbp), Operand::Reg(Reg::Rsp)));
 
         if final_stack_size > 0 {
-            self.push_text(Asm::Sub(Operand::Reg(Reg::Rsp), Operand::Imm(final_stack_size as i64)));
+            self.push_text(Asm::Sub(
+                Operand::Reg(Reg::Rsp),
+                Operand::Imm(final_stack_size as i64),
+            ));
         }
 
         self.curr_fn = func.name.clone();
@@ -127,7 +130,10 @@ impl AsmCodeGen {
                     if flt_idx < 8 {
                         let arg_reg = parse_reg(&format!("xmm{}", flt_idx));
                         if *alloc_reg != arg_reg {
-                            self.push_text(Asm::Movsd(Operand::Reg(*alloc_reg), Operand::Reg(arg_reg)));
+                            self.push_text(Asm::Movsd(
+                                Operand::Reg(*alloc_reg),
+                                Operand::Reg(arg_reg),
+                            ));
                         }
                         self.regs.insert(*alloc_reg, Some(param.clone()));
                         flt_idx += 1;
@@ -136,7 +142,10 @@ impl AsmCodeGen {
                     if int_idx < 6 {
                         let arg_reg = parse_reg(&self.arg_reg[int_idx]);
                         if *alloc_reg != arg_reg {
-                            self.push_text(Asm::Mov(Operand::Reg(*alloc_reg), Operand::Reg(arg_reg)));
+                            self.push_text(Asm::Mov(
+                                Operand::Reg(*alloc_reg),
+                                Operand::Reg(arg_reg),
+                            ));
                         }
                         self.regs.insert(*alloc_reg, Some(param.clone()));
                         int_idx += 1;

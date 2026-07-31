@@ -15,7 +15,7 @@ impl IRGen {
         field_values: Vec<(String, Expr)>,
         ctx: &mut Context,
     ) -> Result<Operand, CodeGenError> {
-        let fields = self
+        let (_, fields) = self
             .structs
             .get(struct_name)
             .ok_or_else(|| CodeGenError::NameError {
@@ -47,6 +47,23 @@ impl IRGen {
         }
 
         Ok(ptr_tmp)
+    }
+
+    pub(super) fn const_array_len(&self, value: &Operand, ctx: &Context) -> Option<usize> {
+        let last_inst = ctx.instructions.last()?;
+        if !matches!(last_inst.op, Op::Move | Op::FMove) {
+            return None;
+        }
+        if last_inst.dst.as_ref() != Some(value) {
+            return None;
+        }
+        let Operand::ConstIdx(idx) = last_inst.src1.as_ref()? else {
+            return None;
+        };
+        match &self.constants[*idx] {
+            IRConst::Array(elems) => Some(elems.len()),
+            _ => None,
+        }
     }
 
     pub(super) fn compile_expr(
@@ -112,50 +129,13 @@ impl IRGen {
 
             Expr::VarDecl(name, typ, value, _) => {
                 let value = self.compile_expr(*value, ctx)?;
-                let value_type = ctx.get_operand_type(&value, &self.constants)?;
                 let var_ir_type = Context::type2ir_type(&typ);
 
-                let var_ir_type = match &typ {
-                    Type::Array(_, declared_len) if *declared_len > 0 => {
-                        if let IRType::Array(Some(actual_len)) = &value_type {
-                            if *declared_len > *actual_len && *actual_len == 1 {
-                                if let Operand::Temp(_, _) = value {
-                                    if let Some(last_inst) = ctx.instructions.last() {
-                                        if let Some(Operand::ConstIdx(idx)) = &last_inst.src1 {
-                                            if let IRConst::Array(_, elems) = &self.constants[*idx]
-                                            {
-                                                let fill_elem = elems[0].clone();
-                                                let new_elems = vec![fill_elem; *declared_len];
-                                                let new_const =
-                                                    IRConst::Array(*declared_len, new_elems);
-                                                let new_idx = self.get_const_index(new_const);
-                                                if let Some(last_inst) = ctx.instructions.last_mut()
-                                                {
-                                                    last_inst.src1 =
-                                                        Some(Operand::ConstIdx(new_idx));
-                                                }
-                                                return Ok(Operand::Temp(
-                                                    ctx.tmp_cnt - 1,
-                                                    IRType::Array(Some(*declared_len)),
-                                                ));
-                                            }
-                                        }
-                                    }
-                                }
-                            } else if *declared_len != *actual_len {
-                                return Err(CodeGenError::TypeError {
-                                    message: "array length mismatch".to_string(),
-                                });
-                            }
-                            IRType::Array(Some(*declared_len))
-                        } else {
-                            return Err(CodeGenError::TypeError {
-                                message: "expected array".to_string(),
-                            });
-                        }
+                if matches!(var_ir_type, IRType::Array) {
+                    if let Some(len) = self.const_array_len(&value, ctx) {
+                        ctx.array_lengths.insert(name.clone(), len);
                     }
-                    _ => var_ir_type,
-                };
+                }
 
                 ctx.declare_var_with_type(name.clone(), var_ir_type.clone(), typ.clone())?;
                 match var_ir_type {
@@ -183,6 +163,11 @@ impl IRGen {
                     return Err(CodeGenError::TypeError {
                         message: format!("unexpected type: {:?}", typ),
                     });
+                }
+                if matches!(var_typ, IRType::Array) {
+                    if let Some(len) = self.const_array_len(&value, ctx) {
+                        ctx.array_lengths.insert(name.clone(), len);
+                    }
                 }
                 match typ {
                     IRType::Float => ctx.instructions.push(Instruction {
@@ -559,32 +544,25 @@ impl IRGen {
             }
 
             Expr::For(var, iter, body, _) => {
+                let known_len = match &*iter {
+                    Expr::ArrayLiteral(elements, _) => Some(elements.len()),
+                    Expr::Var(name, _) => ctx.array_lengths.get(name).copied(),
+                    _ => None,
+                };
                 let array_operand = self.compile_expr(*iter, ctx)?;
-                let array_type = ctx.get_operand_type(&array_operand, &self.constants)?;
 
-                let array_len_operand = match array_type {
-                    IRType::Array(Some(l)) => {
-                        let idx = self.get_const_index(IRConst::Int(l as i64));
-                        Operand::ConstIdx(idx)
-                    }
-                    IRType::Array(None) => {
-                        let len_tmp = ctx.new_tmp(IRType::Int);
-                        ctx.instructions.push(Instruction {
-                            op: Op::SizeOf,
-                            dst: Some(len_tmp.clone()),
-                            src1: Some(array_operand.clone()),
-                            src2: None,
-                        });
-                        len_tmp
-                    }
-                    _ => {
-                        return Err(CodeGenError::TypeError {
-                            message: format!(
-                                "can only iterate over arrays, found {:?}",
-                                array_type
-                            ),
-                        });
-                    }
+                let array_len_operand = if let Some(len) = known_len {
+                    let idx = self.get_const_index(IRConst::Int(len as i64));
+                    Operand::ConstIdx(idx)
+                } else {
+                    let len_tmp = ctx.new_tmp(IRType::Int);
+                    ctx.instructions.push(Instruction {
+                        op: Op::SizeOf,
+                        dst: Some(len_tmp.clone()),
+                        src1: Some(array_operand.clone()),
+                        src2: None,
+                    });
+                    len_tmp
                 };
 
                 let label_cond = ctx.new_label("for_cond");
@@ -737,15 +715,17 @@ impl IRGen {
                 Ok(ctx.new_tmp(IRType::Void))
             }
 
-            Expr::FuncDecl(_, _, _, _, _) => Err(CodeGenError::SyntaxError {
+            Expr::FuncDecl(_, _, _, _, _, _) => Err(CodeGenError::SyntaxError {
                 message: "cannot declare a function in a function".to_string(),
             }),
 
-            Expr::Call(callee, args, _) => {
+            Expr::Call(callee, type_args, args, _) => {
                 let func_name = match &*callee {
                     Expr::Var(name, _) => {
                         if self.find_func(name).is_ok() {
                             Some(name.clone())
+                        } else if self.generic_funcs.contains_key(name) {
+                            Some(self.monomorphize(name, &type_args)?)
                         } else {
                             None
                         }
@@ -769,7 +749,7 @@ impl IRGen {
                         let operand = self.compile_expr(arg.clone(), ctx)?;
                         let operand_type = ctx.get_operand_type(&operand, &self.constants)?;
                         let type_matches = operand_type == param.1
-                            || (matches!(operand_type, IRType::Array(_)) && param.1 == IRType::Int);
+                            || (operand_type == IRType::Array && param.1 == IRType::Int);
                         if !type_matches {
                             return Err(CodeGenError::TypeError {
                                 message: format!(
@@ -827,7 +807,7 @@ impl IRGen {
             Expr::Index(arr, idx, _) => {
                 let elem_ir_type = match &*arr {
                     Expr::Var(name, _) => match ctx.get_var_high_type(name) {
-                        Some(Type::Array(elem_type, _)) => Context::type2ir_type(elem_type),
+                        Some(Type::Array(elem_type)) => Context::type2ir_type(elem_type),
                         _ => IRType::Int,
                     },
                     _ => IRType::Int,
@@ -867,37 +847,13 @@ impl IRGen {
             }
 
             Expr::ArrayLiteral(elements, _) => {
-                let is_fill = false;
                 let mut compiled = Vec::new();
                 for e in elements.iter() {
                     compiled.push(self.compile_expr(e.clone(), ctx)?);
                 }
 
-                let (ir_const, ir_type) = if is_fill && compiled.len() == 1 {
-                    let fill_element = compiled[0].clone();
-                    let mut elems = Vec::new();
-                    for _ in 0..elements.len() {
-                        elems.push(fill_element.clone());
-                    }
-                    (
-                        IRConst::Array(elems.len(), elems.clone()),
-                        IRType::Array(Some(elems.len())),
-                    )
-                } else {
-                    if elements.len() != compiled.len() {
-                        return Err(CodeGenError::TypeError {
-                            message: format!(
-                                "Array literal length mismatch: declared {}, actual {}",
-                                elements.len(),
-                                compiled.len()
-                            ),
-                        });
-                    }
-                    (
-                        IRConst::Array(compiled.len(), compiled.clone()),
-                        IRType::Array(Some(compiled.len())),
-                    )
-                };
+                let ir_const = IRConst::Array(compiled.clone());
+                let ir_type = IRType::Array;
 
                 let res_tmp = ctx.new_tmp(ir_type.clone());
                 let const_idx = self.get_const_index(ir_const);
@@ -921,8 +877,7 @@ impl IRGen {
             Expr::ArrayFill(typ, len, _) => {
                 let len_op = self.compile_expr(*len, ctx)?;
                 let elem_size = match &typ {
-                    Type::Named(n) if n == "bool" => 1i64,
-                    Type::Named(n) if matches!(n.as_str(), "int" | "float" | "string") => 8i64,
+                    Type::Primitive(crate::compiler::parser::Primitive::Boolean) => 1i64,
                     _ => 8i64,
                 };
                 let ptr_tmp = ctx.new_tmp(IRType::Int);
@@ -984,7 +939,7 @@ impl IRGen {
             Expr::Range(start, end, _) => {
                 let start_op = self.compile_expr(*start, ctx)?;
                 let end_op = self.compile_expr(*end, ctx)?;
-                let res_tmp = ctx.new_tmp(IRType::Array(None));
+                let res_tmp = ctx.new_tmp(IRType::Array);
                 ctx.instructions.push(Instruction {
                     op: Op::Range,
                     dst: Some(res_tmp.clone()),
@@ -998,14 +953,16 @@ impl IRGen {
                 message: "cannot extern a function in a function".to_string(),
             }),
 
-            Expr::StructLiteral(name, fields, _) => self.compile_struct_literal(&name, fields, ctx),
+            Expr::StructLiteral(name, _, fields, _) => {
+                self.compile_struct_literal(&name, fields, ctx)
+            }
 
             Expr::MemberAccess(obj, field_name, _) => {
                 let struct_name = match &*obj {
                     Expr::Var(name, _) => match ctx.get_var_high_type(name) {
-                        Some(Type::Named(sname)) => sname.clone(),
+                        Some(Type::Struct(sname, _)) => sname.clone(),
                         Some(Type::Pointer(box_ty)) => {
-                            if let Type::Named(sname) = box_ty.as_ref() {
+                            if let Type::Struct(sname, _) = box_ty.as_ref() {
                                 sname.clone()
                             } else {
                                 return Err(CodeGenError::TypeError {
@@ -1035,7 +992,7 @@ impl IRGen {
 
                 let mut offset = 0;
                 let mut found = false;
-                for (i, (fname, _)) in struct_def.iter().enumerate() {
+                for (i, (fname, _)) in struct_def.1.iter().enumerate() {
                     if fname == &field_name {
                         found = true;
                         offset = i * 8;
@@ -1063,9 +1020,9 @@ impl IRGen {
             Expr::MemberAssign(obj, field_name, value, _) => {
                 let struct_name = match &*obj {
                     Expr::Var(name, _) => match ctx.get_var_high_type(name) {
-                        Some(Type::Named(sname)) => sname.clone(),
+                        Some(Type::Struct(sname, _)) => sname.clone(),
                         Some(Type::Pointer(box_ty)) => {
-                            if let Type::Named(sname) = box_ty.as_ref() {
+                            if let Type::Struct(sname, _) = box_ty.as_ref() {
                                 sname.clone()
                             } else {
                                 return Err(CodeGenError::TypeError {
@@ -1095,7 +1052,7 @@ impl IRGen {
 
                 let mut offset = 0;
                 let mut found = false;
-                for (i, (fname, _)) in struct_def.iter().enumerate() {
+                for (i, (fname, _)) in struct_def.1.iter().enumerate() {
                     if fname == &field_name {
                         found = true;
                         offset = i * 8;
@@ -1130,7 +1087,7 @@ impl IRGen {
                     }
                 };
                 let is_struct = match ctx.get_var_high_type(&name) {
-                    Some(Type::Named(name)) => self.structs.contains_key(name),
+                    Some(Type::Struct(sname, _)) => self.structs.contains_key(sname),
                     _ => false,
                 };
                 if is_struct {
@@ -1171,7 +1128,7 @@ impl IRGen {
                 Ok(ctx.new_tmp(IRType::Void))
             }
 
-            Expr::TypeDef(_) | Expr::Struct(_, _, _) | Expr::Lambda(_, _, _, _) => {
+            Expr::TypeDef(_) | Expr::Struct(_, _, _, _) | Expr::Lambda(_, _, _, _) => {
                 Ok(ctx.new_tmp(IRType::Void))
             }
         }

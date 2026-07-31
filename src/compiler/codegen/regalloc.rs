@@ -86,7 +86,7 @@ fn collect_array_element_temps(
     out: &mut HashSet<String>,
 ) {
     if let Operand::ConstIdx(idx) = op {
-        if let crate::compiler::irgen::ir::IRConst::Array(_, elems) = &constants[*idx] {
+        if let crate::compiler::irgen::ir::IRConst::Array(elems) = &constants[*idx] {
             for elem in elems {
                 if let Operand::Temp(_, _) = elem {
                     out.insert(key(elem));
