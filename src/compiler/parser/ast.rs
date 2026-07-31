@@ -40,6 +40,17 @@ impl Type {
         matches!(self, Type::Primitive(Primitive::Boolean))
     }
 
+    pub fn is_pointer(&self) -> bool {
+        matches!(self, Type::Pointer(_))
+    }
+
+    pub fn pointee(&self) -> Option<&Type> {
+        match self {
+            Type::Pointer(inner) => Some(inner.as_ref()),
+            _ => None,
+        }
+    }
+
     pub fn is_numeric(&self) -> bool {
         matches!(
             self,

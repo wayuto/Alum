@@ -74,6 +74,8 @@ pub enum Op {
     JumpIfFalse,
     ArrayAccess,
     ArrayAssign,
+    ByteAccess,
+    ByteAssign,
     Label(String),
     Malloc,
     StoreAt,

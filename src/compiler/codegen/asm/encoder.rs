@@ -31,6 +31,21 @@ fn mem_rex_bits(m: &Mem) -> (bool, bool) {
     (rex_x, rex_b)
 }
 
+fn m_rex_x(op: &Operand) -> bool {
+    match op {
+        Operand::Mem(m) => m.index.map(|i| i.rex_b()).unwrap_or(false),
+        _ => false,
+    }
+}
+
+fn m_rex_b(op: &Operand) -> bool {
+    match op {
+        Operand::Mem(m) => m.base.map(|b| b.rex_b()).unwrap_or(false),
+        Operand::Reg(r) => r.rex_b(),
+        _ => false,
+    }
+}
+
 impl Assembler {
     pub fn new() -> Self {
         Assembler {
@@ -162,9 +177,30 @@ impl Assembler {
                 self.emit_slice(section, &(*v as i32).to_le_bytes());
             }
             Movzx(d, s) => {
-                self.emit_rex(section, false, false, false, d.rex_b() || s.rex_b());
+                self.emit_rex(section, false, d.rex_b(), m_rex_x(&s), m_rex_b(&s));
                 self.emit_slice(section, &[0x0f, 0xb6]);
-                self.emit_bytes(section, vec![self.modrm(3, d.reg_id() & 7, s.reg_id() & 7)]);
+                match s {
+                    Operand::Reg(s) => {
+                        self.emit_bytes(
+                            section,
+                            vec![self.modrm(3, d.reg_id() & 7, s.reg_id() & 7)],
+                        );
+                    }
+                    Operand::Mem(m) => {
+                        self.emit_modrm_sib(section, d.reg_id() & 7, m, offset)?;
+                    }
+                    _ => return Err(format!("unsupported movzx source {:?}", s)),
+                }
+            }
+            Movb(dst, src) => {
+                self.emit_rex(section, false, src.rex_b(), m_rex_x(&dst), m_rex_b(&dst));
+                self.emit_slice(section, &[0x88]);
+                match dst {
+                    Operand::Mem(m) => {
+                        self.emit_modrm_sib(section, src.reg_id() & 7, m, offset)?;
+                    }
+                    _ => return Err(format!("unsupported movb destination {:?}", dst)),
+                }
             }
             Movsd(dst, src) => self.emit_movsd(dst, src, section, offset)?,
             Add(dst, src) => self.emit_binop(0x03, 0x01, 0x83, 0x00, dst, src, section, offset)?,

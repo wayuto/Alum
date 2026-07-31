@@ -5,8 +5,15 @@ fun abs(n: int): int {
     return n
 }
 
-fun sqr(n: int): int {
-    return n * n
+fun sqrt(n: int): int {
+    if n <= 0 {
+        return 0
+    }
+    let i: int = 1
+    while i * i <= n {
+        i = i + 1
+    }
+    return i - 1
 }
 
 fun max(a: int, b: int): int {

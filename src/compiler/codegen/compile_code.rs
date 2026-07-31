@@ -146,7 +146,7 @@ impl AsmCodeGen {
                     _ => unreachable!(),
                 };
                 self.push_text(set_op(Reg::Rax));
-                self.push_text(Asm::Movzx(Reg::Rax, Reg::Rax));
+                self.push_text(Asm::Movzx(Reg::Rax, Operand::Reg(Reg::Rax)));
                 self.store_dst(dst, Reg::Rax)?;
                 self.invalidate_cached_reg(Reg::Rax);
                 self.regs.insert(Reg::Rax, Some(dst.clone()));
@@ -169,7 +169,7 @@ impl AsmCodeGen {
                     _ => unreachable!(),
                 };
                 self.push_text(set_op(Reg::Rax));
-                self.push_text(Asm::Movzx(Reg::Rax, Reg::Rax));
+                self.push_text(Asm::Movzx(Reg::Rax, Operand::Reg(Reg::Rax)));
                 self.store_dst(dst, Reg::Rax)?;
                 self.invalidate_cached_reg(Reg::Rax);
                 self.regs.insert(Reg::Rax, Some(dst.clone()));
@@ -408,6 +408,36 @@ impl AsmCodeGen {
                     m_sib(Reg::R10, Reg::Rcx, 8, 0),
                 ));
                 self.push_text(Asm::Mov(m_base(Reg::Rdx), Operand::Reg(Reg::Rax)));
+                Ok(())
+            }
+            Op::ByteAccess => {
+                let dst = code.dst.as_ref().unwrap();
+                let src1 = code.src1.as_ref().unwrap();
+                let src2 = code.src2.as_ref().unwrap();
+                self.load(src1, Reg::R10)?;
+                self.load(src2, Reg::Rcx)?;
+                self.push_text(Asm::Lea(
+                    Operand::Reg(Reg::Rax),
+                    m_sib(Reg::R10, Reg::Rcx, 1, 0),
+                ));
+                self.push_text(Asm::Movzx(Reg::Rax, m_base(Reg::Rax)));
+                self.store_dst(dst, Reg::Rax)?;
+                self.invalidate_cached_reg(Reg::Rax);
+                self.regs.insert(Reg::Rax, Some(dst.clone()));
+                Ok(())
+            }
+            Op::ByteAssign => {
+                let dst = code.dst.as_ref().unwrap();
+                let src1 = code.src1.as_ref().unwrap();
+                let src2 = code.src2.as_ref().unwrap();
+                self.load(dst, Reg::R10)?;
+                self.load(src1, Reg::Rcx)?;
+                self.load(src2, Reg::Rax)?;
+                self.push_text(Asm::Lea(
+                    Operand::Reg(Reg::Rdx),
+                    m_sib(Reg::R10, Reg::Rcx, 1, 0),
+                ));
+                self.push_text(Asm::Movb(m_base(Reg::Rdx), Reg::Rax));
                 Ok(())
             }
             Op::Lea => {

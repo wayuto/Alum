@@ -118,6 +118,10 @@ impl TypeChecker {
             self.check_expr(expr)?;
         }
 
+        for expr in &mut program.body {
+            self.resolve_call_type_args(expr);
+        }
+
         Ok(())
     }
 
@@ -159,6 +163,115 @@ impl TypeChecker {
                 args.iter().map(|t| self.resolve_type(t)).collect(),
             ),
             _ => ty.clone(),
+        }
+    }
+
+    pub(super) fn resolve_call_type_args(&mut self, expr: &mut Expr) {
+        match expr {
+            Expr::Call(callee, type_args, args, _) => {
+                for ty in type_args.iter_mut() {
+                    let resolved = self.resolve_type_var(ty);
+                    *ty = match resolved {
+                        Type::TypeVar(_) => Type::Primitive(Primitive::Int),
+                        t => t,
+                    };
+                }
+                self.resolve_call_type_args(callee);
+                for arg in args.iter_mut() {
+                    self.resolve_call_type_args(arg);
+                }
+            }
+            Expr::StructLiteral(_, type_args, fields, _) => {
+                for ty in type_args.iter_mut() {
+                    let resolved = self.resolve_type_var(ty);
+                    *ty = match resolved {
+                        Type::TypeVar(_) => Type::Primitive(Primitive::Int),
+                        t => t,
+                    };
+                }
+                for (_, value) in fields.iter_mut() {
+                    self.resolve_call_type_args(value);
+                }
+            }
+            Expr::Block(body, _) => {
+                for e in body.iter_mut() {
+                    self.resolve_call_type_args(e);
+                }
+            }
+            Expr::FuncDecl(_, _, _, _, body, _) => self.resolve_call_type_args(body),
+            Expr::Lambda(_, body, _, _) => self.resolve_call_type_args(body),
+            Expr::If(cond, then_branch, else_branch, _) => {
+                self.resolve_call_type_args(cond);
+                self.resolve_call_type_args(then_branch);
+                if let Some(e) = else_branch {
+                    self.resolve_call_type_args(e);
+                }
+            }
+            Expr::While(cond, body, _) => {
+                self.resolve_call_type_args(cond);
+                self.resolve_call_type_args(body);
+            }
+            Expr::For(_, array, body, _) => {
+                self.resolve_call_type_args(array);
+                self.resolve_call_type_args(body);
+            }
+            Expr::VarDecl(_, _, value, _)
+            | Expr::VarAssign(_, value, _)
+            | Expr::Return(value, _)
+            | Expr::AddAssign(_, value, _)
+            | Expr::SubAssign(_, value, _) => self.resolve_call_type_args(value),
+            Expr::ArrayLiteral(elems, _) => {
+                for e in elems.iter_mut() {
+                    self.resolve_call_type_args(e);
+                }
+            }
+            Expr::ArrayFill(_, len, _) => self.resolve_call_type_args(len),
+            Expr::Index(arr, idx, _) => {
+                self.resolve_call_type_args(arr);
+                self.resolve_call_type_args(idx);
+            }
+            Expr::IndexAssign(arr_idx, _, _) => self.resolve_call_type_args(arr_idx),
+            Expr::MemberAccess(obj, _, _) => self.resolve_call_type_args(obj),
+            Expr::MemberAssign(obj, _, val, _) => {
+                self.resolve_call_type_args(obj);
+                self.resolve_call_type_args(val);
+            }
+            Expr::AddressOf(inner, _) => self.resolve_call_type_args(inner),
+            Expr::Deref(inner, _) => self.resolve_call_type_args(inner),
+            Expr::DerefAssign(ptr, val, _) => {
+                self.resolve_call_type_args(ptr);
+                self.resolve_call_type_args(val);
+            }
+            Expr::Add(l, r, _)
+            | Expr::Sub(l, r, _)
+            | Expr::Mul(l, r, _)
+            | Expr::Div(l, r, _)
+            | Expr::Mod(l, r, _)
+            | Expr::Xor(l, r, _)
+            | Expr::FAdd(l, r, _)
+            | Expr::FSub(l, r, _)
+            | Expr::FMul(l, r, _)
+            | Expr::FDiv(l, r, _)
+            | Expr::Eq(l, r, _)
+            | Expr::Ne(l, r, _)
+            | Expr::Lt(l, r, _)
+            | Expr::Le(l, r, _)
+            | Expr::Gt(l, r, _)
+            | Expr::Ge(l, r, _)
+            | Expr::FEq(l, r, _)
+            | Expr::FNe(l, r, _)
+            | Expr::FLt(l, r, _)
+            | Expr::FLe(l, r, _)
+            | Expr::FGt(l, r, _)
+            | Expr::FGe(l, r, _)
+            | Expr::LAnd(l, r, _)
+            | Expr::LOr(l, r, _)
+            | Expr::StrCat(l, r, _) => {
+                self.resolve_call_type_args(l);
+                self.resolve_call_type_args(r);
+            }
+            Expr::Not(e, _) | Expr::Neg(e, _) | Expr::FNeg(e, _) => self.resolve_call_type_args(e),
+            _ => {}
         }
     }
 
@@ -262,9 +375,27 @@ impl TypeChecker {
             (_, Type::TypeVar(_)) => true,
             (Type::Param(a), Type::Param(b)) => a == b,
             (Type::Primitive(a), Type::Primitive(b)) => a == b,
+            (Type::Pointer(inner), Type::Primitive(Primitive::String))
+                if matches!(inner.as_ref(), Type::Primitive(Primitive::Void)) =>
+            {
+                true
+            }
+            (Type::Primitive(Primitive::String), Type::Pointer(inner))
+                if matches!(inner.as_ref(), Type::Primitive(Primitive::Void)) =>
+            {
+                true
+            }
             (Type::Array(a), Type::Array(b)) => self.types_compatible(a, b),
             (Type::Pointer(a), Type::Array(b)) => self.types_compatible(a, b),
-            (Type::Pointer(a), Type::Pointer(b)) => self.types_compatible(a, b),
+            (Type::Pointer(a), Type::Pointer(b)) => {
+                if matches!(a.as_ref(), Type::Primitive(Primitive::Void))
+                    || matches!(b.as_ref(), Type::Primitive(Primitive::Void))
+                {
+                    true
+                } else {
+                    self.types_compatible(a, b)
+                }
+            }
             (Type::Function(exp_params, exp_ret), Type::Function(found_params, found_ret)) => {
                 if exp_params.len() != found_params.len() {
                     return false;

@@ -284,11 +284,30 @@
                 },
                 {
                     "name": "storage.type.pointer.alum",
-                    "match": "\\*[A-Za-z_][A-Za-z0-9_]*"
+                    "match": "\\*[a-zA-Z_][A-Za-z0-9_]*"
                 },
                 {
                     "name": "storage.type.vec.alum",
                     "match": "\\bVec\\b"
+                },
+                {
+                    "name": "meta.type.generic.alum",
+                    "begin": "\\b[A-Z][A-Za-z0-9_]*\\b(?=<)",
+                    "end": "(?<=>)",
+                    "patterns": [
+                        {
+                            "name": "punctuation.definition.generic.begin.alum",
+                            "match": "<"
+                        },
+                        {
+                            "name": "punctuation.definition.generic.end.alum",
+                            "match": ">"
+                        },
+                        {
+                            "name": "entity.name.type.parameter.alum",
+                            "match": "[A-Za-z_][A-Za-z0-9_]*"
+                        }
+                    ]
                 },
                 {
                     "name": "meta.type.array.alum",
@@ -374,7 +393,7 @@
             "patterns": [
                 {
                     "name": "meta.function.declaration.alum",
-                    "begin": "(\\bfun)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(\\()",
+                    "begin": "(\\bfun)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(<[^>]*>)?\\s*(\\()",
                     "end": "(\\))\\s*(:)\\s*([\\w\\[\\]]+)\\s*(\\{)",
                     "beginCaptures": {
                         "1": {
@@ -384,6 +403,22 @@
                             "name": "entity.name.function.alum"
                         },
                         "3": {
+                            "patterns": [
+                                {
+                                    "name": "punctuation.definition.generic.begin.alum",
+                                    "match": "<"
+                                },
+                                {
+                                    "name": "punctuation.definition.generic.end.alum",
+                                    "match": ">"
+                                },
+                                {
+                                    "name": "entity.name.type.parameter.alum",
+                                    "match": "[A-Za-z_][A-Za-z0-9_]*"
+                                }
+                            ]
+                        },
+                        "4": {
                             "name": "punctuation.definition.parameters.begin.alum"
                         }
                     },
@@ -440,7 +475,7 @@
             "patterns": [
                 {
                     "name": "meta.extern.declaration.alum",
-                    "begin": "(\\bextern)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(\\()",
+                    "begin": "(\\bextern)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(<[^>]*>)?\\s*(\\()",
                     "end": "(\\))\\s*(:)\\s*([\\w\\[\\]]+)\\s*(;)",
                     "beginCaptures": {
                         "1": {
@@ -450,6 +485,22 @@
                             "name": "entity.name.function.extern.alum"
                         },
                         "3": {
+                            "patterns": [
+                                {
+                                    "name": "punctuation.definition.generic.begin.alum",
+                                    "match": "<"
+                                },
+                                {
+                                    "name": "punctuation.definition.generic.end.alum",
+                                    "match": ">"
+                                },
+                                {
+                                    "name": "entity.name.type.parameter.alum",
+                                    "match": "[A-Za-z_][A-Za-z0-9_]*"
+                                }
+                            ]
+                        },
+                        "4": {
                             "name": "punctuation.definition.parameters.begin.alum"
                         }
                     },
@@ -506,7 +557,7 @@
             "patterns": [
                 {
                     "name": "meta.variable.declaration.alum",
-                    "match": "(\\blet)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(:)\\s*([\\w\\[\\]]+)\\s*(=)",
+                    "match": "(\\blet)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(:)\\s*([\\w\\[\\]<>*,*\\s]+\\s*)\\s*(=)",
                     "captures": {
                         "1": {
                             "name": "storage.modifier.alum"
@@ -620,12 +671,28 @@
             "patterns": [
                 {
                     "name": "meta.function-call.alum",
-                    "match": "(?<!\\w|\\.)\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(\\()",
+                    "match": "(?<!\\w|\\.)\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(\\<[^\\>]*\\>)?\\s*(\\()",
                     "captures": {
                         "1": {
                             "name": "entity.name.function.call.alum"
                         },
                         "2": {
+                            "patterns": [
+                                {
+                                    "name": "punctuation.definition.generic.begin.alum",
+                                    "match": "<"
+                                },
+                                {
+                                    "name": "punctuation.definition.generic.end.alum",
+                                    "match": ">"
+                                },
+                                {
+                                    "name": "entity.name.type.parameter.alum",
+                                    "match": "[A-Za-z_][A-Za-z0-9_]*"
+                                }
+                            ]
+                        },
+                        "3": {
                             "name": "punctuation.definition.arguments.begin.alum"
                         }
                     }
@@ -649,6 +716,10 @@
                 {
                     "name": "keyword.operator.logical.alum",
                     "match": "&&|\\|\\||!"
+                },
+                {
+                    "name": "keyword.operator.address.alum",
+                    "match": "(?<!\\w)&(?!=)"
                 },
                 {
                     "name": "keyword.operator.range.alum",

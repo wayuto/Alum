@@ -125,6 +125,24 @@ impl TypeChecker {
                     return Ok(Type::Primitive(Primitive::String));
                 }
 
+                let is_int_like =
+                    |t: &Type| matches!(t, Type::Primitive(Primitive::Int) | Type::TypeVar(_));
+                if matches!(expr, Expr::Add(..) | Expr::Sub(..)) {
+                    let ptr_type = if lhs_type.is_pointer() && is_int_like(&rhs_type) {
+                        Some(lhs_type.clone())
+                    } else if matches!(expr, Expr::Add(..))
+                        && rhs_type.is_pointer()
+                        && is_int_like(&lhs_type)
+                    {
+                        Some(rhs_type.clone())
+                    } else {
+                        None
+                    };
+                    if let Some(pt) = ptr_type {
+                        return Ok(pt);
+                    }
+                }
+
                 if lhs_type.is_float() || rhs_type.is_float() {
                     if !lhs_type.is_numeric() || !rhs_type.is_numeric() {
                         return Err(CheckerError::InvalidOperation {
@@ -282,14 +300,28 @@ impl TypeChecker {
                     .lookup_var(name)
                     .ok_or_else(|| CheckerError::UndefinedVariable(name.clone(), span))?;
                 let value_type = self.check_expr(value)?;
-                self.unify_types(&var_type, &value_type).map_err(|_| {
-                    CheckerError::TypeMismatch {
-                        expected: var_type.clone(),
-                        found: value_type,
-                        context: format!("compound assignment to '{}'", name),
-                        span: span,
+                if var_type.is_pointer() {
+                    if !matches!(
+                        value_type,
+                        Type::Primitive(Primitive::Int) | Type::TypeVar(_)
+                    ) {
+                        return Err(CheckerError::TypeMismatch {
+                            expected: Type::Primitive(Primitive::Int),
+                            found: value_type,
+                            context: format!("compound assignment to '{}'", name),
+                            span: span,
+                        });
                     }
-                })?;
+                } else {
+                    self.unify_types(&var_type, &value_type).map_err(|_| {
+                        CheckerError::TypeMismatch {
+                            expected: var_type.clone(),
+                            found: value_type,
+                            context: format!("compound assignment to '{}'", name),
+                            span: span,
+                        }
+                    })?;
+                }
                 Ok(var_type)
             }
 
@@ -342,6 +374,16 @@ impl TypeChecker {
                         Expr::Ge(_, _, _) => Expr::FGe(l, r, Span::new(0, 0)),
                         _ => unreachable!(),
                     };
+                } else if lhs_type.is_pointer() || rhs_type.is_pointer() {
+                    let void_like =
+                        |t: &Type| t.is_pointer() || matches!(t, Type::Primitive(Primitive::Void));
+                    if !void_like(&lhs_type) || !void_like(&rhs_type) {
+                        return Err(CheckerError::InvalidOperation {
+                            op: "comparison".to_string(),
+                            type_name: format!("{:?} and {:?}", lhs_type, rhs_type),
+                            span: span,
+                        });
+                    }
                 } else if !lhs_type.is_numeric() || !rhs_type.is_numeric() {
                     return Err(CheckerError::InvalidOperation {
                         op: "comparison".to_string(),
@@ -414,19 +456,13 @@ impl TypeChecker {
                                         .get(&i)
                                         .cloned()
                                         .unwrap_or_else(|| Type::Primitive(Primitive::Int));
-                                    match self.resolve_type_var(&tv) {
-                                        Type::TypeVar(_) => Type::Primitive(Primitive::Int),
-                                        t => t,
-                                    }
+                                    self.resolve_type_var(&tv)
                                 })
                                 .collect();
                             *type_args = resolved_args.clone();
 
                             let ret = self.resolve_type_var(&inst_ret);
-                            return Ok(match ret {
-                                Type::TypeVar(_) => Type::Primitive(Primitive::Int),
-                                t => t,
-                            });
+                            return Ok(ret);
                         }
                     }
                 }
@@ -612,6 +648,7 @@ impl TypeChecker {
                 match array_type {
                     Type::Array(inner) => Ok(*inner),
                     Type::Primitive(Primitive::String) => Ok(Type::Primitive(Primitive::Int)),
+                    Type::Pointer(inner) => Ok(*inner),
                     _ => Err(CheckerError::InvalidOperation {
                         op: "index".to_string(),
                         type_name: format!("{:?}", array_type),
@@ -653,6 +690,16 @@ impl TypeChecker {
                                     expected: Type::Primitive(Primitive::Int),
                                     found: value_type,
                                     context: "string assignment".to_string(),
+                                    span: span,
+                                });
+                            }
+                        }
+                        Type::Pointer(inner) => {
+                            if !self.types_compatible(&inner, &value_type) {
+                                return Err(CheckerError::TypeMismatch {
+                                    expected: *inner,
+                                    found: value_type,
+                                    context: "pointer assignment".to_string(),
                                     span: span,
                                 });
                             }

@@ -49,33 +49,20 @@ Provides mathematical operations.
 
 ```al
 extern abs(int): int        // Absolute value
-extern sqr(int): int         // Square (x * x)
+extern sqrt(int): int       // Integer square root
 extern max(int, int): int   // Maximum of two numbers
 extern min(int, int): int   // Minimum of two numbers
 extern pow(int, int): int   // Power function
 extern fact(int): int       // Factorial
 ```
 
-### String Module (`string.al`)
-
-Provides string manipulation functions.
-
-```al
-extern strlen(string): int              // String length
-extern strcpy(string, string): string   // String copy
-extern strcat(string, string): string   // String concatenation
-extern memcpy(string, string, int): string  // Memory copy
-extern memset(string, int, int): string    // Memory set
-extern bcmp(string, string, int): int      // Byte comparison
-extern memcmp(string, string, int): int    // Memory comparison
-```
-
 ### Memory Module (`memory.al`)
 
-Provides memory management functions.
+Provides memory management functions using a free-list allocator with block headers.
 
 ```al
-extern malloc(int): string  // Allocate memory (returns pointer)
+extern malloc(int): *void  // Allocate memory, returns byte pointer
+extern free(*void): void   // Free memory (no size needed)
 ```
 
 ### Convert Module (`convert.al`)

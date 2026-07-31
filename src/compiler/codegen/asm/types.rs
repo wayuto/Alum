@@ -185,7 +185,8 @@ pub enum Asm {
     Db(Vec<u8>),
 
     Mov(Operand, Operand),
-    Movzx(Reg, Reg),
+    Movzx(Reg, Operand),
+    Movb(Operand, Reg),
     Lea(Operand, Operand),
     Add(Operand, Operand),
     Sub(Operand, Operand),

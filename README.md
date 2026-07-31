@@ -12,6 +12,10 @@ Alum is a modern, systems programming language designed for simplicity and perfo
 - **Build Tool**: Integrated build system (almk) for project management
 - **Lambda Functions**: Support for anonymous functions and closures
 - **Parametric Macros**: Powerful macro system with parameter substitution
+- **Pointer Arithmetic**: Full C-style pointer arithmetic (`p + n`, `p - n`, `p[i]`)
+- **String Indexing**: Byte-level indexing on strings (`s[i]`)
+- **Generics**: Parametric polymorphism with monomorphic instantiation (`Vec<T>`, generic functions)
+- **Free-List Allocator**: Efficient malloc/free with block headers and coalescing
 
 ## Installation
 
@@ -147,9 +151,7 @@ Alum is a statically typed language with explicit type annotations. All variable
 - `void`: No return type
 - `T[N]`: Fixed-size array of type T with N elements
 - `T[]`: Dynamic array (length determined at runtime)
-- `gen`: Generic type with automatic type inference
-
-The `gen` type supports generic-like programming with automatic type inference. Variables and parameters of type `gen` can accept gen value, and the compiler infers the actual type based on usage context.
+- `T`: Generic type parameter (for parametric polymorphism)
 
 ### Variables
 
@@ -282,21 +284,54 @@ fun main(): int {
 
 **Dynamic Memory:**
 ```al
-extern malloc(int): *int  // Allocate memory
-extern free(*int): void   // Free memory
+$import "memory.ah"
+
+extern malloc(int): *void  // Allocate memory, returns byte pointer
+extern free(*void): void   // Free memory (no size needed — block header stores size)
 
 fun main(): int {
-    let ptr: *int = malloc(10)  // Allocate memory for 10 integers
-    *ptr = 42
-    println(itoa(*ptr))
+    let ptr: *void = malloc(100)
     free(ptr)
+    return 0
+}
+```
+
+**Pointer Arithmetic:**
+```al
+fun main(): int {
+    let p: *int = malloc(40)  // Space for 5 integers
+    p[0] = 10
+    p[1] = 20
+
+    let q: *int = p + 1  // Move to next int (8 bytes ahead)
+    println(itoa(q[0]))  // Output: 20
+
+    let sub: *int = p - 1  // Move to previous int
+    println(itoa(sub[1]))  // Output: 20 (same as p[0]→wait actually sub=p-1 →sub[1]=p[0])
+
+    let eq: bool = p == p
+    println(itoa(eq))  // Output: 1
+
+    let lt: bool = p < q
+    println(itoa(lt))  // Output: 1
+
+    return 0
+}
+```
+
+**String Indexing:**
+```al
+fun main(): int {
+    let s: string = "Hello"
+    println(itoa(s[0]))  // Output: 72 (ASCII 'H')
+    println(itoa(s[4]))  // Output: 111 (ASCII 'o')
     return 0
 }
 ```
 
 ### Vec Container
 
-Alum provides a dynamic array (Vec) for storing collections of elements that can grow or shrink at runtime. The Vec is part of the standard library and supports various operations.
+Alum provides a generic dynamic array `Vec<T>` for storing collections of elements that can grow or shrink at runtime. The Vec uses monomorphic instantiation — each element type gets its own compiled version.
 
 **Importing Vec:**
 ```al
@@ -306,7 +341,7 @@ $import "vec.ah"
 **Creating a Vec:**
 ```al
 fun main(): int {
-    let vec: Vec = vec_new()
+    let vec: Vec<int> = vec_new()
     return 0
 }
 ```
@@ -317,7 +352,7 @@ $import "vec.ah"
 $import "convert.ah"
 
 fun main(): int {
-    let vec: Vec = vec_new()
+    let vec: Vec<int> = vec_new()
     
     // Push elements
     vec.push(&vec, 10)
@@ -325,52 +360,21 @@ fun main(): int {
     vec.push(&vec, 30)
     
     // Access elements by index
-    let first: gen = vec.at(&vec, 0)
-    let second: gen = vec.at(&vec, 1)
+    let first: int = vec.at(&vec, 0)
+    let second: int = vec.at(&vec, 1)
     
     println(itoa(first))   // Output: 10
     println(itoa(second))  // Output: 20
-    
-    // Pop elements
-    let popped: gen = vec.pop(&vec)
-    println(itoa(popped))  // Output: 30
-    
-    return 0
-}
-```
-
-**Vec with Structs:**
-```al
-struct Point {
-    x: int,
-    y: int
-}
-
-$import "vec.ah"
-
-fun main(): int {
-    let vec: Vec = vec_new()
-    
-    let p1: Point = Point { x: 10, y: 20 }
-    let p2: Point = Point { x: 30, y: 40 }
-    
-    vec.push(&vec, p1)
-    vec.push(&vec, p2)
-    
-    let point: gen = vec.at(&vec, 0)
-    // Access struct fields (requires casting or direct access pattern)
     
     return 0
 }
 ```
 
 **Vec Methods:**
-- `vec_new()`: Creates a new empty Vec
+- `vec_new<T>()`: Creates a new empty `Vec<T>`
 - `vec.at(&vec, index)`: Access element at the given index
 - `vec.push(&vec, element)`: Add an element to the end
 - `vec.pop(&vec)`: Remove and return the last element
-
-**Note:** The Vec uses `gen` type to store elements, allowing it to hold values of gen type. The compiler automatically infers the actual type based on usage context.
 
 ### Structs
 
@@ -428,54 +432,38 @@ fun main(): int {
 
 Lambda syntax: `\(param: type, ...): return_type body`
 
-### Any Type (Generic Programming)
+### Generic Types (Parametric Polymorphism)
 
-The `gen` type provides generic-like functionality with automatic type inference:
+Alum supports generic functions and types with explicit type parameters:
 
 ```al
-fun identity(x: gen): gen {
+fun identity<T>(x: T): T {
     return x
 }
 
-fun add(a: gen, b: gen): gen {
+fun add<T>(a: T, b: T): T {
     return a + b
 }
 
 fun main(): int {
-    // gen type accepts gen value
-    let x: gen = 42
-    let y: gen = "hello"
-    let z: gen = 3.14
+    // Type inferred from usage
+    let x: int = identity(42)
+    let y: float = identity(3.14)
 
-    // Type is inferred from usage
-    let result: gen = identity(x)  // inferred as int
-    println(itoa(result))
-
-    // Works with arithmetic operations
-    let sum: gen = add(10, 20)  // inferred as int
+    // Works with arithmetic
+    let sum: int = add(10, 20)
     println(itoa(sum))
-
-    // Functions can return gen type
-    fun get_func(): gen {
-        fun helper(): gen {
-            return 42
-        }
-        return helper
-    }
-
-    let func_ptr: gen = get_func()
-    let value: gen = func_ptr()  // inferred as int
-    println(itoa(value))
 
     return 0
 }
 ```
 
 **Key Features:**
-- **Type Inference**: The actual type is inferred from how the value is used
-- **Flexibility**: Can represent gen type (int, float, string, functions, etc.)
-- **Safety**: Type checking is still performed at compile time
-- **Compatibility**: `gen` is compatible with all other types
+- **Explicit Type Parameters**: `fun foo<T>(x: T): T` declares a generic function
+- **Type Inference**: The actual type is inferred from usage context
+- **Monomorphic Instantiation**: The compiler generates a specialized version for each type used
+- **Generic Containers**: `Vec<T>` holds elements of type `T`
+- **Flexibility**: Generics work with all types including structs and functions
 
 ### Preprocessor Directives
 

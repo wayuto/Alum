@@ -1,5 +1,9 @@
 use super::error::CheckerError;
-use crate::compiler::{Span, parser::Type, visitor::TypeChecker};
+use crate::compiler::{
+    Span,
+    parser::{Primitive, Type},
+    visitor::TypeChecker,
+};
 
 impl TypeChecker {
     pub(super) fn resolve_type_var(&self, ty: &Type) -> Type {
@@ -72,8 +76,26 @@ impl TypeChecker {
             (Type::Primitive(p1), Type::Primitive(p2)) if p1 == p2 => Ok(()),
             (Type::Pointer(p), Type::Array(a)) => self.unify_types(p, a),
             (Type::Array(a), Type::Pointer(p)) => self.unify_types(p, a),
+            (Type::Pointer(inner), Type::Primitive(Primitive::String))
+                if matches!(inner.as_ref(), Type::Primitive(Primitive::Void)) =>
+            {
+                Ok(())
+            }
+            (Type::Primitive(Primitive::String), Type::Pointer(inner))
+                if matches!(inner.as_ref(), Type::Primitive(Primitive::Void)) =>
+            {
+                Ok(())
+            }
             (Type::Array(a1), Type::Array(a2)) => self.unify_types(a1, a2),
-            (Type::Pointer(p1), Type::Pointer(p2)) => self.unify_types(p1, p2),
+            (Type::Pointer(p1), Type::Pointer(p2)) => {
+                if matches!(p1.as_ref(), Type::Primitive(Primitive::Void))
+                    || matches!(p2.as_ref(), Type::Primitive(Primitive::Void))
+                {
+                    Ok(())
+                } else {
+                    self.unify_types(p1, p2)
+                }
+            }
             (Type::Function(p1, r1), Type::Function(p2, r2)) => {
                 if p1.len() != p2.len() {
                     return Err(CheckerError::TypeMismatch {

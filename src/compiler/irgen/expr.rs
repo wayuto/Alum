@@ -3,7 +3,7 @@ use super::ir::{IRConst, IRType, Instruction, Op, Operand};
 use crate::compiler::{
     codegen::CodeGenError,
     irgen::IRGen,
-    parser::{Expr, Type},
+    parser::{Expr, Primitive, Type},
 };
 use ordered_float::OrderedFloat;
 use std::iter::zip;
@@ -123,7 +123,14 @@ impl IRGen {
                 Ok(res_tmp)
             }
             Expr::Nil(_) => {
-                let res_tmp = ctx.new_tmp(IRType::Void);
+                let res_tmp = ctx.new_tmp(IRType::Int);
+                let zero_idx = self.get_const_index(IRConst::Int(0));
+                ctx.instructions.push(Instruction {
+                    op: Op::Move,
+                    dst: Some(res_tmp.clone()),
+                    src1: Some(Operand::ConstIdx(zero_idx)),
+                    src2: None,
+                });
                 Ok(res_tmp)
             }
 
@@ -214,9 +221,114 @@ impl IRGen {
                 }
             }
 
-            Expr::Add(_, _, _)
-            | Expr::Sub(_, _, _)
-            | Expr::Mul(_, _, _)
+            Expr::Add(_, _, _) | Expr::Sub(_, _, _) => {
+                let (op, l, r) = IRGen::get_binop_parts(expr)?;
+                {
+                    let is_add = op == Op::Add;
+                    let int_like = |e: &Expr| -> bool {
+                        matches!(e, Expr::Int(_, _))
+                            || matches!(
+                                self.expr_high_type(e, ctx),
+                                Some(Type::Primitive(Primitive::Int))
+                            )
+                    };
+                    let pointee_of = |e: &Expr| -> Option<Type> {
+                        match self.expr_high_type(e, ctx) {
+                            Some(Type::Pointer(inner)) => Some(*inner),
+                            _ => None,
+                        }
+                    };
+                    let l_pointee = pointee_of(&*l);
+                    let r_pointee = pointee_of(&*r);
+                    if let Some(pointee) = l_pointee {
+                        if int_like(&*r) {
+                            let (scale, l_is_ptr) = (Self::ptr_scale(&pointee), true);
+                            let base_e = l;
+                            let off_e = r;
+                            let base_op = self.compile_expr(*base_e, ctx)?;
+                            let off_op = self.compile_expr(*off_e, ctx)?;
+                            let res_tmp = ctx.new_tmp(IRType::Int);
+                            if scale == 1 {
+                                ctx.instructions.push(Instruction {
+                                    op: if l_is_ptr { Op::Add } else { Op::Sub },
+                                    dst: Some(res_tmp.clone()),
+                                    src1: Some(base_op),
+                                    src2: Some(off_op),
+                                });
+                            } else {
+                                let scaled = ctx.new_tmp(IRType::Int);
+                                let scale_idx = self.get_const_index(IRConst::Int(scale as i64));
+                                ctx.instructions.push(Instruction {
+                                    op: Op::Mul,
+                                    dst: Some(scaled.clone()),
+                                    src1: Some(off_op),
+                                    src2: Some(Operand::ConstIdx(scale_idx)),
+                                });
+                                ctx.instructions.push(Instruction {
+                                    op: if l_is_ptr { Op::Add } else { Op::Sub },
+                                    dst: Some(res_tmp.clone()),
+                                    src1: Some(base_op),
+                                    src2: Some(scaled),
+                                });
+                            }
+                            return Ok(res_tmp);
+                        }
+                    }
+                    if is_add {
+                        if let Some(pointee) = r_pointee {
+                            if int_like(&*l) {
+                                let (scale, l_is_ptr) = (Self::ptr_scale(&pointee), false);
+                                let base_e = r;
+                                let off_e = l;
+                                let base_op = self.compile_expr(*base_e, ctx)?;
+                                let off_op = self.compile_expr(*off_e, ctx)?;
+                                let res_tmp = ctx.new_tmp(IRType::Int);
+                                if scale == 1 {
+                                    ctx.instructions.push(Instruction {
+                                        op: if l_is_ptr { Op::Add } else { Op::Sub },
+                                        dst: Some(res_tmp.clone()),
+                                        src1: Some(base_op),
+                                        src2: Some(off_op),
+                                    });
+                                } else {
+                                    let scaled = ctx.new_tmp(IRType::Int);
+                                    let scale_idx =
+                                        self.get_const_index(IRConst::Int(scale as i64));
+                                    ctx.instructions.push(Instruction {
+                                        op: Op::Mul,
+                                        dst: Some(scaled.clone()),
+                                        src1: Some(off_op),
+                                        src2: Some(Operand::ConstIdx(scale_idx)),
+                                    });
+                                    ctx.instructions.push(Instruction {
+                                        op: if l_is_ptr { Op::Add } else { Op::Sub },
+                                        dst: Some(res_tmp.clone()),
+                                        src1: Some(base_op),
+                                        src2: Some(scaled),
+                                    });
+                                }
+                                return Ok(res_tmp);
+                            }
+                        }
+                    }
+                }
+                let left = self.compile_expr(*l, ctx)?;
+                let right = self.compile_expr(*r, ctx)?;
+                let typ = ctx.get_operand_type(&left, &self.constants)?;
+                let res_tmp = match op {
+                    Op::StrCat => ctx.new_tmp(IRType::String),
+                    _ => ctx.new_tmp(typ.clone()),
+                };
+                ctx.instructions.push(Instruction {
+                    op,
+                    dst: Some(res_tmp.clone()),
+                    src1: Some(left),
+                    src2: Some(right),
+                });
+                Ok(res_tmp)
+            }
+
+            Expr::Mul(_, _, _)
             | Expr::Div(_, _, _)
             | Expr::Mod(_, _, _)
             | Expr::FAdd(_, _, _)
@@ -344,7 +456,29 @@ impl IRGen {
 
             Expr::AddAssign(name, value, _) => {
                 let var_op = Operand::Var(name.clone());
-                let rhs = self.compile_expr(*value, ctx)?;
+                let var_high = ctx.get_var_high_type(name.as_str()).cloned();
+                let scale = var_high
+                    .as_ref()
+                    .and_then(|t| t.pointee())
+                    .map(Self::ptr_scale);
+                let rhs_raw = self.compile_expr(*value, ctx)?;
+                let rhs = if let Some(s) = scale {
+                    if s == 1 {
+                        rhs_raw
+                    } else {
+                        let scaled = ctx.new_tmp(IRType::Int);
+                        let scale_idx = self.get_const_index(IRConst::Int(s as i64));
+                        ctx.instructions.push(Instruction {
+                            op: Op::Mul,
+                            dst: Some(scaled.clone()),
+                            src1: Some(rhs_raw),
+                            src2: Some(Operand::ConstIdx(scale_idx)),
+                        });
+                        scaled
+                    }
+                } else {
+                    rhs_raw
+                };
                 let var_tmp = ctx.new_tmp(IRType::Int);
                 ctx.instructions.push(Instruction {
                     op: Op::Load,
@@ -370,7 +504,29 @@ impl IRGen {
 
             Expr::SubAssign(name, value, _) => {
                 let var_op = Operand::Var(name.clone());
-                let rhs = self.compile_expr(*value, ctx)?;
+                let var_high = ctx.get_var_high_type(name.as_str()).cloned();
+                let scale = var_high
+                    .as_ref()
+                    .and_then(|t| t.pointee())
+                    .map(Self::ptr_scale);
+                let rhs_raw = self.compile_expr(*value, ctx)?;
+                let rhs = if let Some(s) = scale {
+                    if s == 1 {
+                        rhs_raw
+                    } else {
+                        let scaled = ctx.new_tmp(IRType::Int);
+                        let scale_idx = self.get_const_index(IRConst::Int(s as i64));
+                        ctx.instructions.push(Instruction {
+                            op: Op::Mul,
+                            dst: Some(scaled.clone()),
+                            src1: Some(rhs_raw),
+                            src2: Some(Operand::ConstIdx(scale_idx)),
+                        });
+                        scaled
+                    }
+                } else {
+                    rhs_raw
+                };
                 let var_tmp = ctx.new_tmp(IRType::Int);
                 ctx.instructions.push(Instruction {
                     op: Op::Load,
@@ -783,6 +939,7 @@ impl IRGen {
                     });
                     Ok(res_tmp)
                 } else {
+                    let ret_ir_type = self.member_call_ret_type(&callee, ctx);
                     let callee_op = self.compile_expr(*callee, ctx)?;
                     for (n, arg) in args.iter().enumerate() {
                         let operand = self.compile_expr(arg.clone(), ctx)?;
@@ -793,7 +950,7 @@ impl IRGen {
                             src2: None,
                         });
                     }
-                    let res_tmp = ctx.new_tmp(IRType::Int);
+                    let res_tmp = ctx.new_tmp(ret_ir_type);
                     ctx.instructions.push(Instruction {
                         op: Op::Call,
                         dst: Some(res_tmp.clone()),
@@ -805,18 +962,17 @@ impl IRGen {
             }
 
             Expr::Index(arr, idx, _) => {
-                let elem_ir_type = match &*arr {
-                    Expr::Var(name, _) => match ctx.get_var_high_type(name) {
-                        Some(Type::Array(elem_type)) => Context::type2ir_type(elem_type),
-                        _ => IRType::Int,
-                    },
-                    _ => IRType::Int,
-                };
+                let (elem_type, byte) = self.index_info(&arr, ctx);
+                let elem_ir_type = elem_type.map_or(IRType::Int, |t| Context::type2ir_type(&t));
                 let arr_op = self.compile_expr(*arr, ctx)?;
                 let offset = self.compile_expr(*idx, ctx)?;
                 let res_tmp = ctx.new_tmp(elem_ir_type);
                 ctx.instructions.push(Instruction {
-                    op: Op::ArrayAccess,
+                    op: if byte {
+                        Op::ByteAccess
+                    } else {
+                        Op::ArrayAccess
+                    },
                     dst: Some(res_tmp.clone()),
                     src1: Some(arr_op),
                     src2: Some(offset),
@@ -833,12 +989,17 @@ impl IRGen {
                         });
                     }
                 };
+                let (elem_type, byte) = self.index_info(&arr, ctx);
                 let arr_op = self.compile_expr(*arr, ctx)?;
                 let offset = self.compile_expr(*idx, ctx)?;
                 let val = self.compile_expr(*value, ctx)?;
                 let res_tmp = ctx.new_tmp(IRType::Void);
                 ctx.instructions.push(Instruction {
-                    op: Op::ArrayAssign,
+                    op: if byte {
+                        Op::ByteAssign
+                    } else {
+                        Op::ArrayAssign
+                    },
                     dst: Some(arr_op),
                     src1: Some(offset),
                     src2: Some(val),
@@ -1132,5 +1293,157 @@ impl IRGen {
                 Ok(ctx.new_tmp(IRType::Void))
             }
         }
+    }
+
+    fn member_call_ret_type(&self, callee: &Expr, ctx: &Context) -> IRType {
+        if let Expr::MemberAccess(obj, field_name, _) = callee {
+            if let Expr::Var(name, _) = &**obj {
+                if let Some(Type::Struct(sname, type_args)) = ctx.get_var_high_type(name) {
+                    if let Some((_, fields)) = self.structs.get(sname) {
+                        for (fname, ftype) in fields {
+                            if fname == field_name {
+                                if let Type::Function(_, ret) = ftype {
+                                    let concrete = ret.substitute(type_args);
+                                    return Context::type2ir_type(&concrete);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        IRType::Int
+    }
+
+    fn ptr_arith_scale(&self, op: &Op, l: &Expr, r: &Expr, ctx: &Context) -> Option<(usize, bool)> {
+        if !matches!(op, Op::Add | Op::Sub) {
+            return None;
+        }
+        let int_like = |e: &Expr| match e {
+            Expr::Int(_, _) => true,
+            _ => matches!(
+                self.expr_high_type(e, ctx),
+                Some(Type::Primitive(Primitive::Int))
+            ),
+        };
+        let pointee_of = |e: &Expr| -> Option<Type> {
+            match self.expr_high_type(e, ctx) {
+                Some(Type::Pointer(inner)) => Some(*inner),
+                _ => None,
+            }
+        };
+
+        if let Some(pointee) = pointee_of(l) {
+            if int_like(r) {
+                return Some((Self::ptr_scale(&pointee), true));
+            }
+        }
+        if *op == Op::Add {
+            if let Some(pointee) = pointee_of(r) {
+                if int_like(l) {
+                    return Some((Self::ptr_scale(&pointee), false));
+                }
+            }
+        }
+        None
+    }
+
+    fn ptr_scale(ty: &Type) -> usize {
+        match ty {
+            Type::Primitive(Primitive::Void) => 1,
+            _ => 8,
+        }
+    }
+
+    fn expr_high_type(&self, e: &Expr, ctx: &Context) -> Option<Type> {
+        match e {
+            Expr::Var(name, _) => ctx.get_var_high_type(name.as_str()).cloned(),
+            Expr::AddressOf(inner, _) => match inner.as_ref() {
+                Expr::Var(n, _) => ctx
+                    .get_var_high_type(n.as_str())
+                    .cloned()
+                    .map(|t| Type::Pointer(Box::new(t))),
+                _ => None,
+            },
+            Expr::Deref(inner, _) => match inner.as_ref() {
+                Expr::Var(n, _) => match ctx.get_var_high_type(n.as_str()) {
+                    Some(Type::Pointer(t)) => Some(*t.clone()),
+                    _ => None,
+                },
+                _ => match &self.expr_high_type(inner, ctx) {
+                    Some(Type::Pointer(t)) => Some(*t.clone()),
+                    _ => None,
+                },
+            },
+            Expr::Index(arr, _, _) => self.index_info(arr, ctx).0,
+            _ => None,
+        }
+    }
+
+    fn index_info(&self, arr: &Expr, ctx: &Context) -> (Option<Type>, bool) {
+        let (sname, type_args, field_name) = match arr {
+            Expr::Var(name, _) => match ctx.get_var_high_type(name) {
+                Some(Type::Array(elem)) => return (Some(elem.as_ref().clone()), false),
+                Some(Type::Primitive(Primitive::String)) => {
+                    return (Some(Type::Primitive(Primitive::Int)), true);
+                }
+                Some(Type::Pointer(inner)) => {
+                    return (Some(*inner.clone()), Self::ptr_scale(inner) == 1);
+                }
+                Some(Type::Struct(sname, ta)) => (sname.clone(), ta.clone(), None),
+                Some(Type::Pointer(box_ty)) => {
+                    if let Type::Struct(sname, ta) = box_ty.as_ref() {
+                        (sname.clone(), ta.clone(), None)
+                    } else {
+                        return (None, false);
+                    }
+                }
+                _ => return (None, false),
+            },
+            Expr::MemberAccess(obj, field_name, _) => match &**obj {
+                Expr::Var(name, _) => match ctx.get_var_high_type(name) {
+                    Some(Type::Struct(sname, type_args)) => {
+                        (sname.clone(), type_args.clone(), Some(field_name.clone()))
+                    }
+                    Some(Type::Pointer(box_ty)) => {
+                        if let Type::Struct(sname, type_args) = box_ty.as_ref() {
+                            (sname.clone(), type_args.clone(), Some(field_name.clone()))
+                        } else {
+                            return (None, false);
+                        }
+                    }
+                    _ => return (None, false),
+                },
+                _ => return (None, false),
+            },
+            _ => return (None, false),
+        };
+
+        if let Some((_, fields)) = self.structs.get(&sname) {
+            for (fname, ftype) in fields {
+                if Some(fname.as_str()) == field_name.as_deref() {
+                    let byte = match ftype {
+                        Type::Primitive(Primitive::String) => true,
+                        Type::Array(elem) => {
+                            let concrete = elem.substitute(&type_args);
+                            false
+                        }
+                        Type::Pointer(inner) => Self::ptr_scale(&inner) == 1,
+                        _ => false,
+                    };
+                    let elem = match ftype {
+                        Type::Pointer(inner) => *inner.clone(),
+                        Type::Array(elem) => {
+                            let concrete = elem.substitute(&type_args);
+                            concrete
+                        }
+                        Type::Primitive(Primitive::String) => Type::Primitive(Primitive::Int),
+                        _ => Type::Primitive(Primitive::Int),
+                    };
+                    return (Some(elem), byte);
+                }
+            }
+        }
+        (None, false)
     }
 }
