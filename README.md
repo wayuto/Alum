@@ -4,18 +4,10 @@ Alum is a modern, systems programming language designed for simplicity and perfo
 
 ## Features
 
-- **Simple Syntax**: Clean, readable syntax inspired by modern languages
-- **Static Typing**: Type safety with explicit type annotations
 - **Native Compilation**: Compiles directly to machine code via built-in assembler + LLD
-- **Fast Compilation**: Efficient compilation pipeline
-- **FFI Support**: Interoperability with C for low-level operations
-- **Build Tool**: Integrated build system (almk) for project management
-- **Lambda Functions**: Support for anonymous functions and closures
-- **Parametric Macros**: Powerful macro system with parameter substitution
-- **Pointer Arithmetic**: Full C-style pointer arithmetic (`p + n`, `p - n`, `p[i]`)
-- **String Indexing**: Byte-level indexing on strings (`s[i]`)
-- **Generics**: Parametric polymorphism with monomorphic instantiation (`Vec<T>`, generic functions)
-- **Free-List Allocator**: Efficient malloc/free with block headers and coalescing
+- **Build Toolkit**: Integrated `almk` build system and `almk run` for project management
+- **Standard Library**: Rich `alum-std` with I/O, strings, vectors, math, and memory management
+
 
 ## Installation
 
