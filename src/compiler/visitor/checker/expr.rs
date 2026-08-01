@@ -15,7 +15,6 @@ impl TypeChecker {
             Expr::Bool(_, _) => Ok(Type::Primitive(Primitive::Boolean)),
             Expr::String(_, _) => Ok(Type::Primitive(Primitive::String)),
             Expr::Nil(_) => Ok(Type::Primitive(Primitive::Void)),
-
             Expr::Var(name, _) => {
                 if let Some(ty) = self.lookup_var(name) {
                     return Ok(self.resolve_type(&ty));
@@ -31,7 +30,6 @@ impl TypeChecker {
 
                 Err(CheckerError::UndefinedVariable(name.clone(), span))
             }
-
             Expr::VarDecl(name, ty, value, _) => {
                 let resolved_ty = self.resolve_type(ty);
                 let value_type = self.check_expr(value)?;
@@ -55,7 +53,6 @@ impl TypeChecker {
                 self.declare_var(name, actual_ty.clone());
                 Ok(actual_ty)
             }
-
             Expr::VarAssign(name, value, _) => {
                 let var_type = self
                     .lookup_var(name)
@@ -75,7 +72,6 @@ impl TypeChecker {
 
                 Ok(var_type)
             }
-
             Expr::Add(lhs, rhs, _)
             | Expr::Sub(lhs, rhs, _)
             | Expr::Mul(lhs, rhs, _)
@@ -209,7 +205,6 @@ impl TypeChecker {
 
                 Ok(Type::Primitive(Primitive::Int))
             }
-
             Expr::Mod(lhs, rhs, _) => {
                 let lhs_type = self.check_expr(lhs)?;
                 let rhs_type = self.check_expr(rhs)?;
@@ -232,7 +227,6 @@ impl TypeChecker {
 
                 Ok(Type::Primitive(Primitive::Int))
             }
-
             Expr::Neg(operand, _) => {
                 let ty = self.check_expr(operand)?;
                 if ty.is_float() {
@@ -248,7 +242,6 @@ impl TypeChecker {
                 }
                 Ok(ty)
             }
-
             Expr::FNeg(operand, _) => {
                 let ty = self.check_expr(operand)?;
                 if !ty.is_numeric() {
@@ -260,7 +253,6 @@ impl TypeChecker {
                 }
                 Ok(Type::Primitive(Primitive::Float))
             }
-
             Expr::Xor(lhs, rhs, _) => {
                 let lhs_type = self.check_expr(lhs)?;
                 let rhs_type = self.check_expr(rhs)?;
@@ -280,7 +272,6 @@ impl TypeChecker {
                 }
                 Ok(Type::Primitive(Primitive::Int))
             }
-
             Expr::Inc(name, _) | Expr::Dec(name, _) => {
                 let var_type = self
                     .lookup_var(name)
@@ -294,7 +285,6 @@ impl TypeChecker {
                 }
                 Ok(var_type)
             }
-
             Expr::AddAssign(name, value, _) | Expr::SubAssign(name, value, _) => {
                 let var_type = self
                     .lookup_var(name)
@@ -324,7 +314,6 @@ impl TypeChecker {
                 }
                 Ok(var_type)
             }
-
             Expr::LAnd(lhs, rhs, _) | Expr::LOr(lhs, rhs, _) => {
                 let lhs_type = self.check_expr(lhs)?;
                 let rhs_type = self.check_expr(rhs)?;
@@ -337,7 +326,6 @@ impl TypeChecker {
                 }
                 Ok(Type::Primitive(Primitive::Boolean))
             }
-
             Expr::Eq(lhs, rhs, _)
             | Expr::Ne(lhs, rhs, _)
             | Expr::Lt(lhs, rhs, _)
@@ -394,7 +382,6 @@ impl TypeChecker {
 
                 Ok(Type::Primitive(Primitive::Boolean))
             }
-
             Expr::Not(e, _) => {
                 let ty = self.check_expr(e)?;
                 if !ty.is_bool() {
@@ -406,7 +393,6 @@ impl TypeChecker {
                 }
                 Ok(Type::Primitive(Primitive::Boolean))
             }
-
             Expr::Call(callee, type_args, args, _) => {
                 let callee_type = self.check_expr(callee)?;
                 let arg_types: Result<Vec<Type>, CheckerError> =
@@ -513,7 +499,6 @@ impl TypeChecker {
                     }),
                 }
             }
-
             Expr::Return(value, _) => {
                 let value_type = self.check_expr(value)?;
                 if let Some(expected_ret) = self.return_types.last() {
@@ -545,7 +530,6 @@ impl TypeChecker {
                     Ok(value_type)
                 }
             }
-
             Expr::If(cond, then_branch, else_branch, _) => {
                 let cond_type = self.check_expr(cond)?;
                 if !cond_type.is_bool() {
@@ -581,7 +565,6 @@ impl TypeChecker {
                     None => Ok(Type::Primitive(Primitive::Void)),
                 }
             }
-
             Expr::While(cond, body, _) => {
                 let cond_type = self.check_expr(cond)?;
                 if !cond_type.is_bool() {
@@ -599,7 +582,6 @@ impl TypeChecker {
 
                 Ok(Type::Primitive(Primitive::Void))
             }
-
             Expr::For(var, array, body, _) => {
                 let array_type = self.check_expr(array)?;
 
@@ -622,7 +604,6 @@ impl TypeChecker {
 
                 Ok(Type::Primitive(Primitive::Void))
             }
-
             Expr::Block(body, _) => {
                 self.push_scope();
                 let mut result = Type::Primitive(Primitive::Void);
@@ -632,7 +613,6 @@ impl TypeChecker {
                 self.pop_scope();
                 Ok(result)
             }
-
             Expr::Index(array, idx, _) => {
                 let array_type = self.check_expr(array)?;
                 let idx_type = self.check_expr(idx)?;
@@ -656,7 +636,6 @@ impl TypeChecker {
                     }),
                 }
             }
-
             Expr::IndexAssign(array_idx, value, _) => {
                 let value_type = self.check_expr(value)?;
 
@@ -722,7 +701,6 @@ impl TypeChecker {
                     })
                 }
             }
-
             Expr::ArrayLiteral(elements, _) => {
                 let mut elem_type: Option<Type> = None;
                 for e in elements {
@@ -743,7 +721,6 @@ impl TypeChecker {
                 let elem_type = self.resolve_type(&elem_type);
                 Ok(Type::Array(Box::new(elem_type)))
             }
-
             Expr::ArrayFill(elem_type, len, _) => {
                 let len_type = self.check_expr(len)?;
                 if !len_type.is_numeric() {
@@ -757,7 +734,6 @@ impl TypeChecker {
                 let resolved_elem = self.resolve_type(elem_type);
                 Ok(Type::Array(Box::new(resolved_elem)))
             }
-
             Expr::Range(start, end, _) => {
                 let start_type = self.check_expr(start)?;
                 let end_type = self.check_expr(end)?;
@@ -772,7 +748,6 @@ impl TypeChecker {
 
                 Ok(Type::Array(Box::new(Type::Primitive(Primitive::Int))))
             }
-
             Expr::FuncDecl(name, type_params, params, ret_type, body, _) => {
                 self.push_scope();
                 if !type_params.is_empty() {
@@ -804,13 +779,47 @@ impl TypeChecker {
 
                 Ok(Type::Primitive(Primitive::Void))
             }
-
             Expr::Extern(_, _, _, _) => Ok(Type::Primitive(Primitive::Void)),
-
             Expr::Break(_) | Expr::Continue(_) => Ok(Type::Primitive(Primitive::Void)),
-
             Expr::TypeDef(_) => Ok(Type::Primitive(Primitive::Void)),
-
+            Expr::Match(target, branches, default, _) => {
+                let target_type = self.check_expr(target)?;
+                let mut case_types: Vec<Type> = Vec::new();
+                let mut ret_types: Vec<Type> = Vec::new();
+                for (case_type, ret_type) in branches {
+                    case_types.push(self.check_expr(case_type)?);
+                    ret_types.push(self.check_expr(ret_type)?);
+                }
+                if let Some(d) = default {
+                    ret_types.push(self.check_expr(d)?)
+                }
+                for case_type in case_types {
+                    if case_type != target_type {
+                        return Err(CheckerError::TypeMismatch {
+                            expected: target_type,
+                            found: case_type,
+                            context: "case".to_string(),
+                            span,
+                        });
+                    }
+                }
+                if !ret_types.clone().is_empty() {
+                    let expected_ret_type = ret_types.first().cloned().unwrap();
+                    for ret_type in ret_types {
+                        if ret_type != expected_ret_type.clone() {
+                            return Err(CheckerError::TypeMismatch {
+                                expected: expected_ret_type.clone(),
+                                found: ret_type,
+                                context: "case".to_string(),
+                                span,
+                            });
+                        }
+                    }
+                    Ok(expected_ret_type.to_owned())
+                } else {
+                    Ok(Type::Primitive(Primitive::Void))
+                }
+            }
             Expr::Struct(_name, type_params, fields, _) => {
                 self.push_generic_params(type_params.len());
                 for (_, field_ty) in fields {
@@ -819,7 +828,6 @@ impl TypeChecker {
                 self.pop_generic_params();
                 Ok(Type::Primitive(Primitive::Void))
             }
-
             Expr::StructLiteral(name, type_args, field_values, _) => {
                 let (tp_names, fields) = self
                     .structs
@@ -889,7 +897,6 @@ impl TypeChecker {
 
                 Ok(Type::Struct(name.clone(), resolved_args))
             }
-
             Expr::MemberAccess(obj, field_name, _) => {
                 let obj_type = self.check_expr(obj)?;
                 let (struct_name, type_args) = match &obj_type {
@@ -934,7 +941,6 @@ impl TypeChecker {
                     span: span,
                 })
             }
-
             Expr::MemberAssign(obj, field_name, value, _) => {
                 let obj_type = self.check_expr(obj)?;
                 let value_type = self.check_expr(value)?;
@@ -989,7 +995,6 @@ impl TypeChecker {
                     span: span,
                 })
             }
-
             Expr::FAdd(lhs, rhs, _)
             | Expr::FSub(lhs, rhs, _)
             | Expr::FMul(lhs, rhs, _)

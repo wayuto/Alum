@@ -380,6 +380,21 @@ impl AsmCodeGen {
                 self.push_text(Asm::Je(lbl));
                 Ok(())
             }
+            Op::JumpIfTrue => {
+                let src1 = code.src1.as_ref().unwrap();
+                let lbl = match code.src2.as_ref().unwrap() {
+                    IROperand::Label(s) => s.clone(),
+                    _ => {
+                        return Err(CodeGenError::InvalidOperand {
+                            message: "JumpIfFalse src2 must be a Label".to_string(),
+                        });
+                    }
+                };
+                self.load(src1, Reg::Rax)?;
+                self.push_text(Asm::Cmp(Operand::Reg(Reg::Rax), Operand::Imm(1)));
+                self.push_text(Asm::Je(lbl));
+                Ok(())
+            }
             Op::ArrayAccess => {
                 let dst = code.dst.as_ref().unwrap();
                 let src1 = code.src1.as_ref().unwrap();

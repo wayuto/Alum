@@ -1,5 +1,9 @@
 use super::ir::{IRConst, IRType, Instruction, Operand};
-use crate::compiler::codegen::CodeGenError;
+use crate::compiler::{
+    codegen::CodeGenError,
+    parser::Type,
+    parser::{Primitive, Type as HighType},
+};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -71,8 +75,7 @@ impl Context {
         })
     }
 
-    pub fn type2ir_type(typ: &crate::compiler::parser::Type) -> IRType {
-        use crate::compiler::parser::{Primitive, Type as HighType};
+    pub fn type2ir_type(typ: &Type) -> IRType {
         match typ {
             HighType::Primitive(p) => match p {
                 Primitive::Int => IRType::Int,

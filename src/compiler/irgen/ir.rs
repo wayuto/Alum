@@ -72,6 +72,7 @@ pub enum Op {
     Return(String),
     Jump,
     JumpIfFalse,
+    JumpIfTrue,
     ArrayAccess,
     ArrayAssign,
     ByteAccess,

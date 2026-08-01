@@ -353,6 +353,8 @@ impl<'a> Lexer<'a> {
                     "break" => Token::BREAK,
                     "continue" => Token::CONTINUE,
                     "typedef" => Token::TYPEDEF,
+                    "match" => Token::MATCH,
+                    "default" => Token::DEFAULT,
                     "struct" => Token::STRUCT,
                     _ => Token::IDENT(ident),
                 }

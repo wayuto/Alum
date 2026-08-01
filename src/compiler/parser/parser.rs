@@ -144,6 +144,55 @@ impl<'a> Parser<'a> {
                         .insert(alias_name.clone(), target_type.clone());
                     Ok(Expr::TypeDef(span))
                 }
+                Ok((Token::MATCH, span_)) => {
+                    self.next()?;
+                    let (token, span) = self.next()?;
+                    let var = Expr::Var(
+                        match token {
+                            Token::IDENT(s) => s,
+                            token => {
+                                return Err(ParserError::UnexpectedToken {
+                                    expected: Some(Token::IDENT("VAR_NAME".to_string())),
+                                    found: token,
+                                    span,
+                                });
+                            }
+                        },
+                        span,
+                    );
+                    self.expect(Token::LBRACE)?;
+                    let mut cases: Vec<(Expr, Expr)> = Vec::new();
+                    let mut default: Option<Box<Expr>> = None;
+                    loop {
+                        let case = self.expr()?;
+                        self.expect(Token::COLON)?;
+                        let ret = self.expr()?;
+                        cases.push((case, ret));
+                        if let Some(next_tok) = self.peek() {
+                            match next_tok {
+                                Ok(tok) => {
+                                    let (tok, _) = tok;
+                                    if tok.clone() == Token::RBRACE {
+                                        break;
+                                    } else if tok.clone() == Token::DEFAULT {
+                                        self.next()?;
+                                        self.expect(Token::COLON)?;
+                                        default = Some(Box::new(self.expr()?));
+                                        break;
+                                    } else {
+                                        return Err(ParserError::UnexpectedToken {
+                                            expected: Some(Token::RBRACE),
+                                            found: tok.clone(),
+                                            span: span_,
+                                        });
+                                    }
+                                }
+                                Err(e) => return Err(ParserError::LexerError(e.to_owned())),
+                            }
+                        }
+                    }
+                    Ok(Expr::Match(Box::new(var), cases, default, span))
+                }
                 Ok((Token::RET, span)) => {
                     self.next()?;
                     Ok(Expr::Return(Box::new(self.expr()?), span))
@@ -196,9 +245,7 @@ impl<'a> Parser<'a> {
                     };
 
                     self.expect(Token::IN)?;
-
                     let array_expr = self.expr()?;
-
                     let body = self.expr()?;
 
                     Ok(Expr::For(

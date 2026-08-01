@@ -1292,6 +1292,92 @@ impl IRGen {
             Expr::TypeDef(_) | Expr::Struct(_, _, _, _) | Expr::Lambda(_, _, _, _) => {
                 Ok(ctx.new_tmp(IRType::Void))
             }
+
+            Expr::Match(target, branches, default, _) => {
+                let target = self.compile_expr(*target, ctx)?;
+                let end_label = ctx.new_label("end_match");
+                let mut case_labels: Vec<String> = Vec::new();
+                let mut case_cnt = 0usize;
+                let res_tmp = ctx.new_tmp(IRType::Void);
+
+                for _ in branches.clone() {
+                    case_labels.push(format!("case{}", case_cnt));
+                    case_cnt += 1;
+                }
+
+                case_cnt = 0;
+                for (case, _) in branches.clone() {
+                    let cond = ctx.new_tmp(IRType::Bool);
+                    let case = self.compile_expr(case, ctx)?;
+                    ctx.instructions.push(Instruction {
+                        op: Op::Eq,
+                        dst: Some(cond.clone()),
+                        src1: Some(target.clone()),
+                        src2: Some(case),
+                    });
+                    ctx.instructions.push(Instruction {
+                        op: Op::JumpIfTrue,
+                        dst: None,
+                        src1: Some(cond),
+                        src2: Some(Operand::Label(
+                            case_labels.iter().nth(case_cnt).unwrap().clone(),
+                        )),
+                    });
+                    case_cnt += 1;
+                }
+
+                if let Some(d) = default {
+                    ctx.enter_scope();
+                    let ret = self.compile_expr(*d, ctx)?;
+                    ctx.instructions.push(Instruction {
+                        op: Op::Move,
+                        dst: Some(res_tmp.clone()),
+                        src1: Some(ret),
+                        src2: None,
+                    });
+                    ctx.exit_scope()?;
+                }
+
+                ctx.instructions.push(Instruction {
+                    op: Op::Jump,
+                    dst: None,
+                    src1: Some(Operand::Label(end_label.clone())),
+                    src2: None,
+                });
+
+                case_cnt = 0;
+                for (_, ret) in branches.clone() {
+                    ctx.instructions.push(Instruction {
+                        op: Op::Label(case_labels.iter().nth(case_cnt).unwrap().clone()),
+                        dst: None,
+                        src1: None,
+                        src2: None,
+                    });
+                    ctx.enter_scope();
+                    let ret = self.compile_expr(ret, ctx)?;
+                    ctx.instructions.push(Instruction {
+                        op: Op::Move,
+                        dst: Some(res_tmp.clone()),
+                        src1: Some(ret),
+                        src2: None,
+                    });
+                    ctx.exit_scope()?;
+                    ctx.instructions.push(Instruction {
+                        op: Op::Jump,
+                        dst: None,
+                        src1: Some(Operand::Label(end_label.clone())),
+                        src2: None,
+                    });
+                    case_cnt += 1;
+                }
+                ctx.instructions.push(Instruction {
+                    op: Op::Label(end_label),
+                    dst: None,
+                    src1: None,
+                    src2: None,
+                });
+                Ok(res_tmp)
+            }
         }
     }
 

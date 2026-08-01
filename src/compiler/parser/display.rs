@@ -402,6 +402,7 @@ impl Expr {
                 write!(f, "\n{})", indent_str)
             }
             Expr::TypeDef(_) => write!(f, "{}TypeDef", indent_str),
+            Expr::Match(_, _, _, _) => write!(f, "Match hasn't implemented yet"),
             Expr::Struct(name, type_params, fields, _) => {
                 let field_str: Vec<String> = fields
                     .iter()

@@ -196,6 +196,7 @@ impl Expr {
             | Expr::Range(_, _, s)
             | Expr::For(_, _, _, s)
             | Expr::TypeDef(s)
+            | Expr::Match(_, _, _, s)
             | Expr::Struct(_, _, _, s)
             | Expr::StructLiteral(_, _, _, s)
             | Expr::MemberAccess(_, _, s)
@@ -282,6 +283,7 @@ pub enum Expr {
     Range(Box<Expr>, Box<Expr>, Span),
     For(String, Box<Expr>, Box<Expr>, Span),
     TypeDef(Span),
+    Match(Box<Expr>, Vec<(Expr, Expr)>, Option<Box<Expr>>, Span),
     Struct(String, Vec<String>, Vec<(String, Type)>, Span),
     StructLiteral(String, Vec<Type>, Vec<(String, Expr)>, Span),
     MemberAccess(Box<Expr>, String, Span),
