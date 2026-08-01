@@ -1,7 +1,7 @@
 $import "io.ah"
 
 fun main(): void {
-    let s = 0
+    let s = 1
     match s {
         0: {
             println("`s` is equal to 0")
@@ -9,7 +9,7 @@ fun main(): void {
         1: {
             println("`s` is equal to 1")
         }
-        default: {
+        _: {
             println("`s` is not equal to 0 or 1")
         }
     }

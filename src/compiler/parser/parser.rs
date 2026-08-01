@@ -169,7 +169,7 @@ impl<'a> Parser<'a> {
                                 self.next()?;
                                 break;
                             }
-                            Some(Ok((Token::DEFAULT, _))) => {
+                            Some(Ok((Token::IDENT(s), _))) if s == "_".to_string() => {
                                 self.next()?;
                                 self.expect(Token::COLON)?;
                                 default = Some(Box::new(self.expr()?));

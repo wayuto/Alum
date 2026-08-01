@@ -329,7 +329,7 @@ impl<'a> Lexer<'a> {
                     self.lex_int().map(Token::INT)?
                 }
             }
-            _ if c.is_ascii_alphabetic() => {
+            _ if c.is_ascii_alphabetic() || c == '_' => {
                 let ident = self.lex_ident()?;
                 match ident.as_str() {
                     "let" => Token::LET,
@@ -354,7 +354,6 @@ impl<'a> Lexer<'a> {
                     "continue" => Token::CONTINUE,
                     "typedef" => Token::TYPEDEF,
                     "match" => Token::MATCH,
-                    "default" => Token::DEFAULT,
                     "struct" => Token::STRUCT,
                     _ => Token::IDENT(ident),
                 }

@@ -51,7 +51,6 @@ pub enum Token {
     CONTINUE,
     TYPEDEF,
     MATCH,
-    DEFAULT,
     STRUCT,
     TYPE(String),
     IDENT(String),

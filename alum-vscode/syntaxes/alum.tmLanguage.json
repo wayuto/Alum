@@ -13,6 +13,9 @@
             "include": "#keywords"
         },
         {
+            "include": "#match-expression"
+        },
+        {
             "include": "#typedef"
         },
         {
@@ -131,7 +134,7 @@
             "patterns": [
                 {
                     "name": "keyword.control.alum",
-                    "match": "\\b(if|else|while|for|in|break|continue)\\b"
+                    "match": "\\b(if|else|while|for|in|break|continue|match)\\b"
                 },
                 {
                     "name": "keyword.control.return.alum",
@@ -164,6 +167,48 @@
                 {
                     "name": "constant.language.boolean.alum",
                     "match": "\\b(true|false|nil)\\b"
+                }
+            ]
+        },
+        "match-expression": {
+            "patterns": [
+                {
+                    "name": "meta.match.alum",
+                    "begin": "(\\bmatch)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(\\{)",
+                    "end": "(\\})",
+                    "beginCaptures": {
+                        "1": {
+                            "name": "keyword.control.alum"
+                        },
+                        "2": {
+                            "name": "variable.other.readwrite.alum"
+                        },
+                        "3": {
+                            "name": "punctuation.definition.block.begin.alum"
+                        }
+                    },
+                    "endCaptures": {
+                        "1": {
+                            "name": "punctuation.definition.block.end.alum"
+                        }
+                    },
+                    "patterns": [
+                        {
+                            "name": "keyword.control.match.wildcard.alum",
+                            "match": "_\\s*(?=:)"
+                        },
+                        {
+                            "name": "constant.numeric.match-case.alum",
+                            "match": "\\b[0-9]+\\b\\s*(?=:)"
+                        },
+                        {
+                            "name": "punctuation.separator.match-case.alum",
+                            "match": ":"
+                        },
+                        {
+                            "include": "$self"
+                        }
+                    ]
                 }
             ]
         },
