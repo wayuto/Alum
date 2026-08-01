@@ -1,8 +1,9 @@
 $import "io.ah"
 
-fun main(): void {
-    let s = 1
-    match s {
+// Match Example
+
+fun func(n: int): void {
+    match n {
         0: {
             println("`s` is equal to 0")
         }
@@ -12,5 +13,11 @@ fun main(): void {
         _: {
             println("`s` is not equal to 0 or 1")
         }
+    }
+}
+
+fun main(): void {
+    for n in 0..3 {
+        func(n)
     }
 }
