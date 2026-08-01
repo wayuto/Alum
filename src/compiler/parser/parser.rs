@@ -164,34 +164,35 @@ impl<'a> Parser<'a> {
                     let mut cases: Vec<(Expr, Expr)> = Vec::new();
                     let mut default: Option<Box<Expr>> = None;
                     loop {
-                        let case = self.expr()?;
-                        self.expect(Token::COLON)?;
-                        let ret = self.expr()?;
-                        cases.push((case, ret));
-                        if let Some(next_tok) = self.peek() {
-                            match next_tok {
-                                Ok(tok) => {
-                                    let (tok, _) = tok;
-                                    if tok.clone() == Token::RBRACE {
-                                        break;
-                                    } else if tok.clone() == Token::DEFAULT {
-                                        self.next()?;
-                                        self.expect(Token::COLON)?;
-                                        default = Some(Box::new(self.expr()?));
-                                        break;
-                                    } else {
-                                        return Err(ParserError::UnexpectedToken {
-                                            expected: Some(Token::RBRACE),
-                                            found: tok.clone(),
-                                            span: span_,
-                                        });
-                                    }
-                                }
-                                Err(e) => return Err(ParserError::LexerError(e.to_owned())),
+                        match self.peek().cloned() {
+                            Some(Ok((Token::RBRACE, _))) => {
+                                self.next()?;
+                                break;
+                            }
+                            Some(Ok((Token::DEFAULT, _))) => {
+                                self.next()?;
+                                self.expect(Token::COLON)?;
+                                default = Some(Box::new(self.expr()?));
+                                self.expect(Token::RBRACE)?;
+                                break;
+                            }
+                            Some(Ok((_, _))) => {
+                                let case = self.expr()?;
+                                self.expect(Token::COLON)?;
+                                let ret = self.expr()?;
+                                cases.push((case, ret));
+                            }
+                            Some(Err(e)) => return Err(ParserError::LexerError(e.clone())),
+                            None => {
+                                return Err(ParserError::UnexpectedToken {
+                                    expected: Some(Token::RBRACE),
+                                    found: Token::EOF,
+                                    span: self.last_span,
+                                });
                             }
                         }
                     }
-                    Ok(Expr::Match(Box::new(var), cases, default, span))
+                    Ok(Expr::Match(Box::new(var), cases, default, span_))
                 }
                 Ok((Token::RET, span)) => {
                     self.next()?;
