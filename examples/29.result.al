@@ -28,10 +28,10 @@ fun main(): int {
     let result = auth(password)
     match result.result {
         Ok: {
-            println(itoa(result.value.ok))
+            println(f"{result.value.ok}")
         }
         Err: {
-            println(result.value.err)
+            println(f"{result.value.err}")
         }
     }
     return 0    
