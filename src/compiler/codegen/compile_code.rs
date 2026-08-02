@@ -456,10 +456,7 @@ impl AsmCodeGen {
                 let src2 = code.src2.as_ref().unwrap();
                 self.load(src1, Reg::R10)?;
                 self.load(src2, Reg::R11)?;
-                self.push_text(Asm::Movzx(
-                    Reg::Rax,
-                    m_sib(Reg::R10, Reg::R11, 1, 0),
-                ));
+                self.push_text(Asm::Movzx(Reg::Rax, m_sib(Reg::R10, Reg::R11, 1, 0)));
                 self.push_text(Asm::Mov(Operand::Reg(Reg::R15), Operand::Reg(Reg::Rax)));
                 self.push_text(Asm::Mov(Operand::Reg(Reg::Rdi), Operand::Imm(2)));
                 self.push_text(Asm::Call(Operand::PLT("malloc".to_string())));

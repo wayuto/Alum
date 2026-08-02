@@ -518,7 +518,7 @@ impl<'a> Lexer<'a> {
                 }
             }
         }
-Ok(buf)
+        Ok(buf)
     }
 }
 

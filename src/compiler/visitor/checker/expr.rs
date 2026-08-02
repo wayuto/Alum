@@ -677,22 +677,18 @@ impl TypeChecker {
 
                 match array_type {
                     Type::Array(inner) => Ok(*inner),
-                    Type::Primitive(Primitive::String) => {
-                        Ok(Type::Primitive(Primitive::String))
-                    }
+                    Type::Primitive(Primitive::String) => Ok(Type::Primitive(Primitive::String)),
                     Type::Pointer(inner) => Ok(*inner),
-                    Type::Struct(struct_name, args) => {
-                        self.struct_method_return(&struct_name, &args, "nth").ok_or(
-                            CheckerError::InvalidOperation {
-                                op: "index".to_string(),
-                                type_name: format!(
-                                    "{:?} (no 'nth' method)",
-                                    Type::Struct(struct_name, args)
-                                ),
-                                span: span,
-                            },
-                        )
-                    }
+                    Type::Struct(struct_name, args) => self
+                        .struct_method_return(&struct_name, &args, "nth")
+                        .ok_or(CheckerError::InvalidOperation {
+                            op: "index".to_string(),
+                            type_name: format!(
+                                "{:?} (no 'nth' method)",
+                                Type::Struct(struct_name, args)
+                            ),
+                            span: span,
+                        }),
                     _ => Err(CheckerError::InvalidOperation {
                         op: "index".to_string(),
                         type_name: format!("{:?}", array_type),
@@ -1298,12 +1294,7 @@ impl TypeChecker {
         None
     }
 
-    fn fstring_to_string(
-        &self,
-        part: &Expr,
-        ty: &Type,
-        span: Span,
-    ) -> Result<Expr, CheckerError> {
+    fn fstring_to_string(&self, part: &Expr, ty: &Type, span: Span) -> Result<Expr, CheckerError> {
         match ty {
             Type::Primitive(Primitive::Int) => Ok(Expr::Call(
                 Box::new(Expr::Var("itoa".to_string(), span)),

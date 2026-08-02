@@ -221,7 +221,8 @@ impl IRGen {
         &self,
         obj_type: &Type,
         field_name: &str,
-    ) -> Result<(usize, Type), CodeGenError> {        let (type_name, type_args) = match obj_type {
+    ) -> Result<(usize, Type), CodeGenError> {
+        let (type_name, type_args) = match obj_type {
             Type::Struct(sname, args) => (sname.clone(), args.clone()),
             Type::Union(sname, args) => (sname.clone(), args.clone()),
             Type::Pointer(inner) => match inner.as_ref() {
@@ -960,11 +961,11 @@ impl IRGen {
 
             Expr::For(var, iter, body, _) => {
                 if let Some(Type::Struct(sname, ta)) = self.expr_high_type(&iter, ctx) {
-                    let maybe_ty = self
-                        .struct_field_fn_ret(&sname, &ta, "next")
-                        .ok_or_else(|| CodeGenError::TypeError {
-                            message: format!("type '{}' has no 'next' method", sname),
-                        })?;
+                    let maybe_ty =
+                        self.struct_field_fn_ret(&sname, &ta, "next")
+                            .ok_or_else(|| CodeGenError::TypeError {
+                                message: format!("type '{}' has no 'next' method", sname),
+                            })?;
                     let elem_ir = match &maybe_ty {
                         Type::Struct(mname, margs) if mname == "Maybe" => margs
                             .first()
@@ -1404,11 +1405,8 @@ impl IRGen {
                     return Ok(res_tmp);
                 }
                 let (elem_type, byte) = self.index_info(&arr, ctx);
-                let is_string_index = byte
-                    && matches!(
-                        elem_type,
-                        Some(Type::Primitive(Primitive::String))
-                    );
+                let is_string_index =
+                    byte && matches!(elem_type, Some(Type::Primitive(Primitive::String)));
                 let elem_ir_type = if is_string_index {
                     IRType::String
                 } else {
