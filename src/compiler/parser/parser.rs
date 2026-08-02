@@ -148,7 +148,6 @@ impl<'a> Parser<'a> {
                 }
                 Ok((Token::MATCH, span_)) => {
                     self.next()?;
-                    // let (token, span) = self.next()?;
                     let var = self.expr()?;
                     self.expect(Token::LBRACE)?;
                     let mut cases: Vec<(Expr, Expr)> = Vec::new();
@@ -412,8 +411,7 @@ impl<'a> Parser<'a> {
                             }
                             Some(Ok((Token::IDENT(member_name), _))) => {
                                 self.next()?;
-                                let value = if matches!(self.peek(), Some(Ok((Token::EQ, _))))
-                                {
+                                let value = if matches!(self.peek(), Some(Ok((Token::EQ, _)))) {
                                     self.next()?;
                                     let (token, val_span) = self.next()?;
                                     match token {
