@@ -1,5 +1,4 @@
 $import "io.ah"
-$import "convert.ah"
 
 // Control Flow Example
 // Demonstrates if-else, while loops, and for loops
@@ -31,21 +30,21 @@ fun main(): int {
     println("Counting with while loop:")
     let i: int = 0
     while i < 5 {
-        println(itoa(i))
+        println(f"{i}")
         i = i + 1
     }
     
     // For loop
     println("Counting with for loop:")
     for i in 0..5 {
-        println(itoa(i))
+        println(f"{i}")
     }
     
     // Combining loops and conditions
     println("Even numbers from 0 to 10:")
     for i in 0..11 {
         if i % 2 == 0 {
-            println(itoa(i))
+            println(f"{i}")
         }
     }
     

@@ -13,13 +13,11 @@ fun main(): int {
     // Pass Alum array directly to C function
     // No conversion needed - arrays are fully compatible!
     let sum: int = c_array_sum(alum_arr, 5)
-    print("Sum of Alum array [1,2,3,4,5] computed by C: ")
-    println(itoa(sum))
+    println(f"Sum of Alum array [1,2,3,4,5] computed by C: {sum}")
 
     // Find max using C function
     let max_val: int = c_array_max(alum_arr, 5)
-    print("Max of Alum array computed by C: ")
-    println(itoa(max_val))
+    println(f"Max of Alum array computed by C: {max_val}")
 
     return 0
 }

@@ -542,6 +542,14 @@ impl Expr {
                 val.fmt_with_indent(f, indent + 1)?;
                 write!(f, "\n{})", indent_str)
             }
+            Expr::FString(parts, _) => {
+                write!(f, "{}FString(", indent_str)?;
+                for part in parts {
+                    write!(f, "\n")?;
+                    part.fmt_with_indent(f, indent + 1)?;
+                }
+                write!(f, "\n{})", indent_str)
+            }
         }
     }
 }

@@ -1,5 +1,4 @@
 $import "io.ah"
-$import "convert.ah"
 
 // Variables Example
 // Demonstrates variable declarations with different types
@@ -21,18 +20,10 @@ fun main(): int {
     let empty: int = nil
     
     // Print values
-    println("Name: ")
-    println(name)
-    println("Age: ")
-    println(itoa(age))
-    println("Pi: ")
-    println(ftoa(pi))
-    println("Is Student: ")
-    if is_student {
-        println("true")
-    } else {
-        println("false")
-    }
+    println(f"Name: {name}")
+    println(f"Age: {age}")
+    println(f"Pi: {pi}")
+    println(f"Is Student: {if is_student { "true" } else { "false" }}")
     
     return 0
 }

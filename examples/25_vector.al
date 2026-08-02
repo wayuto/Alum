@@ -1,5 +1,4 @@
 $import "io.ah"
-$import "convert.ah"
 $import "maybe.ah"
 $import "vec.ah"
 
@@ -14,7 +13,7 @@ fun main(): int {
 	for i in 0..10 {
 		let m: Maybe<int> = v[i]
 		if m.tag == Just {
-			println(itoa(m.value))
+			println(f"{m.value}")
 		} else {
 			println("out of bounds")
 		}

@@ -1,5 +1,4 @@
 $import "io.ah"
-$import "convert.ah"
 
 // Functions Example
 // Demonstrates function definitions and calls
@@ -39,14 +38,9 @@ fun main(): int {
     
     greet("Alum")
     
-    println("Sum: ")
-    println(itoa(sum))
-    
-    println("Product: ")
-    println(itoa(product))
-    
-    println("Maximum: ")
-    println(itoa(maximum))
+    println(f"Sum: {sum}")
+    println(f"Product: {product}")
+    println(f"Maximum: {maximum}")
     
     return 0
 }

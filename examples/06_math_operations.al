@@ -1,5 +1,4 @@
 $import "io.ah"
-$import "convert.ah"
 $import "math.ah"
 
 // Math Operations Example
@@ -17,44 +16,31 @@ fun main(): int {
     let quotient: int = a / c
     
     println("Arithmetic:")
-    print("a + b = ")
-    println(itoa(sum))
-    
-    print("a - b = ")
-    println(itoa(diff))
-    
-    print("a * b = ")
-    println(itoa(product))
-    
-    print("a / c = ")
-    println(itoa(quotient))
+    println(f"a + b = {sum}")
+    println(f"a - b = {diff}")
+    println(f"a * b = {product}")
+    println(f"a / c = {quotient}")
     
     // Math functions
     println("\nMath Functions:")
     
     let abs_val: int = abs(b)
-    print("abs(-5) = ")
-    println(itoa(abs_val))
+    println(f"abs(-5) = {abs_val}")
 
     let max_val: int = max(a, c)
-    print("max(10, 3) = ")
-    println(itoa(max_val))
+    println(f"max(10, 3) = {max_val}")
 
     let min_val: int = min(b, c)
-    print("min(-5, 3) = ")
-    println(itoa(min_val))
+    println(f"min(-5, 3) = {min_val}")
     
     let square: int = sqrt(a)
-    print("sqrt(10) = ")
-    println(itoa(square))
+    println(f"sqrt(10) = {square}")
     
     let power: int = pow(c, 2)
-    print("pow(3, 2) = ")
-    println(itoa(power))
+    println(f"pow(3, 2) = {power}")
     
     let factorial: int = fact(5)
-    print("fact(5) = ")
-    println(itoa(factorial))
+    println(f"fact(5) = {factorial}")
     
     return 0
 }

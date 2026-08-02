@@ -14,15 +14,13 @@ fun main(): int {
     let result: string = f(10)
 
     println("Function pointer test:")
-    println("f(10) = ")
-    println(result)
+    println(f"f(10) = {result}")
 
     // Test 3: Another function pointer
     let g: int(int, int) = add
     let sum: int = g(5, 7)
 
-    println("g(5, 7) = ")
-    println(itoa(sum))
+    println(f"g(5, 7) = {sum}")
 
     println("Function pointer test completed successfully!")
 

@@ -1792,6 +1792,9 @@ impl IRGen {
                 });
                 Ok(res_tmp)
             }
+            Expr::FString(_, _) => {
+                unreachable!("f-string should have been desugared in checker")
+            }
         }
     }
 

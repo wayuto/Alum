@@ -322,6 +322,11 @@ impl TypeChecker {
                 self.resolve_call_type_args(r);
             }
             Expr::Not(e, _) | Expr::Neg(e, _) | Expr::FNeg(e, _) => self.resolve_call_type_args(e),
+            Expr::FString(parts, _) => {
+                for p in parts {
+                    self.resolve_call_type_args(p);
+                }
+            }
             _ => {}
         }
     }
@@ -368,6 +373,7 @@ impl TypeChecker {
                 Type::Primitive(Primitive::Boolean)
             }
             Expr::StrCat(_, _, _) => Type::Primitive(Primitive::String),
+            Expr::FString(_, _) => Type::Primitive(Primitive::String),
             Expr::Call(callee, _, _, _) => {
                 if let Expr::Var(name, _) = callee.as_ref() {
                     if let Some((_, _, ret_type)) = self.functions.get(name) {

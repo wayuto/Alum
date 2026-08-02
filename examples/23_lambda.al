@@ -1,5 +1,4 @@
 $import "io.ah"
-$import "convert.ah"
 
 // Lambda function example
 
@@ -8,6 +7,6 @@ fun main(): int {
         return n + 1
     }
 
-    println(itoa(f(1)))
+    println(f"{f(1)}")
     return 0
 }

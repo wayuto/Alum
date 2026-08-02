@@ -1,5 +1,4 @@
 $import "io.ah"
-$import "convert.ah"
 
 fun main(): int {
     // break in while loop
@@ -9,7 +8,7 @@ fun main(): int {
         if i == 5 {
             break;
         }
-        println(itoa(i));
+        println(f"{i}");
         i = i + 1;
     }
     println("Done!");
@@ -20,7 +19,7 @@ fun main(): int {
         if j == 5 {
             break;
         }
-        println(itoa(j));
+        println(f"{j}");
     }
     println("Done!");
 

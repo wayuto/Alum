@@ -234,7 +234,8 @@ impl Expr {
             | Expr::SubAssign(_, _, s)
             | Expr::AddressOf(_, s)
             | Expr::Deref(_, s)
-            | Expr::DerefAssign(_, _, s) => *s,
+            | Expr::DerefAssign(_, _, s)
+            | Expr::FString(_, s) => *s,
         }
     }
 }
@@ -316,4 +317,5 @@ pub enum Expr {
     AddressOf(Box<Expr>, Span),
     Deref(Box<Expr>, Span),
     DerefAssign(Box<Expr>, Box<Expr>, Span),
+    FString(Vec<Expr>, Span),
 }

@@ -1,7 +1,7 @@
 use super::error::LexerError;
 use crate::compiler::{
     Span,
-    lexer::{Lexer, Token},
+    lexer::{FstringSeg, Lexer, Token},
 };
 
 impl<'a> Lexer<'a> {
@@ -330,34 +330,21 @@ impl<'a> Lexer<'a> {
                 }
             }
             _ if c.is_ascii_alphabetic() || c == '_' => {
-                let ident = self.lex_ident()?;
-                match ident.as_str() {
-                    "let" => Token::LET,
-                    "fun" => Token::FUN,
-                    "for" => Token::FOR,
-                    "in" => Token::IN,
-                    "extern" => Token::EXTERN,
-                    "int" => Token::TYPE(ident),
-                    "float" => Token::TYPE(ident),
-                    "bool" => Token::TYPE(ident),
-                    "string" => Token::TYPE(ident),
-                    "arr" => Token::IDENT(ident),
-                    "void" => Token::TYPE(ident),
-                    "true" => Token::BOOL(true),
-                    "false" => Token::BOOL(false),
-                    "nil" => Token::NIL,
-                    "return" => Token::RET,
-                    "if" => Token::IF,
-                    "else" => Token::ELSE,
-                    "while" => Token::WHILE,
-                    "break" => Token::BREAK,
-                    "continue" => Token::CONTINUE,
-                    "typedef" => Token::TYPEDEF,
-                    "match" => Token::MATCH,
-                    "struct" => Token::STRUCT,
-                    "union" => Token::UNION,
-                    "enum" => Token::ENUM,
-                    _ => Token::IDENT(ident),
+                if c == 'f' {
+                    let mut lookahead = self.chars.clone();
+                    if matches!(lookahead.next(), Some('"') | Some('\'')) {
+                        self.bump();
+                        let quote = self.current.unwrap();
+                        self.bump();
+                        let segs = self.lex_fstring(quote)?;
+                        Token::FSTRING(segs)
+                    } else {
+                        let ident = self.lex_ident()?;
+                        self.keyword(ident)
+                    }
+                } else {
+                    let ident = self.lex_ident()?;
+                    self.keyword(ident)
                 }
             }
             _ => {
@@ -373,6 +360,165 @@ impl<'a> Lexer<'a> {
         };
 
         Ok((tok, Span::new(line, col)))
+    }
+
+    fn keyword(&self, ident: String) -> Token {
+        match ident.as_str() {
+            "let" => Token::LET,
+            "fun" => Token::FUN,
+            "for" => Token::FOR,
+            "in" => Token::IN,
+            "extern" => Token::EXTERN,
+            "int" => Token::TYPE(ident),
+            "float" => Token::TYPE(ident),
+            "bool" => Token::TYPE(ident),
+            "string" => Token::TYPE(ident),
+            "arr" => Token::IDENT(ident),
+            "void" => Token::TYPE(ident),
+            "true" => Token::BOOL(true),
+            "false" => Token::BOOL(false),
+            "nil" => Token::NIL,
+            "return" => Token::RET,
+            "if" => Token::IF,
+            "else" => Token::ELSE,
+            "while" => Token::WHILE,
+            "break" => Token::BREAK,
+            "continue" => Token::CONTINUE,
+            "typedef" => Token::TYPEDEF,
+            "match" => Token::MATCH,
+            "struct" => Token::STRUCT,
+            "union" => Token::UNION,
+            "enum" => Token::ENUM,
+            _ => Token::IDENT(ident),
+        }
+    }
+
+    fn lex_fstring(&mut self, quote: char) -> Result<Vec<FstringSeg>, LexerError> {
+        let mut segs: Vec<FstringSeg> = Vec::new();
+        let mut lit = String::new();
+
+        fn flush(segs: &mut Vec<FstringSeg>, lit: &mut String) {
+            if !lit.is_empty() {
+                segs.push(FstringSeg::Lit(std::mem::take(lit)));
+            }
+        }
+
+        while self.current != Some(quote) {
+            match self.current {
+                None | Some('\0') => {
+                    return Err(LexerError::UnclosedQuote {
+                        line: self.line,
+                        col: self.col,
+                    });
+                }
+                Some('\\') => {
+                    self.bump();
+                    match self.current {
+                        Some('n') => lit.push('\n'),
+                        Some('t') => lit.push('\t'),
+                        Some('r') => lit.push('\r'),
+                        Some(c) => lit.push(c),
+                        None => {}
+                    }
+                    self.bump();
+                }
+                Some('{') => {
+                    let next = self.chars.clone().next();
+                    if next == Some('{') {
+                        lit.push('{');
+                        self.bump();
+                        self.bump();
+                    } else {
+                        self.bump();
+                        flush(&mut segs, &mut lit);
+                        let raw = self.read_expr_body()?;
+                        segs.push(FstringSeg::Expr(raw));
+                    }
+                }
+                Some('}') => {
+                    let next = self.chars.clone().next();
+                    if next == Some('}') {
+                        lit.push('}');
+                        self.bump();
+                        self.bump();
+                    } else {
+                        return Err(LexerError::UnexpectedChar {
+                            expected: None,
+                            found: '}',
+                            line: self.line,
+                            col: self.col,
+                        });
+                    }
+                }
+                Some(c) => {
+                    lit.push(c);
+                    self.bump();
+                }
+            }
+        }
+        flush(&mut segs, &mut lit);
+        self.bump();
+        Ok(segs)
+    }
+
+    fn read_expr_body(&mut self) -> Result<String, LexerError> {
+        let mut buf = String::new();
+        let mut depth: isize = 0;
+        let mut quote: Option<char> = None;
+
+        loop {
+            match self.current {
+                None | Some('\0') => {
+                    return Err(LexerError::UnclosedQuote {
+                        line: self.line,
+                        col: self.col,
+                    });
+                }
+                Some('\\') => {
+                    buf.push('\\');
+                    self.bump();
+                    if let Some(c) = self.current {
+                        buf.push(c);
+                        self.bump();
+                    }
+                }
+                Some(c @ ('"' | '\'')) => match quote {
+                    Some(q) if q == c => {
+                        buf.push(c);
+                        self.bump();
+                        quote = None;
+                    }
+                    Some(_) => {
+                        buf.push(c);
+                        self.bump();
+                    }
+                    None => {
+                        buf.push(c);
+                        self.bump();
+                        quote = Some(c);
+                    }
+                },
+                Some('{') => {
+                    buf.push('{');
+                    self.bump();
+                    depth += 1;
+                }
+                Some('}') => {
+                    if depth == 0 {
+                        self.bump();
+                        break;
+                    }
+                    buf.push('}');
+                    self.bump();
+                    depth -= 1;
+                }
+                Some(c) => {
+                    buf.push(c);
+                    self.bump();
+                }
+            }
+        }
+Ok(buf)
     }
 }
 

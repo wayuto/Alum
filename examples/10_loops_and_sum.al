@@ -1,5 +1,4 @@
 $import "io.ah"
-$import "convert.ah"
 
 // Loops and Sum Example
 // Demonstrates calculating sum of numbers using loops
@@ -16,8 +15,7 @@ fun main(): int {
         i = i + 1
     }
 
-    print("Sum = ")
-    println(itoa(sum))
+    println(f"Sum = {sum}")
 
     // Sum of first 10 natural numbers using for loop with range
     // Range expression n..m creates an array [n, n+1, ..., m-1]
@@ -28,8 +26,7 @@ fun main(): int {
         sum = sum + i
     }
 
-    print("Sum = ")
-    println(itoa(sum))
+    println(f"Sum = {sum}")
 
     // Sum of even numbers from 1 to 20
     println("\nSum of even numbers from 1 to 20:")
@@ -41,14 +38,13 @@ fun main(): int {
         }
     }
 
-    print("Sum = ")
-    println(itoa(sum))
+    println(f"Sum = {sum}")
 
     // Iterate over an array directly
     println("\nIterating over array [10, 20, 30, 40, 50]:")
     let arr: int[5] = [10, 20, 30, 40, 50]
     for val in arr {
-        println(itoa(val))
+        println(f"{val}")
     }
 
     // Factorial of 5 using while loop
@@ -62,8 +58,7 @@ fun main(): int {
         i = i - 1
     }
 
-    print("5! = ")
-    println(itoa(factorial))
+    println(f"5! = {factorial}")
 
     return 0
 }

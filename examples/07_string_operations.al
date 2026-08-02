@@ -1,5 +1,4 @@
 $import "io.ah"
-$import "convert.ah"
 $import "string.ah"
 $import "memory.ah"
 
@@ -13,15 +12,13 @@ fun main(): int {
     let len: int = strlen(hello)
     print("Length of '")
     print(hello)
-    print("': ")
-    println(itoa(len))
+    println(f"': {len}")
     
     // String copy
     let copy: string = malloc(100)
     strcpy(copy, hello)
     
-    print("Copy: ")
-    println(copy)
+    println(f"Copy: {copy}")
     
     // String comparison using memcmp
     let result: int = memcmp(hello, copy, len + 1)

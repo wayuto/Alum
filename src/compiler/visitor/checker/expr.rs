@@ -1203,6 +1203,27 @@ impl TypeChecker {
                 self.check_expr(rhs)?;
                 Ok(Type::Primitive(Primitive::String))
             }
+            Expr::FString(parts, span) => {
+                let mut strings: Vec<Expr> = Vec::new();
+                for part in parts.iter_mut() {
+                    let ty = self.check_expr(part)?;
+                    if ty.is_string() {
+                        strings.push(part.clone());
+                    } else {
+                        strings.push(self.fstring_to_string(part, &ty, *span)?);
+                    }
+                }
+                *expr = if strings.is_empty() {
+                    Expr::String(String::new(), *span)
+                } else {
+                    let mut acc = strings.remove(0);
+                    for s in strings {
+                        acc = Expr::StrCat(Box::new(acc), Box::new(s), *span);
+                    }
+                    acc
+                };
+                Ok(Type::Primitive(Primitive::String))
+            }
             Expr::Lambda(params, body, ret_type, _) => {
                 self.push_scope();
                 let mut param_types = Vec::new();
@@ -1275,5 +1296,38 @@ impl TypeChecker {
             }
         }
         None
+    }
+
+    fn fstring_to_string(
+        &self,
+        part: &Expr,
+        ty: &Type,
+        span: Span,
+    ) -> Result<Expr, CheckerError> {
+        match ty {
+            Type::Primitive(Primitive::Int) => Ok(Expr::Call(
+                Box::new(Expr::Var("itoa".to_string(), span)),
+                Vec::new(),
+                vec![part.clone()],
+                span,
+            )),
+            Type::Primitive(Primitive::Float) => Ok(Expr::Call(
+                Box::new(Expr::Var("ftoa".to_string(), span)),
+                Vec::new(),
+                vec![part.clone()],
+                span,
+            )),
+            Type::Primitive(Primitive::Boolean) => Ok(Expr::If(
+                Box::new(part.clone()),
+                Box::new(Expr::String("true".to_string(), span)),
+                Some(Box::new(Expr::String("false".to_string(), span))),
+                span,
+            )),
+            _ => Err(CheckerError::InvalidOperation {
+                op: "f-string interpolation".to_string(),
+                type_name: ty.to_string(),
+                span,
+            }),
+        }
     }
 }

@@ -1,5 +1,4 @@
 $import "io.ah"
-$import "convert.ah"
 
 // Array Sort Example
 // Demonstrates bubble sort algorithm
@@ -13,8 +12,7 @@ fun main(): int {
 
     println("Original array:")
     for i in 0..n {
-        print(itoa(numbers[i]))
-        print(" ")
+        print(f"{numbers[i]} ")
     }
     println("")
 
@@ -35,8 +33,7 @@ fun main(): int {
 
     println("Sorted array:")
     for i in 0..n {
-        print(itoa(numbers[i]))
-        print(" ")
+        print(f"{numbers[i]} ")
     }
     println("")
 

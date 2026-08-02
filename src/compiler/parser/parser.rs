@@ -1,8 +1,8 @@
 use super::error::ParserError;
 use crate::compiler::{
     Span,
-    lexer::{Lexer, LexerError, Token},
-    parser::{Expr, Parser, Program, Type},
+    lexer::{FstringSeg, Lexer, LexerError, Token},
+    parser::{Expr, Parser, Primitive, Program, Type},
 };
 use std::collections::HashMap;
 
@@ -17,6 +17,7 @@ impl<'a> Parser<'a> {
             unions: HashMap::new(),
             enums: HashMap::new(),
             type_param_scopes: Vec::new(),
+            has_fstring: false,
         }
     }
 
@@ -28,7 +29,45 @@ impl<'a> Parser<'a> {
                 _ => body.push(self.expr()?),
             }
         }
+        if self.has_fstring {
+            body.push(Expr::Extern(
+                "itoa".to_string(),
+                vec![("n".to_string(), Type::Primitive(Primitive::Int))],
+                Type::Primitive(Primitive::String),
+                Span::new(0, 0),
+            ));
+            body.push(Expr::Extern(
+                "ftoa".to_string(),
+                vec![("n".to_string(), Type::Primitive(Primitive::Float))],
+                Type::Primitive(Primitive::String),
+                Span::new(0, 0),
+            ));
+        }
         Ok(Program { body })
+    }
+
+    fn parse_sub_expr(&self, src: &str, span: Span) -> Result<Expr, ParserError> {
+        let src = src.trim();
+        if src.is_empty() {
+            return Err(ParserError::UnexpectedToken {
+                expected: None,
+                found: Token::EOF,
+                span,
+            });
+        }
+        let lex = Lexer::new(src);
+        let mut sub = Parser {
+            lex: lex.peekable(),
+            lookahead: Vec::new(),
+            last_span: span,
+            typedefs: self.typedefs.clone(),
+            structs: self.structs.clone(),
+            unions: self.unions.clone(),
+            enums: self.enums.clone(),
+            type_param_scopes: self.type_param_scopes.clone(),
+            has_fstring: false,
+        };
+        sub.expr()
     }
 
     fn expr(&mut self) -> Result<Expr, ParserError> {
@@ -745,6 +784,20 @@ impl<'a> Parser<'a> {
                 Ok((Token::STRING(s), span)) => {
                     self.next()?;
                     return Ok(Expr::String(s, span));
+                }
+                Ok((Token::FSTRING(segs), span)) => {
+                    self.next()?;
+                    self.has_fstring = true;
+                    let mut parts: Vec<Expr> = Vec::new();
+                    for seg in segs {
+                        match seg {
+                            FstringSeg::Lit(s) => parts.push(Expr::String(s, span)),
+                            FstringSeg::Expr(raw) => {
+                                parts.push(self.parse_sub_expr(&raw, span)?);
+                            }
+                        }
+                    }
+                    return Ok(Expr::FString(parts, span));
                 }
                 Ok((Token::NIL, span)) => {
                     self.next()?;

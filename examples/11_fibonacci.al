@@ -1,5 +1,4 @@
 $import "io.ah"
-$import "convert.ah"
 
 // Fibonacci Sequence Example
 // Generates and displays Fibonacci numbers
@@ -14,7 +13,7 @@ fun main(): int {
     println("Fibonacci sequence (first 10 numbers):")
     
     while i < n {
-        println(itoa(a))
+        println(f"{a}")
         
         temp = a + b
         a = b
@@ -26,8 +25,7 @@ fun main(): int {
     // Calculate nth Fibonacci number
     println("\nCalculating 10th Fibonacci number:")
     let fib_n: int = fibonacci(10)
-    print("fibonacci(10) = ")
-    println(itoa(fib_n))
+    println(f"fibonacci(10) = {fib_n}")
     
     return 0
 }

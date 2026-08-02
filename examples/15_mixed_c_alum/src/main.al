@@ -7,16 +7,13 @@ $import "helper.ah"
 
 fun main(): int {
     let sum: int = c_add(10, 20)
-    print("c_add(10, 20) = ")
-    println(itoa(sum))
+    println(f"c_add(10, 20) = {sum}")
     
     let product: int = c_multiply(5, 6)
-    print("c_multiply(5, 6) = ")
-    println(itoa(product))
+    println(f"c_multiply(5, 6) = {product}")
     
     let factorial: int = c_calculate_factorial(5)
-    print("c_calculate_factorial(5) = ")
-    println(itoa(factorial))
+    println(f"c_calculate_factorial(5) = {factorial}")
     
     return 0
 }

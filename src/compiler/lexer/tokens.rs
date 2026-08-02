@@ -1,9 +1,16 @@
 #[derive(Debug, Clone, PartialEq)]
+pub enum FstringSeg {
+    Lit(String),
+    Expr(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     INT(isize),
     FLOAT(f64),
     BOOL(bool),
     STRING(String),
+    FSTRING(Vec<FstringSeg>),
     NIL,
     PLUS,
     MINUS,

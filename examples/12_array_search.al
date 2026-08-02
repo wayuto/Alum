@@ -1,5 +1,4 @@
 $import "io.ah"
-$import "convert.ah"
 
 // Array Search Example
 // Demonstrates searching for elements in an array
@@ -14,15 +13,12 @@ fun main(): int {
 
     println("Array elements:")
     for i in 0..n {
-        print(itoa(numbers[i]))
-        print(" ")
+        print(f"{numbers[i]} ")
     }
     println("")
 
     // Linear search
-    print("Searching for ")
-    print(itoa(target))
-    println(" using linear search:")
+    println(f"Searching for {target} using linear search:")
 
     i = 0
     found = 0
@@ -36,8 +32,7 @@ fun main(): int {
     }
 
     if found == 1 {
-        print("Found at index: ")
-        println(itoa(index))
+        println(f"Found at index: {index}")
     } else {
         println("Not found")
     }
@@ -57,11 +52,8 @@ fun main(): int {
         }
     }
 
-    print("Minimum: ")
-    println(itoa(min_val))
-
-    print("Maximum: ")
-    println(itoa(max_val))
+    println(f"Minimum: {min_val}")
+    println(f"Maximum: {max_val}")
 
     return 0
 }

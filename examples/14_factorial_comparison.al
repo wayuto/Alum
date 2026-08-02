@@ -1,5 +1,4 @@
 $import "io.ah"
-$import "convert.ah"
 
 // Factorial Comparison Example
 // Compares iterative vs recursive factorial implementations
@@ -30,17 +29,13 @@ fun main(): int {
     let num: int = 6
 
     println("Factorial Comparison:")
-    print("Number: ")
-    println(itoa(num))
+    println(f"Number: {num}")
 
     let iter_result: int = factorial_iterative(num)
     let recur_result: int = factorial_recursive(num)
     
-    print("Iterative: ")
-    println(itoa(iter_result))
-    
-    print("Recursive: ")
-    println(itoa(recur_result))
+    println(f"Iterative: {iter_result}")
+    println(f"Recursive: {recur_result}")
     
     if iter_result == recur_result {
         println("Both methods produce the same result!")

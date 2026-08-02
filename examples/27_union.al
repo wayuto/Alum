@@ -1,5 +1,4 @@
 $import "io.ah"
-$import "convert.ah"
 
 // Union declaration and usage Example
 
@@ -14,13 +13,11 @@ fun main(): int {
     }
 
     // Read the int member
-    print("v.i = ")
-    println(itoa(v.i))
+    println(f"v.i = {v.i}")
 
     // Assign through the int member
     v.i = 100
-    print("v.i after assign = ")
-    println(itoa(v.i))
+    println(f"v.i after assign = {v.i}")
 
     return 0
 }
