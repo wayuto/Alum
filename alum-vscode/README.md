@@ -13,6 +13,7 @@ Alum is a lightweight, efficient programming language implemented in **Rust**. T
   - Generic containers (`Vec<T>`)
   - Lambda functions
   - Preprocessor directives
+  - Structs and unions (including generic declarations and literals)
 
 ## Installation
 

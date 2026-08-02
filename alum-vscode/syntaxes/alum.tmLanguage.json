@@ -10,6 +10,12 @@
             "include": "#preprocessor"
         },
         {
+            "include": "#struct-declaration"
+        },
+        {
+            "include": "#union-declaration"
+        },
+        {
             "include": "#keywords"
         },
         {
@@ -17,12 +23,6 @@
         },
         {
             "include": "#typedef"
-        },
-        {
-            "include": "#struct-declaration"
-        },
-        {
-            "include": "#union-declaration"
         },
         {
             "include": "#struct-literal"
@@ -248,7 +248,7 @@
             "patterns": [
                 {
                     "name": "meta.struct.declaration.alum",
-                    "begin": "(\\bstruct)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(\\{)",
+                    "begin": "(\\bstruct)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(?:<[^\\n{]*>)?\\s*(\\{)",
                     "end": "(\\})",
                     "beginCaptures": {
                         "1": {
@@ -292,8 +292,46 @@
         "struct-literal": {
             "patterns": [
                 {
+                    "name": "meta.struct.literal.generic.alum",
+                    "begin": "([A-Z][A-Za-z0-9_]*)(<[^\\n{}]*>)\\s*(\\{)",
+                    "end": "(\\})",
+                    "beginCaptures": {
+                        "1": {
+                            "name": "entity.name.type.struct.alum"
+                        },
+                        "2": {
+                            "name": "meta.type.generic.alum"
+                        },
+                        "3": {
+                            "name": "punctuation.definition.block.begin.alum"
+                        }
+                    },
+                    "endCaptures": {
+                        "1": {
+                            "name": "punctuation.definition.block.end.alum"
+                        }
+                    },
+                    "patterns": [
+                        {
+                            "name": "variable.other.member.alum",
+                            "match": "([A-Za-z_][A-Za-z0-9_]*)\\s*(:)",
+                            "captures": {
+                                "1": {
+                                    "name": "variable.other.member.alum"
+                                },
+                                "2": {
+                                    "name": "punctuation.separator.key-value.alum"
+                                }
+                            }
+                        },
+                        {
+                            "include": "$self"
+                        }
+                    ]
+                },
+                {
                     "name": "meta.struct.literal.alum",
-                    "begin": "([A-Za-z_][A-Za-z0-9_]*)\\s*(\\{)",
+                    "begin": "(?<![A-Za-z0-9_])(?!\\b(int|float|string|bool|void|gen)\\b)([A-Za-z_][A-Za-z0-9_]*)\\s*(\\{)",
                     "end": "(\\})",
                     "beginCaptures": {
                         "1": {
@@ -332,7 +370,7 @@
             "patterns": [
                 {
                     "name": "meta.union.declaration.alum",
-                    "begin": "(\\bunion)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(\\{)",
+                    "begin": "(\\bunion)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(?:<[^\\n{]*>)?\\s*(\\{)",
                     "end": "(\\})",
                     "beginCaptures": {
                         "1": {
