@@ -133,7 +133,7 @@ alc lib.al -o lib.o --lib
 
 ### Type System
 
-Alum is a statically typed language with explicit type annotations. All variables and functions must have their types declared at compile time.
+Alum is a statically typed language. Functions must declare their parameter and return types explicitly, and `let` variables may use an explicit type annotation or let the type be inferred from the initializer expression.
 
 **Supported types:**
 - `int`: Signed integer (isize)
@@ -154,6 +154,17 @@ let name: string = "Alum"
 let count: int = 42
 let pi: float = 3.14159
 let is_valid: bool = true
+```
+
+When the initializer's type is unambiguous, the annotation can be omitted and the type is inferred:
+
+```al
+let name = "Alum"          // string
+let count = 42             // int
+let pi = 3.14              // float
+let nums = [1, 2, 3]       // int[3]
+let pt = make_point()      // Point (from function return type)
+let line = Line { a: ..., b: ... }  // Line (from struct literal)
 ```
 
 ### Functions
@@ -395,6 +406,18 @@ println(itoa(p.x))
 println(itoa(p.y))
 ```
 
+Member access composes, so nested struct/union fields (including through pointers) can be chained:
+
+```al
+let line: Line = Line { a: Point { x: 5, y: 6 }, b: Point { x: 7, y: 8 } }
+println(itoa(line.b.x))  // 7
+
+let ptr: *Point = &p
+println(itoa(ptr.x))     // member access through a pointer
+```
+
+Nested fields can also be assigned: `line.b.x = 100`.
+
 ### Unions
 
 Define custom data structures that share the same memory among all members with the `union` keyword. All union members overlap in memory, and the union size is the size of its largest member:
@@ -421,7 +444,7 @@ Union members are accessed with the dot operator, and unions support the same fe
 
 ### Enums
 
-Define named integer constants with C-style `enum` declarations. Members auto-increment unless given an explicit value, and can be referenced with the dot operator (`Color.RED`) or bare (C-style `RED`). Enum types are `int` under the hood, so they work anywhere an integer does:
+Define named integer constants with C-style `enum` declarations. Members auto-increment unless given an explicit value. Members are read-only compile-time constants typed as `int` under the hood, so they work anywhere an integer does:
 
 ```al
 enum Color {
@@ -437,7 +460,6 @@ fun main(): int {
     println(itoa(c))       // 5
 
     println(itoa(Color.BLUE)) // 6
-    println(itoa(WHITE))      // 11 (bare reference)
 
     if c == Color.GREEN {
         println("green")
@@ -446,7 +468,18 @@ fun main(): int {
 }
 ```
 
-Enum members are read-only compile-time constants, so assignments like `Color.RED = 5` are rejected.
+Members are referenced with the dot operator (`Color.RED`). A member can also be referenced **bare** (C-style, e.g. `RED`) — but only when the member name is unique across all enums in the program; if two enums both define the same member name, a bare reference is rejected and the qualified form must be used:
+
+```al
+enum Color { Red, Green }
+enum Status { Red, Ok }
+
+println(itoa(Color.Red))   // OK
+println(itoa(Green))       // OK — unique member name
+println(itoa(Red))         // error — ambiguous (Color and Status both define Red)
+```
+
+Assignments like `Color.RED = 5` are rejected since enum members are constants.
 
 ### Lambda Functions
 

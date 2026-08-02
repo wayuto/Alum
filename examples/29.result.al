@@ -3,6 +3,8 @@ $import "io.ah"
 $import "string.ah"
 $import "convert.ah"
 
+// Result Example
+
 fun auth(password: string): Result<int, string> {
     if memcmp(password, "123456", 6) == 0 {
         return Result<int, string> {
