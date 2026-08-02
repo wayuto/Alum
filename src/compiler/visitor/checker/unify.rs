@@ -69,6 +69,8 @@ impl TypeChecker {
         let t2 = self.resolve_type_var(t2);
 
         match (&t1, &t2) {
+            (Type::Primitive(Primitive::Void), _) => Ok(()),
+            (_, Type::Primitive(Primitive::Void)) => Ok(()),
             (Type::TypeVar(id), _) => {
                 self.bind_type_var(*id, &t2);
                 Ok(())

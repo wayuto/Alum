@@ -1,13 +1,17 @@
 $ifndef ALUM_VEC
 $define ALUM_VEC 1
 
+$import "maybe.ah"
+
 struct Vec<T> {
     data: T[],
     len: int,
     capacity: int,
-    nth: T(*Vec<T>, int),
+    iter: int,
+    nth: Maybe<T>(*Vec<T>, int),
     push: void(*Vec<T>, T),
-    pop: T(*Vec<T>),
+    pop: Maybe<T>(*Vec<T>),
+    next: Maybe<T>(*Vec<T>),
     clear: void(*Vec<T>),
 }
 
@@ -16,9 +20,16 @@ fun vec_new<T>(): Vec<T> {
         data: [T; 0],
         len: 0,
         capacity: 0,
-		nth: \(v: *Vec<T>, i: int): T {
-			if i >= v.len || i < 0 return nil
-			return v.data[i]
+        iter: 0,
+		nth: \(v: *Vec<T>, i: int): Maybe<T> {
+			if i >= v.len || i < 0 return Maybe<T> {
+				tag: Nothing,
+				value: nil
+			}
+			return Maybe<T> {
+				tag: Just,
+				value: v.data[i]
+			}
 		},
 		push: \(v: *Vec<T>, elem: T): void {
 			if v.len >= v.capacity {
@@ -37,11 +48,32 @@ fun vec_new<T>(): Vec<T> {
 			v.data[v.len] = elem
 			v.len = v.len + 1
 		},
-		pop: \(v: *Vec<T>): T {
-			if v.len == 0 return nil
+		pop: \(v: *Vec<T>): Maybe<T> {
+			if v.len == 0 return Maybe<T> {
+				tag: Nothing,
+				value: nil
+			}
 			v.len = v.len - 1
 			let elem: T = v.data[v.len]
-			return elem
+			return Maybe<T> {
+				tag: Just,
+				value: elem
+			}
+		},
+		next: \(v: *Vec<T>): Maybe<T> {
+			if v.iter >= v.len {
+				v.iter = 0
+				return Maybe<T> {
+					tag: Nothing,
+					value: nil
+				}
+			}
+			let elem: T = v.data[v.iter]
+			v.iter = v.iter + 1
+			return Maybe<T> {
+				tag: Just,
+				value: elem
+			}
 		},
 		clear: \(v: *Vec<T>): void {
 			v.len = 0

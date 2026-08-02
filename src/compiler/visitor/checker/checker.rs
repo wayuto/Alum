@@ -447,6 +447,7 @@ impl TypeChecker {
         let found = self.resolve_type(found);
 
         match (&expected, &found) {
+            (_, Type::Primitive(Primitive::Void)) => true,
             (Type::TypeVar(_), _) => true,
             (_, Type::TypeVar(_)) => true,
             (Type::Param(a), Type::Param(b)) => a == b,
