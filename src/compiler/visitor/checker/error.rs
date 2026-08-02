@@ -19,6 +19,11 @@ pub enum CheckerError {
         field: String,
         span: Span,
     },
+    UndefinedEnumMember {
+        enum_name: String,
+        member: String,
+        span: Span,
+    },
     ArgCountMismatch {
         expected: usize,
         found: usize,
@@ -65,6 +70,11 @@ impl fmt::Display for CheckerError {
             } => {
                 write!(f, "Struct {} has no field {}", struct_name, field)
             }
+            CheckerError::UndefinedEnumMember {
+                enum_name, member, ..
+            } => {
+                write!(f, "Enum {} has no member {}", enum_name, member)
+            }
             CheckerError::ArgCountMismatch {
                 expected,
                 found,
@@ -94,6 +104,7 @@ impl CheckerError {
         match self {
             CheckerError::TypeMismatch { span, .. }
             | CheckerError::UndefinedField { span, .. }
+            | CheckerError::UndefinedEnumMember { span, .. }
             | CheckerError::ArgCountMismatch { span, .. }
             | CheckerError::InvalidOperation { span, .. } => *span,
             CheckerError::UndefinedVariable(_, s)

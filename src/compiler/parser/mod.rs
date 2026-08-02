@@ -19,5 +19,6 @@ pub struct Parser<'a> {
     typedefs: HashMap<String, Type>,
     structs: HashMap<String, (Vec<String>, Vec<(String, Type)>)>,
     unions: HashMap<String, (Vec<String>, Vec<(String, Type)>)>,
+    enums: HashMap<String, Vec<(String, isize)>>,
     type_param_scopes: Vec<HashMap<String, usize>>,
 }

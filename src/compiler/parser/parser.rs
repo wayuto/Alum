@@ -15,6 +15,7 @@ impl<'a> Parser<'a> {
             typedefs: HashMap::new(),
             structs: HashMap::new(),
             unions: HashMap::new(),
+            enums: HashMap::new(),
             type_param_scopes: Vec::new(),
         }
     }
@@ -385,6 +386,92 @@ impl<'a> Parser<'a> {
                     self.unions
                         .insert(name.clone(), (type_params.clone(), fields.clone()));
                     Ok(Expr::Union(name, type_params, fields, span))
+                }
+
+                Ok((Token::ENUM, span)) => {
+                    self.next()?;
+                    let (token, name_span) = self.next()?;
+                    let name = match token {
+                        Token::IDENT(s) => s,
+                        token => {
+                            return Err(ParserError::UnexpectedToken {
+                                expected: Some(Token::IDENT("ENUM NAME".to_string())),
+                                found: token,
+                                span: name_span,
+                            });
+                        }
+                    };
+                    self.expect(Token::LBRACE)?;
+                    let mut members = Vec::new();
+                    let mut next_value: isize = 0;
+                    loop {
+                        match self.peek().cloned() {
+                            Some(Ok((Token::RBRACE, _))) => {
+                                self.next()?;
+                                break;
+                            }
+                            Some(Ok((Token::IDENT(member_name), _))) => {
+                                self.next()?;
+                                let value = if matches!(self.peek(), Some(Ok((Token::EQ, _))))
+                                {
+                                    self.next()?;
+                                    let (token, val_span) = self.next()?;
+                                    match token {
+                                        Token::INT(n) => n,
+                                        Token::MINUS => {
+                                            let (tok2, sp2) = self.next()?;
+                                            match tok2 {
+                                                Token::INT(n) => -n,
+                                                token => {
+                                                    return Err(ParserError::UnexpectedToken {
+                                                        expected: Some(Token::INT(0)),
+                                                        found: token,
+                                                        span: sp2,
+                                                    });
+                                                }
+                                            }
+                                        }
+                                        token => {
+                                            return Err(ParserError::UnexpectedToken {
+                                                expected: Some(Token::INT(0)),
+                                                found: token,
+                                                span: val_span,
+                                            });
+                                        }
+                                    }
+                                } else {
+                                    next_value
+                                };
+                                next_value = value + 1;
+                                members.push((member_name, value));
+                                match self.peek().cloned() {
+                                    Some(Ok((Token::COMMA, _))) => {
+                                        self.next()?;
+                                    }
+                                    Some(Ok((Token::RBRACE, _))) => {
+                                        self.next()?;
+                                        break;
+                                    }
+                                    _ => {
+                                        return Err(ParserError::UnexpectedToken {
+                                            expected: Some(Token::COMMA),
+                                            found: Token::EOF,
+                                            span: self.last_span,
+                                        });
+                                    }
+                                }
+                            }
+                            _ => {
+                                return Err(ParserError::UnexpectedToken {
+                                    expected: Some(Token::IDENT("ENUM MEMBER".to_string())),
+                                    found: Token::EOF,
+                                    span: self.last_span,
+                                });
+                            }
+                        }
+                    }
+                    self.enums.insert(name.clone(), members.clone());
+                    Ok(Expr::Enum(name, members, span))
                 }
 
                 Ok((_, _)) => {
@@ -1206,6 +1293,8 @@ impl<'a> Parser<'a> {
                     }
                     if self.unions.contains_key(name) {
                         Type::Union(name.to_string(), args)
+                    } else if self.enums.contains_key(name) {
+                        Type::Primitive(crate::compiler::parser::Primitive::Int)
                     } else {
                         Type::Struct(name.to_string(), args)
                     }
@@ -1225,6 +1314,8 @@ impl<'a> Parser<'a> {
                     }
                     if self.unions.contains_key(&s) {
                         Type::Union(s, args)
+                    } else if self.enums.contains_key(&s) {
+                        Type::Primitive(crate::compiler::parser::Primitive::Int)
                     } else {
                         Type::Struct(s, args)
                     }

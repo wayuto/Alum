@@ -477,6 +477,19 @@ impl Expr {
                 }
                 write!(f, "\n{}}})", indent_str)
             }
+            Expr::Enum(name, members, _) => {
+                let member_str: Vec<String> = members
+                    .iter()
+                    .map(|(n, v)| format!("{} = {}", n, v))
+                    .collect();
+                write!(
+                    f,
+                    "{}Enum(\"{}\" {{ {} }})",
+                    indent_str,
+                    name,
+                    member_str.join(", ")
+                )
+            }
             Expr::MemberAccess(obj, field, _) => {
                 write!(f, "{}MemberAccess(", indent_str)?;
                 write!(f, "\n")?;

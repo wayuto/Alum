@@ -356,6 +356,7 @@ impl<'a> Lexer<'a> {
                     "match" => Token::MATCH,
                     "struct" => Token::STRUCT,
                     "union" => Token::UNION,
+                    "enum" => Token::ENUM,
                     _ => Token::IDENT(ident),
                 }
             }

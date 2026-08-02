@@ -88,6 +88,17 @@ impl IRGen {
         Ok(ptr_tmp)
     }
 
+    pub(super) fn enum_member_value(&self, name: &str) -> Option<isize> {
+        for members in self.enums.values() {
+            for (member_name, value) in members {
+                if member_name == name {
+                    return Some(*value);
+                }
+            }
+        }
+        None
+    }
+
     pub(super) fn const_array_len(&self, value: &Operand, ctx: &Context) -> Option<usize> {
         let last_inst = ctx.instructions.last()?;
         if !matches!(last_inst.op, Op::Move | Op::FMove) {
@@ -252,6 +263,16 @@ impl IRGen {
                     Ok(res_tmp)
                 } else if let Ok(func) = self.find_func(&name) {
                     Ok(Operand::Function(func.name))
+                } else if let Some(value) = self.enum_member_value(&name) {
+                    let const_idx = self.get_const_index(IRConst::Int(value as i64));
+                    let res_tmp = ctx.new_tmp(IRType::Int);
+                    ctx.instructions.push(Instruction {
+                        op: Op::Move,
+                        dst: Some(res_tmp.clone()),
+                        src1: Some(Operand::ConstIdx(const_idx)),
+                        src2: None,
+                    });
+                    Ok(res_tmp)
                 } else {
                     Err(CodeGenError::UndefinedVariable {
                         name: name.clone(),
@@ -1162,6 +1183,30 @@ impl IRGen {
             }
 
             Expr::MemberAccess(obj, field_name, _) => {
+                if let Expr::Var(name, _) = obj.as_ref() {
+                    if let Some(members) = self.enums.get(name) {
+                        for (member_name, value) in members {
+                            if member_name == &field_name {
+                                let const_idx = self
+                                    .get_const_index(IRConst::Int(*value as i64));
+                                let res_tmp = ctx.new_tmp(IRType::Int);
+                                ctx.instructions.push(Instruction {
+                                    op: Op::Move,
+                                    dst: Some(res_tmp.clone()),
+                                    src1: Some(Operand::ConstIdx(const_idx)),
+                                    src2: None,
+                                });
+                                return Ok(res_tmp);
+                            }
+                        }
+                        return Err(CodeGenError::NameError {
+                            message: format!(
+                                "enum '{}' has no member '{}'",
+                                name, field_name
+                            ),
+                        });
+                    }
+                }
                 let (type_name, is_union) = match &*obj {
                     Expr::Var(name, _) => match ctx.get_var_high_type(name) {
                         Some(Type::Struct(sname, _)) => (sname.clone(), false),
@@ -1349,7 +1394,7 @@ impl IRGen {
                 Ok(ctx.new_tmp(IRType::Void))
             }
 
-            Expr::TypeDef(_) | Expr::Struct(_, _, _, _) | Expr::Union(_, _, _, _) | Expr::Lambda(_, _, _, _) => {
+            Expr::TypeDef(_) | Expr::Struct(_, _, _, _) | Expr::Union(_, _, _, _) | Expr::Enum(_, _, _) | Expr::Lambda(_, _, _, _) => {
                 Ok(ctx.new_tmp(IRType::Void))
             }
 

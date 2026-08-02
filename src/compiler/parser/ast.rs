@@ -219,6 +219,7 @@ impl Expr {
             | Expr::StructLiteral(_, _, _, s)
             | Expr::Union(_, _, _, s)
             | Expr::UnionLiteral(_, _, _, s)
+            | Expr::Enum(_, _, s)
             | Expr::MemberAccess(_, _, s)
             | Expr::MemberAssign(_, _, _, s)
             | Expr::Lambda(_, _, _, s)
@@ -308,6 +309,7 @@ pub enum Expr {
     StructLiteral(String, Vec<Type>, Vec<(String, Expr)>, Span),
     Union(String, Vec<String>, Vec<(String, Type)>, Span),
     UnionLiteral(String, Vec<Type>, Vec<(String, Expr)>, Span),
+    Enum(String, Vec<(String, isize)>, Span),
     MemberAccess(Box<Expr>, String, Span),
     MemberAssign(Box<Expr>, String, Box<Expr>, Span),
     Lambda(Vec<(String, Type)>, Box<Expr>, Type, Span),

@@ -144,6 +144,7 @@ Alum is a statically typed language with explicit type annotations. All variable
 - `T[N]`: Fixed-size array of type T with N elements
 - `T[]`: Dynamic array (length determined at runtime)
 - `struct`/`union`: User-defined composite types
+- `enum`: User-defined named integer constants (C-style)
 - `T`: Generic type parameter (for parametric polymorphism)
 
 ### Variables
@@ -417,6 +418,35 @@ fun main(): int {
 ```
 
 Union members are accessed with the dot operator, and unions support the same features as structs (type parameters, pointer access, etc.).
+
+### Enums
+
+Define named integer constants with C-style `enum` declarations. Members auto-increment unless given an explicit value, and can be referenced with the dot operator (`Color.RED`) or bare (C-style `RED`). Enum types are `int` under the hood, so they work anywhere an integer does:
+
+```al
+enum Color {
+    RED,            // 0 (auto)
+    GREEN = 5,      // 5 (explicit)
+    BLUE,           // 6 (auto after explicit)
+    BLACK = 10,
+    WHITE           // 11
+}
+
+fun main(): int {
+    let c: Color = Color.GREEN
+    println(itoa(c))       // 5
+
+    println(itoa(Color.BLUE)) // 6
+    println(itoa(WHITE))      // 11 (bare reference)
+
+    if c == Color.GREEN {
+        println("green")
+    }
+    return 0
+}
+```
+
+Enum members are read-only compile-time constants, so assignments like `Color.RED = 5` are rejected.
 
 ### Lambda Functions
 

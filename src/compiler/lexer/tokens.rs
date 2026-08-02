@@ -53,6 +53,7 @@ pub enum Token {
     MATCH,
     STRUCT,
     UNION,
+    ENUM,
     TYPE(String),
     IDENT(String),
     LAMBDA,

@@ -124,6 +124,9 @@ impl TypeChecker {
                     self.unions
                         .insert(name.clone(), (type_params.clone(), fields.clone()));
                 }
+                Expr::Enum(name, members, _) => {
+                    self.enums.insert(name.clone(), members.clone());
+                }
                 _ => {}
             }
         }
@@ -158,6 +161,17 @@ impl TypeChecker {
         for scope in self.type_stack.iter().rev() {
             if let Some(ty) = scope.get(name) {
                 return Some(ty.clone());
+            }
+        }
+        None
+    }
+
+    pub(super) fn lookup_enum_member(&self, name: &str) -> Option<isize> {
+        for members in self.enums.values() {
+            for (member_name, value) in members {
+                if member_name == name {
+                    return Some(*value);
+                }
             }
         }
         None
@@ -357,6 +371,16 @@ impl TypeChecker {
             }
             Expr::Index(_, _, _) => Type::Primitive(Primitive::Int),
             Expr::MemberAccess(obj, field_name, _) => {
+                if let Expr::Var(name, _) = obj.as_ref() {
+                    if let Some(members) = self.enums.get(name) {
+                        for (member_name, _) in members {
+                            if member_name == field_name {
+                                return Type::Primitive(Primitive::Int);
+                            }
+                        }
+                        return Type::Primitive(Primitive::Int);
+                    }
+                }
                 let obj_type = self.get_expr_type(obj);
                 let inner_type = match obj_type {
                     Type::Pointer(inner) => *inner,

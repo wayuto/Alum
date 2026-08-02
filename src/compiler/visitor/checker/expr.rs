@@ -28,6 +28,10 @@ impl TypeChecker {
                     return Ok(Type::Function(resolved_params, Box::new(resolved_ret)));
                 }
 
+                if self.lookup_enum_member(name).is_some() {
+                    return Ok(Type::Primitive(Primitive::Int));
+                }
+
                 Err(CheckerError::UndefinedVariable(name.clone(), span))
             }
             Expr::VarDecl(name, ty, value, _) => {
@@ -836,6 +840,19 @@ impl TypeChecker {
                 self.pop_generic_params();
                 Ok(Type::Primitive(Primitive::Void))
             }
+            Expr::Enum(_name, members, _) => {
+                let mut seen = std::collections::HashSet::new();
+                for (member_name, _) in members {
+                    if !seen.insert(member_name.clone()) {
+                        return Err(CheckerError::InvalidOperation {
+                            op: "redeclared enum member".to_string(),
+                            type_name: member_name.clone(),
+                            span: span,
+                        });
+                    }
+                }
+                Ok(Type::Primitive(Primitive::Void))
+            }
             Expr::StructLiteral(name, type_args, field_values, _) => {
                 let (tp_names, fields) = self
                     .structs
@@ -975,6 +992,20 @@ impl TypeChecker {
                 Ok(Type::Union(name.clone(), resolved_args))
             }
             Expr::MemberAccess(obj, field_name, _) => {
+                if let Expr::Var(name, _) = obj.as_ref() {
+                    if let Some(members) = self.enums.get(name) {
+                        for (member_name, _) in members {
+                            if member_name == field_name {
+                                return Ok(Type::Primitive(Primitive::Int));
+                            }
+                        }
+                        return Err(CheckerError::UndefinedEnumMember {
+                            enum_name: name.clone(),
+                            member: field_name.clone(),
+                            span: span,
+                        });
+                    }
+                }
                 let obj_type = self.check_expr(obj)?;
                 let (type_name, type_args) = match &obj_type {
                     Type::Struct(name, args) => (name.clone(), args.clone()),
@@ -1027,6 +1058,15 @@ impl TypeChecker {
                 })
             }
             Expr::MemberAssign(obj, field_name, value, _) => {
+                if let Expr::Var(name, _) = obj.as_ref() {
+                    if self.enums.contains_key(name) {
+                        return Err(CheckerError::InvalidOperation {
+                            op: "assignment to enum member".to_string(),
+                            type_name: format!("{}.{}", name, field_name),
+                            span: span,
+                        });
+                    }
+                }
                 let obj_type = self.check_expr(obj)?;
                 let value_type = self.check_expr(value)?;
 

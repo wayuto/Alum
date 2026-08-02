@@ -39,6 +39,9 @@ impl IRGen {
                     self.unions
                         .insert(name.clone(), (type_params.clone(), fields.clone()));
                 }
+                Expr::Enum(name, members, _) => {
+                    self.enums.insert(name.clone(), members.clone());
+                }
                 _ => {}
             }
         }
