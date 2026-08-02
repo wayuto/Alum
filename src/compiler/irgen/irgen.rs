@@ -16,6 +16,8 @@ impl IRGen {
                 Expr::FuncDecl(name, type_params, params, ret_type, body, _) => {
                     if type_params.is_empty() {
                         self.func_decl(name.clone(), params.clone(), ret_type.clone())?;
+                        self.func_high_returns
+                            .insert(name.clone(), ret_type.clone());
                     } else {
                         self.generic_funcs.insert(
                             name.clone(),
@@ -30,6 +32,8 @@ impl IRGen {
                 }
                 Expr::Extern(name, params, ret_type, _) => {
                     self.extern_decl(name.clone(), params.clone(), ret_type.clone())?;
+                    self.func_high_returns
+                        .insert(name.clone(), ret_type.clone());
                 }
                 Expr::Struct(name, type_params, fields, _) => {
                     self.structs

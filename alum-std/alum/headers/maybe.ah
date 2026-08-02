@@ -1,0 +1,21 @@
+$ifndef ALUM_MAYBE
+$define ALUM_MAYBE 1
+
+enum MaybeTag {
+    Nothing,
+    Just
+}
+
+struct Maybe<T> {
+    tag: MaybeTag,
+    value: T
+}
+
+fun is_some<T>(m: Maybe<T>): int {
+    if m.tag == Just {
+        return 1
+    }
+    return 0
+}
+
+$endif

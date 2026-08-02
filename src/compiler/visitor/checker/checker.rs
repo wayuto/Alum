@@ -166,15 +166,22 @@ impl TypeChecker {
         None
     }
 
-    pub(super) fn lookup_enum_member(&self, name: &str) -> Option<isize> {
-        for members in self.enums.values() {
+    pub(super) fn resolve_enum_member(&self, name: &str) -> Result<Option<isize>, Vec<String>> {
+        let mut found: Vec<(&str, isize)> = Vec::new();
+        for (enum_name, members) in &self.enums {
             for (member_name, value) in members {
                 if member_name == name {
-                    return Some(*value);
+                    found.push((enum_name.as_str(), *value));
                 }
             }
         }
-        None
+        if found.len() > 1 {
+            let mut names: Vec<String> = found.iter().map(|(n, _)| n.to_string()).collect();
+            names.sort();
+            Err(names)
+        } else {
+            Ok(found.first().map(|(_, v)| *v))
+        }
     }
 
     pub(super) fn resolve_type(&self, ty: &Type) -> Type {

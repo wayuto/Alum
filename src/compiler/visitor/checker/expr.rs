@@ -28,8 +28,16 @@ impl TypeChecker {
                     return Ok(Type::Function(resolved_params, Box::new(resolved_ret)));
                 }
 
-                if self.lookup_enum_member(name).is_some() {
-                    return Ok(Type::Primitive(Primitive::Int));
+                match self.resolve_enum_member(name) {
+                    Ok(Some(_)) => return Ok(Type::Primitive(Primitive::Int)),
+                    Err(enums) => {
+                        return Err(CheckerError::AmbiguousEnumMember {
+                            member: name.clone(),
+                            enums,
+                            span,
+                        });
+                    }
+                    Ok(None) => {}
                 }
 
                 Err(CheckerError::UndefinedVariable(name.clone(), span))

@@ -88,15 +88,139 @@ impl IRGen {
         Ok(ptr_tmp)
     }
 
-    pub(super) fn enum_member_value(&self, name: &str) -> Option<isize> {
-        for members in self.enums.values() {
+    pub(super) fn enum_member_value(&self, name: &str) -> Result<Option<isize>, CodeGenError> {
+        let mut found: Vec<(&str, isize)> = Vec::new();
+        for (enum_name, members) in &self.enums {
             for (member_name, value) in members {
                 if member_name == name {
-                    return Some(*value);
+                    found.push((enum_name.as_str(), *value));
                 }
             }
         }
-        None
+        if found.len() > 1 {
+            let mut names: Vec<String> = found.iter().map(|(n, _)| n.to_string()).collect();
+            names.sort();
+            Err(CodeGenError::NameError {
+                message: format!(
+                    "enum member '{}' is ambiguous (defined in {}); qualify it as <EnumName>.{}",
+                    name,
+                    names.join(", "),
+                    name
+                ),
+            })
+        } else {
+            Ok(found.first().map(|(_, v)| *v))
+        }
+    }
+
+    fn member_addr(
+        &mut self,
+        expr: &Expr,
+        ctx: &mut Context,
+    ) -> Result<(Operand, Type), CodeGenError> {
+        match expr {
+            Expr::Var(name, _) => {
+                let hty = ctx
+                    .get_var_high_type(name)
+                    .ok_or_else(|| CodeGenError::TypeError {
+                        message: format!("member access on non-struct variable '{}'", name),
+                    })?
+                    .clone();
+                let op = self.compile_expr(expr.clone(), ctx)?;
+                Ok((op, hty))
+            }
+            Expr::MemberAccess(obj, field_name, _) => {
+                let (obj_addr, obj_type) = self.member_addr(obj, ctx)?;
+                let (offset, field_type) = self.member_offset_and_type(&obj_type, field_name)?;
+                let field_addr = if offset == 0 {
+                    obj_addr
+                } else {
+                    let addr_tmp = ctx.new_tmp(IRType::Int);
+                    let offset_idx = self.get_const_index(IRConst::Int(offset as i64));
+                    ctx.instructions.push(Instruction {
+                        op: Op::Add,
+                        dst: Some(addr_tmp.clone()),
+                        src1: Some(obj_addr),
+                        src2: Some(Operand::ConstIdx(offset_idx)),
+                    });
+                    addr_tmp
+                };
+                let is_container = matches!(&field_type, Type::Struct(_, _) | Type::Union(_, _))
+                    || matches!(&field_type, Type::Pointer(inner) if matches!(inner.as_ref(), Type::Struct(_, _) | Type::Union(_, _)));
+                if is_container {
+                    let ptr_tmp = ctx.new_tmp(IRType::Int);
+                    let zero_idx = self.get_const_index(IRConst::Int(0));
+                    ctx.instructions.push(Instruction {
+                        op: Op::LoadAt,
+                        dst: Some(ptr_tmp.clone()),
+                        src1: Some(field_addr),
+                        src2: Some(Operand::ConstIdx(zero_idx)),
+                    });
+                    Ok((ptr_tmp, field_type))
+                } else {
+                    Ok((field_addr, field_type))
+                }
+            }
+            _ => Err(CodeGenError::TypeError {
+                message: "member access on non-variable expression".to_string(),
+            }),
+        }
+    }
+
+    fn member_offset_and_type(
+        &self,
+        obj_type: &Type,
+        field_name: &str,
+    ) -> Result<(usize, Type), CodeGenError> {
+        let (type_name, type_args) = match obj_type {
+            Type::Struct(sname, args) => (sname.clone(), args.clone()),
+            Type::Union(sname, args) => (sname.clone(), args.clone()),
+            Type::Pointer(inner) => match inner.as_ref() {
+                Type::Struct(sname, args) => (sname.clone(), args.clone()),
+                Type::Union(sname, args) => (sname.clone(), args.clone()),
+                _ => {
+                    return Err(CodeGenError::TypeError {
+                        message: "member access on non-struct type".to_string(),
+                    });
+                }
+            },
+            _ => {
+                return Err(CodeGenError::TypeError {
+                    message: format!("member access on non-struct type '{}'", obj_type),
+                });
+            }
+        };
+        let is_union = self.unions.contains_key(&type_name);
+        let type_def = if is_union {
+            self.unions
+                .get(&type_name)
+                .ok_or_else(|| CodeGenError::NameError {
+                    message: format!("undefined union '{}'", type_name),
+                })?
+        } else {
+            self.structs
+                .get(&type_name)
+                .ok_or_else(|| CodeGenError::NameError {
+                    message: format!("undefined struct '{}'", type_name),
+                })?
+        };
+        let mut offset = 0;
+        let mut found = false;
+        let mut field_type = None;
+        for (i, (fname, ftype)) in type_def.1.iter().enumerate() {
+            if fname == field_name {
+                found = true;
+                offset = if is_union { 0 } else { i * 8 };
+                field_type = Some(ftype.clone());
+                break;
+            }
+        }
+        if !found {
+            return Err(CodeGenError::NameError {
+                message: format!("type '{}' has no field '{}'", type_name, field_name),
+            });
+        }
+        Ok((offset, field_type.unwrap().substitute(&type_args)))
     }
 
     pub(super) fn const_array_len(&self, value: &Operand, ctx: &Context) -> Option<usize> {
@@ -185,8 +309,15 @@ impl IRGen {
             }
 
             Expr::VarDecl(name, typ, value, _) => {
+                let resolved_typ =
+                    if matches!(typ, Type::Unknown | Type::TypeVar(_) | Type::Param(_)) {
+                        self.expr_high_type(&value, ctx)
+                            .unwrap_or_else(|| typ.clone())
+                    } else {
+                        typ.clone()
+                    };
                 let value = self.compile_expr(*value, ctx)?;
-                let var_ir_type = Context::type2ir_type(&typ);
+                let var_ir_type = Context::type2ir_type(&resolved_typ);
 
                 if matches!(var_ir_type, IRType::Array) {
                     if let Some(len) = self.const_array_len(&value, ctx) {
@@ -194,7 +325,7 @@ impl IRGen {
                     }
                 }
 
-                ctx.declare_var_with_type(name.clone(), var_ir_type.clone(), typ.clone())?;
+                ctx.declare_var_with_type(name.clone(), var_ir_type.clone(), resolved_typ)?;
                 match var_ir_type {
                     IRType::Float => ctx.instructions.push(Instruction {
                         op: Op::FStore,
@@ -263,7 +394,7 @@ impl IRGen {
                     Ok(res_tmp)
                 } else if let Ok(func) = self.find_func(&name) {
                     Ok(Operand::Function(func.name))
-                } else if let Some(value) = self.enum_member_value(&name) {
+                } else if let Some(value) = self.enum_member_value(&name)? {
                     let const_idx = self.get_const_index(IRConst::Int(value as i64));
                     let res_tmp = ctx.new_tmp(IRType::Int);
                     ctx.instructions.push(Instruction {
@@ -969,8 +1100,8 @@ impl IRGen {
                         if !type_matches {
                             return Err(CodeGenError::TypeError {
                                 message: format!(
-                                    "unexpected type {:?}, expected {:?}",
-                                    operand_type, param.1
+                                    "unexpected type {:?}, expected {:?} (arg {} of '{}')",
+                                    operand_type, param.1, n, name
                                 ),
                             });
                         }
@@ -1203,136 +1334,55 @@ impl IRGen {
                         });
                     }
                 }
-                let (type_name, is_union) = match &*obj {
-                    Expr::Var(name, _) => match ctx.get_var_high_type(name) {
-                        Some(Type::Struct(sname, _)) => (sname.clone(), false),
-                        Some(Type::Union(sname, _)) => (sname.clone(), true),
-                        Some(Type::Pointer(box_ty)) => match box_ty.as_ref() {
-                            Type::Struct(sname, _) => (sname.clone(), false),
-                            Type::Union(sname, _) => (sname.clone(), true),
-                            _ => {
-                                return Err(CodeGenError::TypeError {
-                                    message: "member access on non-struct variable".to_string(),
-                                });
-                            }
-                        },
-                        _ => {
-                            return Err(CodeGenError::TypeError {
-                                message: "member access on non-struct variable".to_string(),
-                            });
-                        }
-                    },
-                    _ => {
-                        return Err(CodeGenError::TypeError {
-                            message: "member access on non-variable expression".to_string(),
-                        });
-                    }
-                };
-
-                let type_def = if is_union {
-                    self.unions
-                        .get(&type_name)
-                        .ok_or_else(|| CodeGenError::NameError {
-                            message: format!("undefined union '{}'", type_name),
-                        })?
+                let (obj_addr, obj_type) = self.member_addr(&obj, ctx)?;
+                let (offset, field_type) = self.member_offset_and_type(&obj_type, &field_name)?;
+                let field_ir_type = Context::type2ir_type(&field_type);
+                let addr = if offset == 0 {
+                    obj_addr
                 } else {
-                    self.structs
-                        .get(&type_name)
-                        .ok_or_else(|| CodeGenError::NameError {
-                            message: format!("undefined struct '{}'", type_name),
-                        })?
-                };
-
-                let mut offset = 0;
-                let mut found = false;
-                for (i, (fname, _)) in type_def.1.iter().enumerate() {
-                    if fname == &field_name {
-                        found = true;
-                        offset = if is_union { 0 } else { i * 8 };
-                        break;
-                    }
-                }
-                if !found {
-                    return Err(CodeGenError::NameError {
-                        message: format!("type '{}' has no field '{}'", type_name, field_name),
+                    let addr_tmp = ctx.new_tmp(IRType::Int);
+                    let offset_idx = self.get_const_index(IRConst::Int(offset as i64));
+                    ctx.instructions.push(Instruction {
+                        op: Op::Add,
+                        dst: Some(addr_tmp.clone()),
+                        src1: Some(obj_addr),
+                        src2: Some(Operand::ConstIdx(offset_idx)),
                     });
-                }
-
-                let obj_op = self.compile_expr(*obj, ctx)?;
-                let offset_idx = self.get_const_index(IRConst::Int(offset as i64));
-                let res_tmp = ctx.new_tmp(IRType::Int);
+                    addr_tmp
+                };
+                let res_tmp = ctx.new_tmp(field_ir_type);
+                let zero_idx = self.get_const_index(IRConst::Int(0));
                 ctx.instructions.push(Instruction {
                     op: Op::LoadAt,
                     dst: Some(res_tmp.clone()),
-                    src1: Some(obj_op),
-                    src2: Some(Operand::ConstIdx(offset_idx)),
+                    src1: Some(addr),
+                    src2: Some(Operand::ConstIdx(zero_idx)),
                 });
                 Ok(res_tmp)
             }
 
-            Expr::MemberAssign(obj, field_name, value, _) => {
-                let (type_name, is_union) = match &*obj {
-                    Expr::Var(name, _) => match ctx.get_var_high_type(name) {
-                        Some(Type::Struct(sname, _)) => (sname.clone(), false),
-                        Some(Type::Union(sname, _)) => (sname.clone(), true),
-                        Some(Type::Pointer(box_ty)) => match box_ty.as_ref() {
-                            Type::Struct(sname, _) => (sname.clone(), false),
-                            Type::Union(sname, _) => (sname.clone(), true),
-                            _ => {
-                                return Err(CodeGenError::TypeError {
-                                    message: "member assign on non-struct variable".to_string(),
-                                });
-                            }
-                        },
-                        _ => {
-                            return Err(CodeGenError::TypeError {
-                                message: "member assign on non-struct variable".to_string(),
-                            });
-                        }
-                    },
-                    _ => {
-                        return Err(CodeGenError::TypeError {
-                            message: "member assign on non-variable expression".to_string(),
-                        });
-                    }
-                };
-
-                let type_def = if is_union {
-                    self.unions
-                        .get(&type_name)
-                        .ok_or_else(|| CodeGenError::NameError {
-                            message: format!("undefined union '{}'", type_name),
-                        })?
-                } else {
-                    self.structs
-                        .get(&type_name)
-                        .ok_or_else(|| CodeGenError::NameError {
-                            message: format!("undefined struct '{}'", type_name),
-                        })?
-                };
-
-                let mut offset = 0;
-                let mut found = false;
-                for (i, (fname, _)) in type_def.1.iter().enumerate() {
-                    if fname == &field_name {
-                        found = true;
-                        offset = if is_union { 0 } else { i * 8 };
-                        break;
-                    }
-                }
-                if !found {
-                    return Err(CodeGenError::NameError {
-                        message: format!("type '{}' has no field '{}'", type_name, field_name),
-                    });
-                }
-
-                let obj_op = self.compile_expr(*obj, ctx)?;
+            Expr::MemberAssign(obj, _field_name, value, _) => {
                 let val_op = self.compile_expr(*value, ctx)?;
-                let offset_idx = self.get_const_index(IRConst::Int(offset as i64));
+                let (obj_addr, obj_type) = self.member_addr(&obj, ctx)?;
+                let (offset, _) = self.member_offset_and_type(&obj_type, &_field_name)?;
+                let addr = if offset == 0 {
+                    obj_addr
+                } else {
+                    let addr_tmp = ctx.new_tmp(IRType::Int);
+                    let offset_idx = self.get_const_index(IRConst::Int(offset as i64));
+                    ctx.instructions.push(Instruction {
+                        op: Op::Add,
+                        dst: Some(addr_tmp.clone()),
+                        src1: Some(obj_addr),
+                        src2: Some(Operand::ConstIdx(offset_idx)),
+                    });
+                    addr_tmp
+                };
+                let zero_idx = self.get_const_index(IRConst::Int(0));
                 ctx.instructions.push(Instruction {
                     op: Op::StoreAt,
-                    dst: Some(obj_op),
-                    src1: Some(Operand::ConstIdx(offset_idx)),
+                    dst: Some(addr),
+                    src1: Some(Operand::ConstIdx(zero_idx)),
                     src2: Some(val_op),
                 });
                 Ok(ctx.new_tmp(IRType::Void))
@@ -1486,29 +1536,10 @@ impl IRGen {
 
     fn member_call_ret_type(&self, callee: &Expr, ctx: &Context) -> IRType {
         if let Expr::MemberAccess(obj, field_name, _) = callee {
-            if let Expr::Var(name, _) = &**obj {
-                if let Some(Type::Struct(sname, type_args)) = ctx.get_var_high_type(name) {
-                    if let Some((_, fields)) = self.structs.get(sname) {
-                        for (fname, ftype) in fields {
-                            if fname == field_name {
-                                if let Type::Function(_, ret) = ftype {
-                                    let concrete = ret.substitute(type_args);
-                                    return Context::type2ir_type(&concrete);
-                                }
-                            }
-                        }
-                    }
-                }
-                if let Some(Type::Union(sname, type_args)) = ctx.get_var_high_type(name) {
-                    if let Some((_, fields)) = self.unions.get(sname) {
-                        for (fname, ftype) in fields {
-                            if fname == field_name {
-                                if let Type::Function(_, ret) = ftype {
-                                    let concrete = ret.substitute(type_args);
-                                    return Context::type2ir_type(&concrete);
-                                }
-                            }
-                        }
+            if let Some(obj_ty) = self.expr_high_type(obj, ctx) {
+                if let Some(ftype) = self.member_field_type(&obj_ty, field_name) {
+                    if let Type::Function(_, ret) = ftype {
+                        return Context::type2ir_type(&ret);
                     }
                 }
             }
@@ -1525,13 +1556,20 @@ impl IRGen {
 
     fn expr_high_type(&self, e: &Expr, ctx: &Context) -> Option<Type> {
         match e {
+            Expr::Int(_, _) => Some(Type::Primitive(Primitive::Int)),
+            Expr::Float(_, _) => Some(Type::Primitive(Primitive::Float)),
+            Expr::Bool(_, _) => Some(Type::Primitive(Primitive::Boolean)),
+            Expr::String(_, _) => Some(Type::Primitive(Primitive::String)),
+            Expr::Nil(_) => Some(Type::Primitive(Primitive::Void)),
             Expr::Var(name, _) => ctx.get_var_high_type(name.as_str()).cloned(),
             Expr::AddressOf(inner, _) => match inner.as_ref() {
                 Expr::Var(n, _) => ctx
                     .get_var_high_type(n.as_str())
                     .cloned()
                     .map(|t| Type::Pointer(Box::new(t))),
-                _ => None,
+                _ => self
+                    .expr_high_type(inner, ctx)
+                    .map(|t| Type::Pointer(Box::new(t))),
             },
             Expr::Deref(inner, _) => match inner.as_ref() {
                 Expr::Var(n, _) => match ctx.get_var_high_type(n.as_str()) {
@@ -1543,7 +1581,145 @@ impl IRGen {
                     _ => None,
                 },
             },
-            Expr::Index(arr, _, _) => self.index_info(arr, ctx).0,
+            Expr::Index(arr, _, _) => match self.expr_high_type(arr, ctx) {
+                Some(Type::Array(elem)) => Some(*elem),
+                Some(Type::Pointer(elem)) => Some(*elem),
+                _ => self.index_info(arr, ctx).0,
+            },
+            Expr::MemberAccess(obj, field_name, _) => {
+                let obj_ty = self.expr_high_type(obj, ctx)?;
+                self.member_field_type(&obj_ty, field_name)
+            }
+            Expr::Call(callee, type_args, _, _) => self.call_ret_high_type(callee, type_args, ctx),
+            Expr::StructLiteral(name, type_args, _, _) => {
+                Some(Type::Struct(name.clone(), type_args.clone()))
+            }
+            Expr::UnionLiteral(name, type_args, _, _) => {
+                Some(Type::Union(name.clone(), type_args.clone()))
+            }
+            Expr::ArrayLiteral(items, _) => items
+                .first()
+                .and_then(|i| self.expr_high_type(i, ctx))
+                .map(|t| Type::Array(Box::new(t))),
+            Expr::ArrayFill(ty, _, _) => Some(Type::Array(Box::new(ty.clone()))),
+            Expr::StrCat(_, _, _) => Some(Type::Primitive(Primitive::String)),
+            Expr::Add(_, _, _)
+            | Expr::Sub(_, _, _)
+            | Expr::Mul(_, _, _)
+            | Expr::Div(_, _, _)
+            | Expr::Mod(_, _, _) => {
+                let (l, r) = match e {
+                    Expr::Add(l, r, _)
+                    | Expr::Sub(l, r, _)
+                    | Expr::Mul(l, r, _)
+                    | Expr::Div(l, r, _)
+                    | Expr::Mod(l, r, _) => (l, r),
+                    _ => unreachable!(),
+                };
+                let l_float = matches!(
+                    self.expr_high_type(l, ctx),
+                    Some(Type::Primitive(Primitive::Float))
+                );
+                let r_float = matches!(
+                    self.expr_high_type(r, ctx),
+                    Some(Type::Primitive(Primitive::Float))
+                );
+                if l_float || r_float {
+                    Some(Type::Primitive(Primitive::Float))
+                } else {
+                    Some(Type::Primitive(Primitive::Int))
+                }
+            }
+            Expr::FAdd(_, _, _)
+            | Expr::FSub(_, _, _)
+            | Expr::FMul(_, _, _)
+            | Expr::FDiv(_, _, _) => Some(Type::Primitive(Primitive::Float)),
+            Expr::Neg(inner, _) => self.expr_high_type(inner, ctx),
+            Expr::FNeg(_, _) => Some(Type::Primitive(Primitive::Float)),
+            Expr::Not(_, _)
+            | Expr::Eq(_, _, _)
+            | Expr::Ne(_, _, _)
+            | Expr::Lt(_, _, _)
+            | Expr::Le(_, _, _)
+            | Expr::Gt(_, _, _)
+            | Expr::Ge(_, _, _)
+            | Expr::FEq(_, _, _)
+            | Expr::FNe(_, _, _)
+            | Expr::FLt(_, _, _)
+            | Expr::FLe(_, _, _)
+            | Expr::FGt(_, _, _)
+            | Expr::FGe(_, _, _) => Some(Type::Primitive(Primitive::Boolean)),
+            Expr::Xor(_, _, _)
+            | Expr::LAnd(_, _, _)
+            | Expr::LOr(_, _, _)
+            | Expr::Inc(_, _)
+            | Expr::Dec(_, _) => Some(Type::Primitive(Primitive::Int)),
+            Expr::VarDecl(_, _, value, _) | Expr::VarAssign(_, value, _) => {
+                self.expr_high_type(value, ctx)
+            }
+            Expr::If(_, then_branch, else_branch, _) => {
+                self.expr_high_type(then_branch, ctx).or_else(|| {
+                    else_branch
+                        .as_ref()
+                        .and_then(|e| self.expr_high_type(e, ctx))
+                })
+            }
+            Expr::Match(_, branches, default, _) => branches
+                .iter()
+                .find_map(|(_, ret)| self.expr_high_type(ret, ctx))
+                .or_else(|| default.as_ref().and_then(|e| self.expr_high_type(e, ctx))),
+            Expr::Lambda(params, _, ret_type, _) => {
+                let param_types = params.iter().map(|(_, t)| t.clone()).collect();
+                Some(Type::Function(param_types, Box::new(ret_type.clone())))
+            }
+            Expr::Return(value, _) => self.expr_high_type(value, ctx),
+            Expr::IndexAssign(arr, value, _) => self
+                .expr_high_type(value, ctx)
+                .or_else(|| self.index_info(arr, ctx).0),
+            Expr::MemberAssign(obj, field_name, value, _) => {
+                self.expr_high_type(value, ctx).or_else(|| {
+                    let obj_ty = self.expr_high_type(obj, ctx)?;
+                    self.member_field_type(&obj_ty, field_name)
+                })
+            }
+            _ => None,
+        }
+    }
+
+    fn member_field_type(&self, obj_type: &Type, field: &str) -> Option<Type> {
+        let (sname, type_args) = match obj_type {
+            Type::Struct(sname, args) => (sname, args),
+            Type::Union(sname, args) => (sname, args),
+            Type::Pointer(inner) => match inner.as_ref() {
+                Type::Struct(sname, args) => (sname, args),
+                Type::Union(sname, args) => (sname, args),
+                _ => return None,
+            },
+            _ => return None,
+        };
+        let fields = match self.structs.get(sname).or_else(|| self.unions.get(sname)) {
+            Some((_, fields)) => fields,
+            None => return None,
+        };
+        fields
+            .iter()
+            .find(|(fname, _)| fname == field)
+            .map(|(_, ftype)| ftype.substitute(type_args))
+    }
+
+    fn call_ret_high_type(&self, callee: &Expr, type_args: &[Type], ctx: &Context) -> Option<Type> {
+        match callee {
+            Expr::Var(fname, _) => {
+                if let Some((_, _, ret, _)) = self.generic_funcs.get(fname) {
+                    Some(ret.substitute(type_args))
+                } else {
+                    self.func_high_returns.get(fname).cloned()
+                }
+            }
+            Expr::MemberAccess(obj, field_name, _) => {
+                let obj_ty = self.expr_high_type(obj, ctx)?;
+                self.member_field_type(&obj_ty, field_name)
+            }
             _ => None,
         }
     }

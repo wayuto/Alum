@@ -24,6 +24,11 @@ pub enum CheckerError {
         member: String,
         span: Span,
     },
+    AmbiguousEnumMember {
+        member: String,
+        enums: Vec<String>,
+        span: Span,
+    },
     ArgCountMismatch {
         expected: usize,
         found: usize,
@@ -75,6 +80,15 @@ impl fmt::Display for CheckerError {
             } => {
                 write!(f, "Enum {} has no member {}", enum_name, member)
             }
+            CheckerError::AmbiguousEnumMember { member, enums, .. } => {
+                write!(
+                    f,
+                    "Enum member '{}' is ambiguous (defined in {}); qualify it as <EnumName>.{}",
+                    member,
+                    enums.join(", "),
+                    member
+                )
+            }
             CheckerError::ArgCountMismatch {
                 expected,
                 found,
@@ -105,6 +119,7 @@ impl CheckerError {
             CheckerError::TypeMismatch { span, .. }
             | CheckerError::UndefinedField { span, .. }
             | CheckerError::UndefinedEnumMember { span, .. }
+            | CheckerError::AmbiguousEnumMember { span, .. }
             | CheckerError::ArgCountMismatch { span, .. }
             | CheckerError::InvalidOperation { span, .. } => *span,
             CheckerError::UndefinedVariable(_, s)
