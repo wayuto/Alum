@@ -374,6 +374,19 @@ impl TypeChecker {
                         Expr::Ge(_, _, _) => Expr::FGe(l, r, Span::new(0, 0)),
                         _ => unreachable!(),
                     };
+                } else if lhs_type.is_string() || rhs_type.is_string() {
+                    if !lhs_type.is_string() || !rhs_type.is_string() {
+                        return Err(CheckerError::TypeMismatch {
+                            expected: Type::Primitive(Primitive::String),
+                            found: if !lhs_type.is_string() {
+                                lhs_type.clone()
+                            } else {
+                                rhs_type.clone()
+                            },
+                            context: "string comparison".to_string(),
+                            span: span,
+                        });
+                    }
                 } else if lhs_type.is_pointer() || rhs_type.is_pointer() {
                     let void_like =
                         |t: &Type| t.is_pointer() || matches!(t, Type::Primitive(Primitive::Void));
@@ -599,7 +612,32 @@ impl TypeChecker {
 
                 let elem_type = match &array_type {
                     Type::Array(inner) => *inner.clone(),
-                    Type::Primitive(Primitive::String) => Type::Primitive(Primitive::Int),
+                    Type::Primitive(Primitive::String) => Type::Primitive(Primitive::String),
+                    Type::Struct(struct_name, args) => {
+                        let maybe = self
+                            .struct_method_return(struct_name, args, "next")
+                            .ok_or_else(|| CheckerError::InvalidOperation {
+                                op: "for loop".to_string(),
+                                type_name: format!("{:?}", array_type),
+                                span: span,
+                            })?;
+                        match maybe {
+                            Type::Struct(mname, margs) if mname == "Maybe" => margs
+                                .into_iter()
+                                .next()
+                                .unwrap_or(Type::Primitive(Primitive::Int)),
+                            _ => {
+                                return Err(CheckerError::InvalidOperation {
+                                    op: "for loop".to_string(),
+                                    type_name: format!(
+                                        "{:?} ('next' must return Maybe<T>)",
+                                        array_type
+                                    ),
+                                    span: span,
+                                });
+                            }
+                        }
+                    }
                     _ => {
                         return Err(CheckerError::InvalidOperation {
                             op: "for loop".to_string(),
@@ -639,8 +677,22 @@ impl TypeChecker {
 
                 match array_type {
                     Type::Array(inner) => Ok(*inner),
-                    Type::Primitive(Primitive::String) => Ok(Type::Primitive(Primitive::Int)),
+                    Type::Primitive(Primitive::String) => {
+                        Ok(Type::Primitive(Primitive::String))
+                    }
                     Type::Pointer(inner) => Ok(*inner),
+                    Type::Struct(struct_name, args) => {
+                        self.struct_method_return(&struct_name, &args, "nth").ok_or(
+                            CheckerError::InvalidOperation {
+                                op: "index".to_string(),
+                                type_name: format!(
+                                    "{:?} (no 'nth' method)",
+                                    Type::Struct(struct_name, args)
+                                ),
+                                span: span,
+                            },
+                        )
+                    }
                     _ => Err(CheckerError::InvalidOperation {
                         op: "index".to_string(),
                         type_name: format!("{:?}", array_type),
@@ -675,10 +727,11 @@ impl TypeChecker {
                             }
                         }
                         Type::Primitive(Primitive::String) => {
-                            if !self.types_compatible(&Type::Primitive(Primitive::Int), &value_type)
+                            if !self
+                                .types_compatible(&Type::Primitive(Primitive::String), &value_type)
                             {
                                 return Err(CheckerError::TypeMismatch {
-                                    expected: Type::Primitive(Primitive::Int),
+                                    expected: Type::Primitive(Primitive::String),
                                     found: value_type,
                                     context: "string assignment".to_string(),
                                     span: span,
@@ -1203,5 +1256,24 @@ impl TypeChecker {
                 }
             }
         }
+    }
+
+    fn struct_method_return(
+        &self,
+        struct_name: &str,
+        type_args: &[Type],
+        method: &str,
+    ) -> Option<Type> {
+        let (_, fields) = self.structs.get(struct_name)?;
+        for (fname, fty) in fields {
+            if fname == method {
+                let substituted = fty.substitute(type_args);
+                let resolved = self.resolve_type(&substituted);
+                if let Type::Function(_, ret) = resolved {
+                    return Some(*ret);
+                }
+            }
+        }
+        None
     }
 }

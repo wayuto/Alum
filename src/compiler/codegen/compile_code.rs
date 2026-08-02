@@ -175,6 +175,31 @@ impl AsmCodeGen {
                 self.regs.insert(Reg::Rax, Some(dst.clone()));
                 Ok(())
             }
+            Op::StrEq | Op::StrNe | Op::StrLt | Op::StrLe | Op::StrGt | Op::StrGe => {
+                let dst = code.dst.as_ref().unwrap();
+                let src1 = code.src1.as_ref().unwrap();
+                let src2 = code.src2.as_ref().unwrap();
+                self.load(src1, Reg::Rdi)?;
+                self.load(src2, Reg::Rsi)?;
+                self.push_text(Asm::Call(Operand::PLT("strcmp".to_string())));
+                self.push_text(Asm::Cdqe);
+                self.push_text(Asm::Cmp(Operand::Reg(Reg::Rax), Operand::Imm(0)));
+                let set_op = match code.op {
+                    Op::StrEq => Asm::Sete,
+                    Op::StrNe => Asm::Setne,
+                    Op::StrLt => Asm::Setl,
+                    Op::StrLe => Asm::Setle,
+                    Op::StrGt => Asm::Setg,
+                    Op::StrGe => Asm::Setge,
+                    _ => unreachable!(),
+                };
+                self.push_text(set_op(Reg::Rax));
+                self.push_text(Asm::Movzx(Reg::Rax, Operand::Reg(Reg::Rax)));
+                self.store_dst(dst, Reg::Rax)?;
+                self.invalidate_volatile_registers();
+                self.regs.insert(Reg::Rax, Some(dst.clone()));
+                Ok(())
+            }
             Op::Neg | Op::Inc | Op::Dec | Op::SizeOf => {
                 let dst = code.dst.as_ref().unwrap();
                 let src1 = code.src1.as_ref().unwrap();
@@ -423,6 +448,27 @@ impl AsmCodeGen {
                     m_sib(Reg::R10, Reg::Rcx, 8, 0),
                 ));
                 self.push_text(Asm::Mov(m_base(Reg::Rdx), Operand::Reg(Reg::Rax)));
+                Ok(())
+            }
+            Op::StrByte => {
+                let dst = code.dst.as_ref().unwrap();
+                let src1 = code.src1.as_ref().unwrap();
+                let src2 = code.src2.as_ref().unwrap();
+                self.load(src1, Reg::R10)?;
+                self.load(src2, Reg::R11)?;
+                self.push_text(Asm::Movzx(
+                    Reg::Rax,
+                    m_sib(Reg::R10, Reg::R11, 1, 0),
+                ));
+                self.push_text(Asm::Mov(Operand::Reg(Reg::R15), Operand::Reg(Reg::Rax)));
+                self.push_text(Asm::Mov(Operand::Reg(Reg::Rdi), Operand::Imm(2)));
+                self.push_text(Asm::Call(Operand::PLT("malloc".to_string())));
+                self.push_text(Asm::Movb(m_base(Reg::Rax), Reg::R15));
+                self.push_text(Asm::Mov(Operand::Reg(Reg::Rdi), Operand::Imm(0)));
+                self.push_text(Asm::Movb(m_base_disp(Reg::Rax, 1), Reg::Rdi));
+                self.store_dst(dst, Reg::Rax)?;
+                self.invalidate_volatile_registers();
+                self.regs.insert(Reg::Rax, Some(dst.clone()));
                 Ok(())
             }
             Op::ByteAccess => {

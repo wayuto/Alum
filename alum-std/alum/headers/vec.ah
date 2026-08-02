@@ -5,7 +5,7 @@ struct Vec<T> {
     data: T[],
     len: int,
     capacity: int,
-    at: T(*Vec<T>, int),
+    nth: T(*Vec<T>, int),
     push: void(*Vec<T>, T),
     pop: T(*Vec<T>),
     clear: void(*Vec<T>),
@@ -16,7 +16,7 @@ fun vec_new<T>(): Vec<T> {
         data: [T; 0],
         len: 0,
         capacity: 0,
-		at: \(v: *Vec<T>, i: int): T {
+		nth: \(v: *Vec<T>, i: int): T {
 			if i >= v.len || i < 0 return nil
 			return v.data[i]
 		},

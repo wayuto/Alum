@@ -193,6 +193,7 @@ pub enum Asm {
     Imul(Operand, Operand),
     Idiv(Reg),
     Cqo,
+    Cdqe,
     Neg(Reg),
     Inc(Reg),
     Dec(Reg),

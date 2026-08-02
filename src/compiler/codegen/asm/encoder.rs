@@ -215,6 +215,9 @@ impl Assembler {
             Cqo => {
                 self.emit_slice(section, &[0x48, 0x99]);
             }
+            Cdqe => {
+                self.emit_slice(section, &[0x48, 0x98]);
+            }
             Neg(reg) => {
                 self.emit_rex(section, true, false, false, reg.rex_b());
                 self.emit_slice(section, &[0xf7, self.modrm(3, 3, reg.reg_id() & 7)]);

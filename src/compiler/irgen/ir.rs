@@ -46,6 +46,12 @@ pub enum Op {
     FGt,
     Ge,
     FGe,
+    StrEq,
+    StrNe,
+    StrLt,
+    StrLe,
+    StrGt,
+    StrGe,
     Lt,
     FLt,
     Le,
@@ -82,6 +88,7 @@ pub enum Op {
     StoreAt,
     LoadAt,
     StrCat,
+    StrByte,
     Lea,
 }
 

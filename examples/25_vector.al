@@ -11,7 +11,7 @@ fun main(): int {
 	}
 	
 	for i in 0..10 {
-		println(itoa(v.at(&v, i)))
+		println(itoa(v[i]))
 	}
 	return 0
 }
