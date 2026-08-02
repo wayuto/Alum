@@ -1010,23 +1010,21 @@ impl TypeChecker {
                 let (type_name, type_args) = match &obj_type {
                     Type::Struct(name, args) => (name.clone(), args.clone()),
                     Type::Union(name, args) => (name.clone(), args.clone()),
-                    Type::Pointer(inner) => {
-                        match **inner {
-                            Type::Struct(ref name, ref args) => (name.clone(), args.clone()),
-                            Type::Union(ref name, ref args) => (name.clone(), args.clone()),
-                            _ => {
-                                return Err(CheckerError::NonStructMemberAccess(
-                                    format!("{:?}", obj_type),
-                                    span,
-                                ))
-                            }
+                    Type::Pointer(inner) => match **inner {
+                        Type::Struct(ref name, ref args) => (name.clone(), args.clone()),
+                        Type::Union(ref name, ref args) => (name.clone(), args.clone()),
+                        _ => {
+                            return Err(CheckerError::NonStructMemberAccess(
+                                format!("{:?}", obj_type),
+                                span,
+                            ));
                         }
-                    }
+                    },
                     _ => {
                         return Err(CheckerError::NonStructMemberAccess(
                             format!("{:?}", obj_type),
                             span,
-                        ))
+                        ));
                     }
                 };
 
@@ -1034,9 +1032,7 @@ impl TypeChecker {
                     Some((_, fields)) => fields.clone(),
                     None => match self.unions.get(&type_name) {
                         Some((_, fields)) => fields.clone(),
-                        None => {
-                            return Err(CheckerError::UndefinedStruct(type_name.clone(), span))
-                        }
+                        None => return Err(CheckerError::UndefinedStruct(type_name.clone(), span)),
                     },
                 };
 
@@ -1073,23 +1069,21 @@ impl TypeChecker {
                 let (type_name, type_args) = match &obj_type {
                     Type::Struct(name, args) => (name.clone(), args.clone()),
                     Type::Union(name, args) => (name.clone(), args.clone()),
-                    Type::Pointer(inner) => {
-                        match **inner {
-                            Type::Struct(ref name, ref args) => (name.clone(), args.clone()),
-                            Type::Union(ref name, ref args) => (name.clone(), args.clone()),
-                            _ => {
-                                return Err(CheckerError::NonStructMemberAccess(
-                                    format!("{:?}", obj_type),
-                                    span,
-                                ))
-                            }
+                    Type::Pointer(inner) => match **inner {
+                        Type::Struct(ref name, ref args) => (name.clone(), args.clone()),
+                        Type::Union(ref name, ref args) => (name.clone(), args.clone()),
+                        _ => {
+                            return Err(CheckerError::NonStructMemberAccess(
+                                format!("{:?}", obj_type),
+                                span,
+                            ));
                         }
-                    }
+                    },
                     _ => {
                         return Err(CheckerError::NonStructMemberAccess(
                             format!("{:?}", obj_type),
                             span,
-                        ))
+                        ));
                     }
                 };
 
@@ -1097,9 +1091,7 @@ impl TypeChecker {
                     Some((_, fields)) => fields.clone(),
                     None => match self.unions.get(&type_name) {
                         Some((_, fields)) => fields.clone(),
-                        None => {
-                            return Err(CheckerError::UndefinedStruct(type_name.clone(), span))
-                        }
+                        None => return Err(CheckerError::UndefinedStruct(type_name.clone(), span)),
                     },
                 };
 

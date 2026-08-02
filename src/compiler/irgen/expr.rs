@@ -1187,8 +1187,7 @@ impl IRGen {
                     if let Some(members) = self.enums.get(name) {
                         for (member_name, value) in members {
                             if member_name == &field_name {
-                                let const_idx = self
-                                    .get_const_index(IRConst::Int(*value as i64));
+                                let const_idx = self.get_const_index(IRConst::Int(*value as i64));
                                 let res_tmp = ctx.new_tmp(IRType::Int);
                                 ctx.instructions.push(Instruction {
                                     op: Op::Move,
@@ -1200,10 +1199,7 @@ impl IRGen {
                             }
                         }
                         return Err(CodeGenError::NameError {
-                            message: format!(
-                                "enum '{}' has no member '{}'",
-                                name, field_name
-                            ),
+                            message: format!("enum '{}' has no member '{}'", name, field_name),
                         });
                     }
                 }
@@ -1217,7 +1213,7 @@ impl IRGen {
                             _ => {
                                 return Err(CodeGenError::TypeError {
                                     message: "member access on non-struct variable".to_string(),
-                                })
+                                });
                             }
                         },
                         _ => {
@@ -1285,7 +1281,7 @@ impl IRGen {
                             _ => {
                                 return Err(CodeGenError::TypeError {
                                     message: "member assign on non-struct variable".to_string(),
-                                })
+                                });
                             }
                         },
                         _ => {
@@ -1394,9 +1390,11 @@ impl IRGen {
                 Ok(ctx.new_tmp(IRType::Void))
             }
 
-            Expr::TypeDef(_) | Expr::Struct(_, _, _, _) | Expr::Union(_, _, _, _) | Expr::Enum(_, _, _) | Expr::Lambda(_, _, _, _) => {
-                Ok(ctx.new_tmp(IRType::Void))
-            }
+            Expr::TypeDef(_)
+            | Expr::Struct(_, _, _, _)
+            | Expr::Union(_, _, _, _)
+            | Expr::Enum(_, _, _)
+            | Expr::Lambda(_, _, _, _) => Ok(ctx.new_tmp(IRType::Void)),
 
             Expr::Match(target, branches, default, _) => {
                 let target = self.compile_expr(*target, ctx)?;
