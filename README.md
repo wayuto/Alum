@@ -7,7 +7,9 @@ Alum is a modern, systems programming language designed for simplicity and perfo
 - **Native Compilation**: Compiles directly to machine code via built-in assembler + LLD
 - **Build Toolkit**: Integrated `almk` build system and `almk run` for project management
 - **Standard Library**: Rich `alum-std` with I/O, strings, vectors, math, and memory management
-
+- **Statically Typed**: Explicit annotations with `let` type inference, generics, and monomorphic instantiation
+- **Rich Types**: Structs, unions, C-style enums (bare references when unambiguous), arrays, pointers, lambdas, and tagged-style `Result`/`Maybe`
+- **Preprocessor**: `$import`, `$define` macros, and conditional compilation
 
 ## Installation
 
@@ -61,17 +63,125 @@ Or use the run command:
 alc -r hello.al
 ```
 
-### Basic Example
+### A Program Using All Features
 
 ```al
+$import "io.ah"
+$import "string.ah"
 $import "convert.ah"
+$import "vec.ah"
+$import "result.ah"
+
+// enum (C-style)
+enum Color {
+    RED,          // 0 (auto)
+    GREEN = 5,    // 5 (explicit)
+    BLUE          // 6
+}
+
+// union (all members share memory)
+union Value<T> {
+    i: T,
+    f: float
+}
+
+// struct + generic struct
+struct Point {
+    x: int,
+    y: int
+}
+
+struct Line {
+    a: Point,
+    b: Point
+}
+
+// generic function
+fun identity<T>(x: T): T {
+    return x
+}
+
+// function taking a lambda
+fun apply(f: int(int), v: int): int {
+    return f(v)
+}
 
 fun main(): int {
-    let x: int = 10
-    let y: int = 20
-    let sum: int = x + y
-    
-    println(itoa(sum))
+    // type inference on `let`
+    let name = "Alum"
+    let n = 42
+    println(name)
+    println(itoa(n))
+
+    // nested member access
+    let line = Line {
+        a: Point { x: 1, y: 2 },
+        b: Point { x: 3, y: 4 }
+    }
+    println(itoa(line.b.x))  // 3
+
+    // union member access
+    let u = Value<int> { i: 7 }
+    println(itoa(u.i))       // 7
+
+    // enum member access (qualified + bare)
+    println(itoa(Color.GREEN))  // 5
+    println(itoa(BLUE))         // 6
+
+    // arrays + for loop over array
+    let arr = [10, 20, 30]
+    for x in arr {
+        println(itoa(x))
+    }
+
+    // while loop + reassignment
+    let i = 0
+    while i < 3 {
+        i = i + 1
+    }
+    println(itoa(i))  // 3
+
+    // pointers
+    let p: *int = &n
+    println(itoa(*p))  // 42
+
+    // generic function
+    println(itoa(identity(99)))  // 99
+
+    // lambda
+    let square: int(int) = \(x: int): int {
+        return x * x
+    }
+    println(itoa(apply(square, 4)))  // 16
+
+    // match with default
+    let c: Color = Color.RED
+    match c {
+        Color.GREEN: {
+            println("green")
+        }
+        _: {
+            println("not green")
+        }
+    }
+
+    // Vec container
+    let vec: Vec<int> = vec_new()
+    vec.push(&vec, 1)
+    vec.push(&vec, 2)
+    println(itoa(vec.at(&vec, 1)))  // 2
+
+    // Result (enum tag + union payload)
+    let ok = Result<int, string> {
+        result: ResultStatus.Ok,
+        value: ResultValue<int, string> {
+            ok: 114514
+        }
+    }
+    if ok.result == ResultStatus.Ok {
+        println(itoa(ok.value.ok))  // 114514
+    }
+
     return 0
 }
 ```
@@ -95,573 +205,6 @@ Options:
   -v, --verbose             Verbose output
   -h, --help                Print help
   -V, --version             Print version
-```
-
-### Examples
-
-Compile to executable:
-```bash
-alc program.al -o program
-```
-
-Compile only (object file):
-```bash
-alc program.al -c -o program.o
-```
-
-Link object files:
-```bash
-alc program.o -o program
-```
-
-Run immediately:
-```bash
-alc -r program.al
-```
-
-Include custom directories:
-```bash
-alc program.al -I ./include
-```
-
-Library mode (keep all functions for library building):
-```bash
-alc lib.al -o lib.o --lib
-```
-
-## Language Syntax
-
-### Type System
-
-Alum is a statically typed language. Functions must declare their parameter and return types explicitly, and `let` variables may use an explicit type annotation or let the type be inferred from the initializer expression.
-
-**Supported types:**
-- `int`: Signed integer (isize)
-- `float`: 64-bit floating point number (f64)
-- `bool`: Boolean value
-- `string`: String type
-- `void`: No return type
-- `T[N]`: Fixed-size array of type T with N elements
-- `T[]`: Dynamic array (length determined at runtime)
-- `struct`/`union`: User-defined composite types
-- `enum`: User-defined named integer constants (C-style)
-- `T`: Generic type parameter (for parametric polymorphism)
-
-### Variables
-
-```al
-let name: string = "Alum"
-let count: int = 42
-let pi: float = 3.14159
-let is_valid: bool = true
-```
-
-When the initializer's type is unambiguous, the annotation can be omitted and the type is inferred:
-
-```al
-let name = "Alum"          // string
-let count = 42             // int
-let pi = 3.14              // float
-let nums = [1, 2, 3]       // int[3]
-let pt = make_point()      // Point (from function return type)
-let line = Line { a: ..., b: ... }  // Line (from struct literal)
-```
-
-### Functions
-
-```al
-fun add(a: int, b: int): int {
-    return a + b
-}
-```
-
-### Extern Functions (FFI)
-
-Declare external functions for C interoperability:
-
-```al
-extern c_add(int, int): int
-extern printf(string): int
-```
-
-### Control Flow
-
-```al
-// If-Else
-if x > 0 {
-    println("Positive")
-}
-
-// While Loop
-while i < 10 {
-    i = i + 1
-}
-
-// For Loop with Range
-for i in 0..10 {
-    println(itoa(i))
-}
-
-// For Loop iterating over array elements
-let numbers: int[5] = [10, 20, 30, 40, 50]
-for x in numbers {
-    println(itoa(x))  // Prints each element
-}
-```
-
-### Arrays
-
-Alum arrays have C-compatible memory layout and compile-time known length.
-
-```al
-// Fixed-size array with explicit length
-let numbers: int[5] = [1, 2, 3, 4, 5]
-
-// Array with fill syntax (creates array of specified size)
-let buffer: int[100] = [int; 100]
-
-// Access array elements
-let first: int = numbers[0]
-```
-
-**C Compatibility:**
-Alum arrays are fully compatible with C arrays. You can pass an Alum array directly to C functions:
-
-```al
-// C function declaration
-extern c_sum(*int, int): int
-
-// Alum array
-let arr: int[5] = [10, 20, 30, 40, 50]
-
-// Directly pass to C function (no conversion needed)
-let sum: int = c_sum(arr, 5)
-```
-
-### Pointers
-
-Alum supports pointers for direct memory access and manipulation. Pointers are declared using the `*` prefix before a type.
-
-**Declaration and Usage:**
-```al
-$import "memory.ah"
-
-fun main(): int {
-    let value: int = 42
-    let ptr: *int = &value  // Get address of value
-    
-    // Dereference to access value
-    println(itoa(*ptr))  // Output: 42
-    
-    // Modify value through pointer
-    *ptr = 100
-    println(itoa(value))  // Output: 100
-    
-    return 0
-}
-```
-
-**Pointer to Struct:**
-```al
-struct Point {
-    x: int,
-    y: int
-}
-
-fun modify_point(p: *Point): void {
-    p.x = 100
-    p.y = 200
-}
-
-fun main(): int {
-    let point: Point = Point {
-        x: 10,
-        y: 20
-    }
-    
-    modify_point(&point)
-    println(itoa(point.x))  // Output: 100
-    println(itoa(point.y))  // Output: 200
-    
-    return 0
-}
-```
-
-**Dynamic Memory:**
-```al
-$import "memory.ah"
-
-extern malloc(int): *void  // Allocate memory, returns byte pointer
-extern free(*void): void   // Free memory (no size needed — block header stores size)
-
-fun main(): int {
-    let ptr: *void = malloc(100)
-    free(ptr)
-    return 0
-}
-```
-
-**Pointer Arithmetic:**
-```al
-fun main(): int {
-    let p: *int = malloc(40)  // Space for 5 integers
-    p[0] = 10
-    p[1] = 20
-
-    let q: *int = p + 1  // Move to next int (8 bytes ahead)
-    println(itoa(q[0]))  // Output: 20
-
-    let sub: *int = p - 1  // Move to previous int
-    println(itoa(sub[1]))  // Output: 20 (same as p[0]→wait actually sub=p-1 →sub[1]=p[0])
-
-    let eq: bool = p == p
-    println(itoa(eq))  // Output: 1
-
-    let lt: bool = p < q
-    println(itoa(lt))  // Output: 1
-
-    return 0
-}
-```
-
-**String Indexing:**
-```al
-fun main(): int {
-    let s: string = "Hello"
-    println(itoa(s[0]))  // Output: 72 (ASCII 'H')
-    println(itoa(s[4]))  // Output: 111 (ASCII 'o')
-    return 0
-}
-```
-
-### Vec Container
-
-Alum provides a generic dynamic array `Vec<T>` for storing collections of elements that can grow or shrink at runtime. The Vec uses monomorphic instantiation — each element type gets its own compiled version.
-
-**Importing Vec:**
-```al
-$import "vec.ah"
-```
-
-**Creating a Vec:**
-```al
-fun main(): int {
-    let vec: Vec<int> = vec_new()
-    return 0
-}
-```
-
-**Vec Operations:**
-```al
-$import "vec.ah"
-$import "convert.ah"
-
-fun main(): int {
-    let vec: Vec<int> = vec_new()
-    
-    // Push elements
-    vec.push(&vec, 10)
-    vec.push(&vec, 20)
-    vec.push(&vec, 30)
-    
-    // Access elements by index
-    let first: int = vec.at(&vec, 0)
-    let second: int = vec.at(&vec, 1)
-    
-    println(itoa(first))   // Output: 10
-    println(itoa(second))  // Output: 20
-    
-    return 0
-}
-```
-
-**Vec Methods:**
-- `vec_new<T>()`: Creates a new empty `Vec<T>`
-- `vec.at(&vec, index)`: Access element at the given index
-- `vec.push(&vec, element)`: Add an element to the end
-- `vec.pop(&vec)`: Remove and return the last element
-
-### Structs
-
-Define custom data structures with the `struct` keyword:
-
-```al
-struct Point {
-    x: int,
-    y: int
-}
-
-fun main(): int {
-    let p: Point = Point {
-        x: 10,
-        y: 20
-    }
-    return 0
-}
-```
-
-Access struct fields using the dot operator:
-```al
-println(itoa(p.x))
-println(itoa(p.y))
-```
-
-Member access composes, so nested struct/union fields (including through pointers) can be chained:
-
-```al
-let line: Line = Line { a: Point { x: 5, y: 6 }, b: Point { x: 7, y: 8 } }
-println(itoa(line.b.x))  // 7
-
-let ptr: *Point = &p
-println(itoa(ptr.x))     // member access through a pointer
-```
-
-Nested fields can also be assigned: `line.b.x = 100`.
-
-### Unions
-
-Define custom data structures that share the same memory among all members with the `union` keyword. All union members overlap in memory, and the union size is the size of its largest member:
-
-```al
-union Value {
-    i: int,
-    f: float
-}
-
-fun main(): int {
-    let v: Value = Value {
-        i: 42
-    }
-    println(itoa(v.i))
-
-    // Assign through any member; they all share storage
-    v.f = 3.14
-    return 0
-}
-```
-
-Union members are accessed with the dot operator, and unions support the same features as structs (type parameters, pointer access, etc.).
-
-### Enums
-
-Define named integer constants with C-style `enum` declarations. Members auto-increment unless given an explicit value. Members are read-only compile-time constants typed as `int` under the hood, so they work anywhere an integer does:
-
-```al
-enum Color {
-    RED,            // 0 (auto)
-    GREEN = 5,      // 5 (explicit)
-    BLUE,           // 6 (auto after explicit)
-    BLACK = 10,
-    WHITE           // 11
-}
-
-fun main(): int {
-    let c: Color = Color.GREEN
-    println(itoa(c))       // 5
-
-    println(itoa(Color.BLUE)) // 6
-
-    if c == Color.GREEN {
-        println("green")
-    }
-    return 0
-}
-```
-
-Members are referenced with the dot operator (`Color.RED`). A member can also be referenced **bare** (C-style, e.g. `RED`) — but only when the member name is unique across all enums in the program; if two enums both define the same member name, a bare reference is rejected and the qualified form must be used:
-
-```al
-enum Color { Red, Green }
-enum Status { Red, Ok }
-
-println(itoa(Color.Red))   // OK
-println(itoa(Green))       // OK — unique member name
-println(itoa(Red))         // error — ambiguous (Color and Status both define Red)
-```
-
-Assignments like `Color.RED = 5` are rejected since enum members are constants.
-
-### Lambda Functions
-
-Alum supports anonymous functions (lambdas) for functional programming patterns:
-
-```al
-fun apply_function(f: fun(int): int, value: int): int {
-    return f(value)
-}
-
-fun main(): int {
-    // Define a lambda
-    let square: int(int): int = \(x: int): int {
-        return x * x
-    }
-
-    let result: int = apply_function(square, 5)
-    println(itoa(result))  // Output: 25
-
-    // Use lambda directly
-    let double: int(int): int = \(x: int): int {
-        return x * 2
-    }
-    let doubled: int = double(10)
-    println(itoa(doubled))  // Output: 20
-
-    return 0
-}
-```
-
-Lambda syntax: `\(param: type, ...): return_type body`
-
-### Generic Types (Parametric Polymorphism)
-
-Alum supports generic functions and types with explicit type parameters:
-
-```al
-fun identity<T>(x: T): T {
-    return x
-}
-
-fun add<T>(a: T, b: T): T {
-    return a + b
-}
-
-fun main(): int {
-    // Type inferred from usage
-    let x: int = identity(42)
-    let y: float = identity(3.14)
-
-    // Works with arithmetic
-    let sum: int = add(10, 20)
-    println(itoa(sum))
-
-    return 0
-}
-```
-
-**Key Features:**
-- **Explicit Type Parameters**: `fun foo<T>(x: T): T` declares a generic function
-- **Type Inference**: The actual type is inferred from usage context
-- **Monomorphic Instantiation**: The compiler generates a specialized version for each type used
-- **Generic Containers**: `Vec<T>` holds elements of type `T`
-- **Flexibility**: Generics work with all types including structs and functions
-
-### Preprocessor Directives
-
-```al
-// Simple macro (no parameters)
-$define PI 3.14159
-$define HELLO "Hello, World!"
-
-// Parametric macro with parameters
-$define ADD(a, b) a + b
-$define MAX(a, b) if a > b { a } else { b }
-
-// Conditional compilation
-$ifndef ALUM_LIB
-$define ALUM_LIB 1
-$endif
-
-// Import modules
-$import "io.ah"
-```
-
-**Macro Usage:**
-- Simple macros are used directly without a prefix: `println(HELLO)`
-- Parametric macros are called like functions: `let sum: int = ADD(10, 20)`
-- Macros support nested calls: `MAX(ADD(x, y), 100)`
-
-## Compilation Pipeline
-
-```
-Source Code (.al)
-        │
-        ▼
-┌───────────────┐
-│ Preprocessor  │  →  Handles $import, $define, $ifdef, $ifndef, $endif
-└───────────────┘
-        │
-        ▼
-┌───────────────┐
-│    Lexer      │  →  Tokenizes source code into tokens
-└───────────────┘
-        │
-        ▼
-┌───────────────┐
-│    Parser     │  →  Builds Abstract Syntax Tree (AST)
-└───────────────┘
-        │
-        ▼
-┌───────────────┐
-│  Type Checker │  →  Validates type safety and semantic rules
-└───────────────┘
-        │
-        ▼
-┌───────────────┐
-│  Optimizer    │  →  Constant folding, dead code elimination, IR optimizations
-└───────────────┘
-        │
-        ▼
-┌───────────────┐
-│   IR Gen      │  →  Lowers AST to intermediate representation (IR)
-└───────────────┘
-        │
-        ▼
-┌──────────────────┐
-│ Code Generator   │  →  Emits x86-64 instructions (Asm IR)
-└──────────────────┘
-        │
-        ▼
-┌──────────────────┐
-│   Assembler      │  →  Encodes Asm IR → x86-64 machine code → ELF .o
-└──────────────────┘
-        │
-        ▼
-  Object File (.o)
-        │
-        ▼
-┌──────────────────┐
-│    Linker        │  →  LLD links object file with standard library
-└──────────────────┘
-        │
-        ▼
-  Executable File
-```
-
-### Pipeline Stages
-
-1. **Preprocessing**: Handles `$import`, `$define`, `$ifdef`, `$ifndef`, `$endif` directives, and macro expansion
-2. **Lexing**: Tokenizes source code into a stream of tokens
-3. **Parsing**: Builds Abstract Syntax Tree (AST) from tokens
-4. **Type Checking**: Validates type safety and semantic rules
-5. **Optimization**: Performs constant folding, dead code elimination, and IR optimizations
-6. **IR Generation**: Lowers AST to a platform-agnostic intermediate representation
-7. **Code Generation**: Emits x86-64 instructions as typed `Asm` IR
-8. **Assembly**: Built-in assembler encodes `Asm` IR to x86-64 machine code and produces an ELF64 object file (`.o`)
-9. **Linking**: LLD links object files with the standard library to produce an executable
-
-**Optimizations performed:**
-- Constant folding (e.g., `2 + 3` → `5`)
-- Algebraic simplifications (e.g., `x + 0` → `x`)
-- Dead code elimination
-- Branch elimination (e.g., removing unreachable code)
-
-## Project Structure
-
-```
-Alum/
-├── src/                      # Compiler source code
-│   ├── main.rs               # Compiler entry point
-│   ├── cli/                  # CLI argument parsing and commands
-│   └── compiler/             # Compiler components
-├── alum-std/                 # Standard library
-│   ├── alum/                 # Standard library headers (.al files)
-│   └── src/                  # Standard library implementation (Rust no_std)
-├── alum-make/                # Build tool (almk)
-│   └── src/                  # Build tool source code
-├── alum-vscode/              # VS Code extension
-│   └── syntaxes/             # Syntax highlighting
-├── Cargo.toml                # Compiler dependencies
-└── install.sh                # Installation script
 ```
 
 ## Development
