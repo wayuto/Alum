@@ -440,6 +440,43 @@ impl Expr {
                 }
                 write!(f, "\n{}}})", indent_str)
             }
+            Expr::Union(name, type_params, fields, _) => {
+                let field_str: Vec<String> = fields
+                    .iter()
+                    .map(|(n, t)| format!("{}: {}", n, t))
+                    .collect();
+                let tp_str = if type_params.is_empty() {
+                    String::new()
+                } else {
+                    format!("<{}>", type_params.join(", "))
+                };
+                write!(
+                    f,
+                    "{}Union(\"{}{}\" {{ {} }})",
+                    indent_str,
+                    name,
+                    tp_str,
+                    field_str.join(", ")
+                )
+            }
+            Expr::UnionLiteral(name, type_args, fields, _) => {
+                let ta_str = if type_args.is_empty() {
+                    String::new()
+                } else {
+                    let args: Vec<String> = type_args.iter().map(|t| t.to_string()).collect();
+                    format!("<{}>", args.join(", "))
+                };
+                write!(f, "{}UnionLiteral(\"{}{}\" {{", indent_str, name, ta_str)?;
+                for (i, (fname, fval)) in fields.iter().enumerate() {
+                    write!(f, "\n  {}{}: ", indent_str, fname)?;
+                    write!(f, "\n")?;
+                    fval.fmt_with_indent(f, indent + 2)?;
+                    if i < fields.len() - 1 {
+                        write!(f, ",")?;
+                    }
+                }
+                write!(f, "\n{}}})", indent_str)
+            }
             Expr::MemberAccess(obj, field, _) => {
                 write!(f, "{}MemberAccess(", indent_str)?;
                 write!(f, "\n")?;

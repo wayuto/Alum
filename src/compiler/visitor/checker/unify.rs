@@ -25,6 +25,10 @@ impl TypeChecker {
                 name.clone(),
                 args.iter().map(|t| self.resolve_type_var(t)).collect(),
             ),
+            Type::Union(name, args) => Type::Union(
+                name.clone(),
+                args.iter().map(|t| self.resolve_type_var(t)).collect(),
+            ),
             _ => ty.clone(),
         }
     }
@@ -47,6 +51,7 @@ impl TypeChecker {
                     || self.occurs_check(var_id, ret)
             }
             Type::Struct(_, args) => args.iter().any(|t| self.occurs_check(var_id, t)),
+            Type::Union(_, args) => args.iter().any(|t| self.occurs_check(var_id, t)),
             _ => false,
         }
     }
@@ -111,6 +116,12 @@ impl TypeChecker {
                 self.unify_types(r1, r2)
             }
             (Type::Struct(n1, a1), Type::Struct(n2, a2)) if n1 == n2 && a1.len() == a2.len() => {
+                for (t1, t2) in a1.iter().zip(a2.iter()) {
+                    self.unify_types(t1, t2)?;
+                }
+                Ok(())
+            }
+            (Type::Union(n1, a1), Type::Union(n2, a2)) if n1 == n2 && a1.len() == a2.len() => {
                 for (t1, t2) in a1.iter().zip(a2.iter()) {
                     self.unify_types(t1, t2)?;
                 }

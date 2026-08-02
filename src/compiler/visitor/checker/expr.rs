@@ -828,6 +828,14 @@ impl TypeChecker {
                 self.pop_generic_params();
                 Ok(Type::Primitive(Primitive::Void))
             }
+            Expr::Union(_name, type_params, fields, _) => {
+                self.push_generic_params(type_params.len());
+                for (_, field_ty) in fields {
+                    self.validate_type(field_ty)?;
+                }
+                self.pop_generic_params();
+                Ok(Type::Primitive(Primitive::Void))
+            }
             Expr::StructLiteral(name, type_args, field_values, _) => {
                 let (tp_names, fields) = self
                     .structs
@@ -897,32 +905,109 @@ impl TypeChecker {
 
                 Ok(Type::Struct(name.clone(), resolved_args))
             }
+            Expr::UnionLiteral(name, type_args, field_values, _) => {
+                let (tp_names, fields) = self
+                    .unions
+                    .get(name)
+                    .ok_or_else(|| CheckerError::UndefinedUnion(name.clone(), span))?
+                    .clone();
+
+                let inferred = type_args.is_empty() && !tp_names.is_empty();
+                let resolved_args: Vec<Type> = if inferred {
+                    let mut subst = HashMap::new();
+                    let args: Vec<Type> = (0..tp_names.len())
+                        .map(|i| self.fresh_instantiate(&Type::Param(i), &mut subst))
+                        .collect();
+
+                    for (field_name, expected_ty) in &fields {
+                        let expected = expected_ty.substitute(&args);
+                        if let Some((idx, _)) = field_values
+                            .iter()
+                            .enumerate()
+                            .find(|(_, (n, _))| n == field_name)
+                        {
+                            let expr_type = self.check_expr(&mut field_values[idx].1)?;
+                            if let Err(e) = self.unify_types(&expected, &expr_type) {
+                                let _ = e;
+                                return Err(CheckerError::TypeMismatch {
+                                    expected: expected.clone(),
+                                    found: expr_type,
+                                    context: format!("union '{}' field '{}'", name, field_name),
+                                    span: span,
+                                });
+                            }
+                        }
+                    }
+
+                    args.iter().map(|t| self.resolve_type(t)).collect()
+                } else {
+                    type_args.clone()
+                };
+
+                let resolved_args: Vec<Type> = resolved_args
+                    .iter()
+                    .map(|t| match self.resolve_type(t) {
+                        Type::TypeVar(_) => Type::Primitive(Primitive::Int),
+                        t => t,
+                    })
+                    .collect();
+                *type_args = resolved_args.clone();
+
+                for (field_name, expected_ty) in &fields {
+                    let expected = expected_ty.substitute(&resolved_args);
+                    if let Some((idx, _)) = field_values
+                        .iter()
+                        .enumerate()
+                        .find(|(_, (n, _))| n == field_name)
+                    {
+                        let expr_type = self.check_expr(&mut field_values[idx].1)?;
+                        if !self.types_compatible(&expected, &expr_type) {
+                            return Err(CheckerError::TypeMismatch {
+                                expected: expected.clone(),
+                                found: expr_type,
+                                context: format!("union '{}' field '{}'", name, field_name),
+                                span: span,
+                            });
+                        }
+                    }
+                }
+
+                Ok(Type::Union(name.clone(), resolved_args))
+            }
             Expr::MemberAccess(obj, field_name, _) => {
                 let obj_type = self.check_expr(obj)?;
-                let (struct_name, type_args) = match &obj_type {
+                let (type_name, type_args) = match &obj_type {
                     Type::Struct(name, args) => (name.clone(), args.clone()),
+                    Type::Union(name, args) => (name.clone(), args.clone()),
                     Type::Pointer(inner) => {
-                        if let Type::Struct(ref name, ref args) = **inner {
-                            (name.clone(), args.clone())
-                        } else {
-                            return Err(CheckerError::NonStructMemberAccess(
-                                format!("{:?}", obj_type),
-                                span,
-                            ));
+                        match **inner {
+                            Type::Struct(ref name, ref args) => (name.clone(), args.clone()),
+                            Type::Union(ref name, ref args) => (name.clone(), args.clone()),
+                            _ => {
+                                return Err(CheckerError::NonStructMemberAccess(
+                                    format!("{:?}", obj_type),
+                                    span,
+                                ))
+                            }
                         }
                     }
                     _ => {
                         return Err(CheckerError::NonStructMemberAccess(
                             format!("{:?}", obj_type),
                             span,
-                        ));
+                        ))
                     }
                 };
-                let (_, fields) = self
-                    .structs
-                    .get(&struct_name)
-                    .ok_or_else(|| CheckerError::UndefinedStruct(struct_name.clone(), span))?
-                    .clone();
+
+                let fields = match self.structs.get(&type_name) {
+                    Some((_, fields)) => fields.clone(),
+                    None => match self.unions.get(&type_name) {
+                        Some((_, fields)) => fields.clone(),
+                        None => {
+                            return Err(CheckerError::UndefinedStruct(type_name.clone(), span))
+                        }
+                    },
+                };
 
                 for (name, ty) in &fields {
                     if name == field_name {
@@ -936,7 +1021,7 @@ impl TypeChecker {
                 }
 
                 Err(CheckerError::UndefinedField {
-                    struct_name,
+                    struct_name: type_name,
                     field: field_name.clone(),
                     span: span,
                 })
@@ -945,33 +1030,40 @@ impl TypeChecker {
                 let obj_type = self.check_expr(obj)?;
                 let value_type = self.check_expr(value)?;
 
-                let (struct_name, type_args) = match &obj_type {
+                let (type_name, type_args) = match &obj_type {
                     Type::Struct(name, args) => (name.clone(), args.clone()),
+                    Type::Union(name, args) => (name.clone(), args.clone()),
                     Type::Pointer(inner) => {
-                        if let Type::Struct(ref name, ref args) = **inner {
-                            (name.clone(), args.clone())
-                        } else {
-                            return Err(CheckerError::NonStructMemberAccess(
-                                format!("{:?}", obj_type),
-                                span,
-                            ));
+                        match **inner {
+                            Type::Struct(ref name, ref args) => (name.clone(), args.clone()),
+                            Type::Union(ref name, ref args) => (name.clone(), args.clone()),
+                            _ => {
+                                return Err(CheckerError::NonStructMemberAccess(
+                                    format!("{:?}", obj_type),
+                                    span,
+                                ))
+                            }
                         }
                     }
                     _ => {
                         return Err(CheckerError::NonStructMemberAccess(
                             format!("{:?}", obj_type),
                             span,
-                        ));
+                        ))
                     }
                 };
 
-                let (_, struct_def) = self
-                    .structs
-                    .get(&struct_name)
-                    .ok_or_else(|| CheckerError::UndefinedStruct(struct_name.clone(), span))?
-                    .clone();
+                let fields = match self.structs.get(&type_name) {
+                    Some((_, fields)) => fields.clone(),
+                    None => match self.unions.get(&type_name) {
+                        Some((_, fields)) => fields.clone(),
+                        None => {
+                            return Err(CheckerError::UndefinedStruct(type_name.clone(), span))
+                        }
+                    },
+                };
 
-                for (name, ty) in &struct_def {
+                for (name, ty) in &fields {
                     if name == field_name {
                         let expected = ty.substitute(&type_args);
                         if !self.types_compatible(&expected, &value_type) {
@@ -980,7 +1072,7 @@ impl TypeChecker {
                                 found: value_type,
                                 context: format!(
                                     "struct '{}' field '{}' assignment",
-                                    struct_name, field_name
+                                    type_name, field_name
                                 ),
                                 span: span,
                             });
@@ -990,7 +1082,7 @@ impl TypeChecker {
                 }
 
                 Err(CheckerError::UndefinedField {
-                    struct_name,
+                    struct_name: type_name,
                     field: field_name.clone(),
                     span: span,
                 })

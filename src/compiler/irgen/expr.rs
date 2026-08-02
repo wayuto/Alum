@@ -49,6 +49,45 @@ impl IRGen {
         Ok(ptr_tmp)
     }
 
+    pub(super) fn compile_union_literal(
+        &mut self,
+        union_name: &str,
+        field_values: Vec<(String, Expr)>,
+        ctx: &mut Context,
+    ) -> Result<Operand, CodeGenError> {
+        let (_, fields) = self
+            .unions
+            .get(union_name)
+            .ok_or_else(|| CodeGenError::NameError {
+                message: format!("undefined union '{}'", union_name),
+            })?;
+        let fields = fields.clone();
+        let size_idx = self.get_const_index(IRConst::Int(8));
+        let ptr_tmp = ctx.new_tmp(IRType::Int);
+
+        ctx.instructions.push(Instruction {
+            op: Op::Malloc,
+            dst: Some(ptr_tmp.clone()),
+            src1: Some(Operand::ConstIdx(size_idx)),
+            src2: None,
+        });
+
+        for (field_name, _) in &fields {
+            if let Some((_, field_expr)) = field_values.iter().find(|(n, _)| n == field_name) {
+                let val = self.compile_expr(field_expr.clone(), ctx)?;
+                let offset_idx = self.get_const_index(IRConst::Int(0));
+                ctx.instructions.push(Instruction {
+                    op: Op::StoreAt,
+                    dst: Some(ptr_tmp.clone()),
+                    src1: Some(Operand::ConstIdx(offset_idx)),
+                    src2: Some(val),
+                });
+            }
+        }
+
+        Ok(ptr_tmp)
+    }
+
     pub(super) fn const_array_len(&self, value: &Operand, ctx: &Context) -> Option<usize> {
         let last_inst = ctx.instructions.last()?;
         if !matches!(last_inst.op, Op::Move | Op::FMove) {
@@ -1118,19 +1157,24 @@ impl IRGen {
                 self.compile_struct_literal(&name, fields, ctx)
             }
 
+            Expr::UnionLiteral(name, _, fields, _) => {
+                self.compile_union_literal(&name, fields, ctx)
+            }
+
             Expr::MemberAccess(obj, field_name, _) => {
-                let struct_name = match &*obj {
+                let (type_name, is_union) = match &*obj {
                     Expr::Var(name, _) => match ctx.get_var_high_type(name) {
-                        Some(Type::Struct(sname, _)) => sname.clone(),
-                        Some(Type::Pointer(box_ty)) => {
-                            if let Type::Struct(sname, _) = box_ty.as_ref() {
-                                sname.clone()
-                            } else {
+                        Some(Type::Struct(sname, _)) => (sname.clone(), false),
+                        Some(Type::Union(sname, _)) => (sname.clone(), true),
+                        Some(Type::Pointer(box_ty)) => match box_ty.as_ref() {
+                            Type::Struct(sname, _) => (sname.clone(), false),
+                            Type::Union(sname, _) => (sname.clone(), true),
+                            _ => {
                                 return Err(CodeGenError::TypeError {
                                     message: "member access on non-struct variable".to_string(),
-                                });
+                                })
                             }
-                        }
+                        },
                         _ => {
                             return Err(CodeGenError::TypeError {
                                 message: "member access on non-struct variable".to_string(),
@@ -1144,25 +1188,32 @@ impl IRGen {
                     }
                 };
 
-                let struct_def =
-                    self.structs
-                        .get(&struct_name)
+                let type_def = if is_union {
+                    self.unions
+                        .get(&type_name)
                         .ok_or_else(|| CodeGenError::NameError {
-                            message: format!("undefined struct '{}'", struct_name),
-                        })?;
+                            message: format!("undefined union '{}'", type_name),
+                        })?
+                } else {
+                    self.structs
+                        .get(&type_name)
+                        .ok_or_else(|| CodeGenError::NameError {
+                            message: format!("undefined struct '{}'", type_name),
+                        })?
+                };
 
                 let mut offset = 0;
                 let mut found = false;
-                for (i, (fname, _)) in struct_def.1.iter().enumerate() {
+                for (i, (fname, _)) in type_def.1.iter().enumerate() {
                     if fname == &field_name {
                         found = true;
-                        offset = i * 8;
+                        offset = if is_union { 0 } else { i * 8 };
                         break;
                     }
                 }
                 if !found {
                     return Err(CodeGenError::NameError {
-                        message: format!("struct '{}' has no field '{}'", struct_name, field_name),
+                        message: format!("type '{}' has no field '{}'", type_name, field_name),
                     });
                 }
 
@@ -1179,18 +1230,19 @@ impl IRGen {
             }
 
             Expr::MemberAssign(obj, field_name, value, _) => {
-                let struct_name = match &*obj {
+                let (type_name, is_union) = match &*obj {
                     Expr::Var(name, _) => match ctx.get_var_high_type(name) {
-                        Some(Type::Struct(sname, _)) => sname.clone(),
-                        Some(Type::Pointer(box_ty)) => {
-                            if let Type::Struct(sname, _) = box_ty.as_ref() {
-                                sname.clone()
-                            } else {
+                        Some(Type::Struct(sname, _)) => (sname.clone(), false),
+                        Some(Type::Union(sname, _)) => (sname.clone(), true),
+                        Some(Type::Pointer(box_ty)) => match box_ty.as_ref() {
+                            Type::Struct(sname, _) => (sname.clone(), false),
+                            Type::Union(sname, _) => (sname.clone(), true),
+                            _ => {
                                 return Err(CodeGenError::TypeError {
                                     message: "member assign on non-struct variable".to_string(),
-                                });
+                                })
                             }
-                        }
+                        },
                         _ => {
                             return Err(CodeGenError::TypeError {
                                 message: "member assign on non-struct variable".to_string(),
@@ -1204,25 +1256,32 @@ impl IRGen {
                     }
                 };
 
-                let struct_def =
-                    self.structs
-                        .get(&struct_name)
+                let type_def = if is_union {
+                    self.unions
+                        .get(&type_name)
                         .ok_or_else(|| CodeGenError::NameError {
-                            message: format!("undefined struct '{}'", struct_name),
-                        })?;
+                            message: format!("undefined union '{}'", type_name),
+                        })?
+                } else {
+                    self.structs
+                        .get(&type_name)
+                        .ok_or_else(|| CodeGenError::NameError {
+                            message: format!("undefined struct '{}'", type_name),
+                        })?
+                };
 
                 let mut offset = 0;
                 let mut found = false;
-                for (i, (fname, _)) in struct_def.1.iter().enumerate() {
+                for (i, (fname, _)) in type_def.1.iter().enumerate() {
                     if fname == &field_name {
                         found = true;
-                        offset = i * 8;
+                        offset = if is_union { 0 } else { i * 8 };
                         break;
                     }
                 }
                 if !found {
                     return Err(CodeGenError::NameError {
-                        message: format!("struct '{}' has no field '{}'", struct_name, field_name),
+                        message: format!("type '{}' has no field '{}'", type_name, field_name),
                     });
                 }
 
@@ -1249,6 +1308,7 @@ impl IRGen {
                 };
                 let is_struct = match ctx.get_var_high_type(&name) {
                     Some(Type::Struct(sname, _)) => self.structs.contains_key(sname),
+                    Some(Type::Union(sname, _)) => self.unions.contains_key(sname),
                     _ => false,
                 };
                 if is_struct {
@@ -1289,7 +1349,7 @@ impl IRGen {
                 Ok(ctx.new_tmp(IRType::Void))
             }
 
-            Expr::TypeDef(_) | Expr::Struct(_, _, _, _) | Expr::Lambda(_, _, _, _) => {
+            Expr::TypeDef(_) | Expr::Struct(_, _, _, _) | Expr::Union(_, _, _, _) | Expr::Lambda(_, _, _, _) => {
                 Ok(ctx.new_tmp(IRType::Void))
             }
 
@@ -1396,6 +1456,18 @@ impl IRGen {
                         }
                     }
                 }
+                if let Some(Type::Union(sname, type_args)) = ctx.get_var_high_type(name) {
+                    if let Some((_, fields)) = self.unions.get(sname) {
+                        for (fname, ftype) in fields {
+                            if fname == field_name {
+                                if let Type::Function(_, ret) = ftype {
+                                    let concrete = ret.substitute(type_args);
+                                    return Context::type2ir_type(&concrete);
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
         IRType::Int
@@ -1444,14 +1516,13 @@ impl IRGen {
                     return (Some(*inner.clone()), Self::ptr_scale(inner) == 1);
                 }
                 Some(Type::Struct(sname, ta)) => (sname.clone(), ta.clone(), None),
+                Some(Type::Union(sname, ta)) => (sname.clone(), ta.clone(), None),
                 #[allow(warnings)]
-                Some(Type::Pointer(box_ty)) => {
-                    if let Type::Struct(sname, ta) = box_ty.as_ref() {
-                        (sname.clone(), ta.clone(), None)
-                    } else {
-                        return (None, false);
-                    }
-                }
+                Some(Type::Pointer(box_ty)) => match box_ty.as_ref() {
+                    Type::Struct(sname, ta) => (sname.clone(), ta.clone(), None),
+                    Type::Union(sname, ta) => (sname.clone(), ta.clone(), None),
+                    _ => return (None, false),
+                },
                 _ => return (None, false),
             },
             Expr::MemberAccess(obj, field_name, _) => match &**obj {
@@ -1459,13 +1530,18 @@ impl IRGen {
                     Some(Type::Struct(sname, type_args)) => {
                         (sname.clone(), type_args.clone(), Some(field_name.clone()))
                     }
-                    Some(Type::Pointer(box_ty)) => {
-                        if let Type::Struct(sname, type_args) = box_ty.as_ref() {
-                            (sname.clone(), type_args.clone(), Some(field_name.clone()))
-                        } else {
-                            return (None, false);
-                        }
+                    Some(Type::Union(sname, type_args)) => {
+                        (sname.clone(), type_args.clone(), Some(field_name.clone()))
                     }
+                    Some(Type::Pointer(box_ty)) => match box_ty.as_ref() {
+                        Type::Struct(sname, type_args) => {
+                            (sname.clone(), type_args.clone(), Some(field_name.clone()))
+                        }
+                        Type::Union(sname, type_args) => {
+                            (sname.clone(), type_args.clone(), Some(field_name.clone()))
+                        }
+                        _ => return (None, false),
+                    },
                     _ => return (None, false),
                 },
                 _ => return (None, false),
@@ -1474,6 +1550,28 @@ impl IRGen {
         };
 
         if let Some((_, fields)) = self.structs.get(&sname) {
+            for (fname, ftype) in fields {
+                if Some(fname.as_str()) == field_name.as_deref() {
+                    let byte = match ftype {
+                        Type::Primitive(Primitive::String) => true,
+                        Type::Array(_elem) => false,
+                        Type::Pointer(inner) => Self::ptr_scale(&inner) == 1,
+                        _ => false,
+                    };
+                    let elem = match ftype {
+                        Type::Pointer(inner) => *inner.clone(),
+                        Type::Array(elem) => {
+                            let concrete = elem.substitute(&type_args);
+                            concrete
+                        }
+                        Type::Primitive(Primitive::String) => Type::Primitive(Primitive::Int),
+                        _ => Type::Primitive(Primitive::Int),
+                    };
+                    return (Some(elem), byte);
+                }
+            }
+        }
+        if let Some((_, fields)) = self.unions.get(&sname) {
             for (fname, ftype) in fields {
                 if Some(fname.as_str()) == field_name.as_deref() {
                     let byte = match ftype {

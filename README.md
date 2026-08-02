@@ -143,6 +143,7 @@ Alum is a statically typed language with explicit type annotations. All variable
 - `void`: No return type
 - `T[N]`: Fixed-size array of type T with N elements
 - `T[]`: Dynamic array (length determined at runtime)
+- `struct`/`union`: User-defined composite types
 - `T`: Generic type parameter (for parametric polymorphism)
 
 ### Variables
@@ -392,6 +393,30 @@ Access struct fields using the dot operator:
 println(itoa(p.x))
 println(itoa(p.y))
 ```
+
+### Unions
+
+Define custom data structures that share the same memory among all members with the `union` keyword. All union members overlap in memory, and the union size is the size of its largest member:
+
+```al
+union Value {
+    i: int,
+    f: float
+}
+
+fun main(): int {
+    let v: Value = Value {
+        i: 42
+    }
+    println(itoa(v.i))
+
+    // Assign through any member; they all share storage
+    v.f = 3.14
+    return 0
+}
+```
+
+Union members are accessed with the dot operator, and unions support the same features as structs (type parameters, pointer access, etc.).
 
 ### Lambda Functions
 

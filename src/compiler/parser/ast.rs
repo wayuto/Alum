@@ -22,6 +22,7 @@ pub enum Type {
     Array(Box<Type>),
     Function(Vec<Type>, Box<Type>),
     Struct(String, Vec<Type>),
+    Union(String, Vec<Type>),
     Param(usize),
     TypeVar(usize),
     Unknown,
@@ -71,6 +72,10 @@ impl Type {
                 name.clone(),
                 type_args.iter().map(|t| t.substitute(args)).collect(),
             ),
+            Type::Union(name, type_args) => Type::Union(
+                name.clone(),
+                type_args.iter().map(|t| t.substitute(args)).collect(),
+            ),
             _ => self.clone(),
         }
     }
@@ -85,6 +90,7 @@ impl Type {
                 params.iter().any(|p| p.contains_param()) || ret.contains_param()
             }
             Type::Struct(_, args) => args.iter().any(|t| t.contains_param()),
+            Type::Union(_, args) => args.iter().any(|t| t.contains_param()),
             _ => false,
         }
     }
@@ -105,6 +111,10 @@ impl Type {
                 format!("fn_{}_{}", param_str.join("_"), ret.mangle())
             }
             Type::Struct(name, args) => {
+                let arg_str: Vec<String> = args.iter().map(|t| t.mangle()).collect();
+                format!("{}_{}", name, arg_str.join("_"))
+            }
+            Type::Union(name, args) => {
                 let arg_str: Vec<String> = args.iter().map(|t| t.mangle()).collect();
                 format!("{}_{}", name, arg_str.join("_"))
             }
@@ -132,6 +142,14 @@ impl fmt::Display for Type {
                 write!(f, "{}({})", ret, param_str.join(", "))
             }
             Type::Struct(name, args) => {
+                if args.is_empty() {
+                    write!(f, "{}", name)
+                } else {
+                    let arg_str: Vec<String> = args.iter().map(|t| t.to_string()).collect();
+                    write!(f, "{}<{}>", name, arg_str.join(", "))
+                }
+            }
+            Type::Union(name, args) => {
                 if args.is_empty() {
                     write!(f, "{}", name)
                 } else {
@@ -199,6 +217,8 @@ impl Expr {
             | Expr::Match(_, _, _, s)
             | Expr::Struct(_, _, _, s)
             | Expr::StructLiteral(_, _, _, s)
+            | Expr::Union(_, _, _, s)
+            | Expr::UnionLiteral(_, _, _, s)
             | Expr::MemberAccess(_, _, s)
             | Expr::MemberAssign(_, _, _, s)
             | Expr::Lambda(_, _, _, s)
@@ -286,6 +306,8 @@ pub enum Expr {
     Match(Box<Expr>, Vec<(Expr, Expr)>, Option<Box<Expr>>, Span),
     Struct(String, Vec<String>, Vec<(String, Type)>, Span),
     StructLiteral(String, Vec<Type>, Vec<(String, Expr)>, Span),
+    Union(String, Vec<String>, Vec<(String, Type)>, Span),
+    UnionLiteral(String, Vec<Type>, Vec<(String, Expr)>, Span),
     MemberAccess(Box<Expr>, String, Span),
     MemberAssign(Box<Expr>, String, Box<Expr>, Span),
     Lambda(Vec<(String, Type)>, Box<Expr>, Type, Span),

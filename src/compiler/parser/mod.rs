@@ -18,5 +18,6 @@ pub struct Parser<'a> {
     last_span: Span,
     typedefs: HashMap<String, Type>,
     structs: HashMap<String, (Vec<String>, Vec<(String, Type)>)>,
+    unions: HashMap<String, (Vec<String>, Vec<(String, Type)>)>,
     type_param_scopes: Vec<HashMap<String, usize>>,
 }

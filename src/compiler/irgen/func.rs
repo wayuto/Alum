@@ -255,6 +255,23 @@ pub(super) fn substitute_expr(expr: Expr, args: &[Type]) -> Expr {
             fields.into_iter().map(|(n, e)| (n, sub_val(e))).collect(),
             span,
         ),
+        Union(name, type_params, fields, span) => {
+            let fields = if type_params.is_empty() {
+                fields
+                    .into_iter()
+                    .map(|(n, t)| (n, t.substitute(args)))
+                    .collect()
+            } else {
+                fields
+            };
+            Union(name, type_params, fields, span)
+        }
+        UnionLiteral(name, type_args, fields, span) => UnionLiteral(
+            name,
+            type_args.into_iter().map(|t| t.substitute(args)).collect(),
+            fields.into_iter().map(|(n, e)| (n, sub_val(e))).collect(),
+            span,
+        ),
         Lambda(params, body, ret_type, span) => Lambda(
             params
                 .into_iter()

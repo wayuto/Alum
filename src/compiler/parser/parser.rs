@@ -14,6 +14,7 @@ impl<'a> Parser<'a> {
             last_span: Span::new(1, 1),
             typedefs: HashMap::new(),
             structs: HashMap::new(),
+            unions: HashMap::new(),
             type_param_scopes: Vec::new(),
         }
     }
@@ -146,20 +147,8 @@ impl<'a> Parser<'a> {
                 }
                 Ok((Token::MATCH, span_)) => {
                     self.next()?;
-                    let (token, span) = self.next()?;
-                    let var = Expr::Var(
-                        match token {
-                            Token::IDENT(s) => s,
-                            token => {
-                                return Err(ParserError::UnexpectedToken {
-                                    expected: Some(Token::IDENT("VAR_NAME".to_string())),
-                                    found: token,
-                                    span,
-                                });
-                            }
-                        },
-                        span,
-                    );
+                    // let (token, span) = self.next()?;
+                    let var = self.expr()?;
                     self.expect(Token::LBRACE)?;
                     let mut cases: Vec<(Expr, Expr)> = Vec::new();
                     let mut default: Option<Box<Expr>> = None;
@@ -325,6 +314,77 @@ impl<'a> Parser<'a> {
                     self.structs
                         .insert(name.clone(), (type_params.clone(), fields.clone()));
                     Ok(Expr::Struct(name, type_params, fields, span))
+                }
+
+                Ok((Token::UNION, _)) => {
+                    self.next()?;
+                    let (token, span) = self.next()?;
+                    let name = match token {
+                        Token::IDENT(s) => s,
+                        token => {
+                            return Err(ParserError::UnexpectedToken {
+                                expected: Some(Token::IDENT("UNION NAME".to_string())),
+                                found: token,
+                                span,
+                            });
+                        }
+                    };
+                    let type_params = if matches!(self.peek(), Some(Ok((Token::LT, _)))) {
+                        self.next()?;
+                        let params = self.get_type_params_list()?;
+                        self.expect(Token::GT)?;
+                        params
+                    } else {
+                        Vec::new()
+                    };
+                    if !type_params.is_empty() {
+                        self.push_type_params(&type_params);
+                    }
+                    self.expect(Token::LBRACE)?;
+                    let mut fields = Vec::new();
+                    loop {
+                        match self.peek().cloned() {
+                            Some(Ok((Token::RBRACE, _))) => {
+                                self.next()?;
+                                break;
+                            }
+                            Some(Ok((Token::IDENT(field_name), _))) => {
+                                self.next()?;
+                                self.expect(Token::COLON)?;
+                                let field_type = self.parse_type()?;
+                                fields.push((field_name, field_type));
+                                match self.peek().cloned() {
+                                    Some(Ok((Token::COMMA, _))) => {
+                                        self.next()?;
+                                    }
+                                    Some(Ok((Token::RBRACE, _))) => {
+                                        self.next()?;
+                                        break;
+                                    }
+                                    _ => {
+                                        return Err(ParserError::UnexpectedToken {
+                                            expected: Some(Token::COMMA),
+                                            found: Token::EOF,
+                                            span: self.last_span,
+                                        });
+                                    }
+                                }
+                            }
+                            _ => {
+                                return Err(ParserError::UnexpectedToken {
+                                    expected: Some(Token::IDENT("FIELD NAME".to_string())),
+                                    found: Token::EOF,
+                                    span: self.last_span,
+                                });
+                            }
+                        }
+                    }
+                    if !type_params.is_empty() {
+                        self.type_param_scopes.pop();
+                    }
+                    self.unions
+                        .insert(name.clone(), (type_params.clone(), fields.clone()));
+                    Ok(Expr::Union(name, type_params, fields, span))
                 }
 
                 Ok((_, _)) => {
@@ -731,7 +791,8 @@ impl<'a> Parser<'a> {
                     let name = s.clone();
                     self.next()?;
 
-                    if self.structs.contains_key(&name) {
+                    if self.structs.contains_key(&name) || self.unions.contains_key(&name) {
+                        let is_union = self.unions.contains_key(&name);
                         if let Some(Ok((Token::LT, _))) = self.peek() {
                             self.next()?;
                             let type_args = self.get_type_args_list()?;
@@ -778,7 +839,11 @@ impl<'a> Parser<'a> {
                                         }
                                     }
                                 }
-                                return Ok(Expr::StructLiteral(name, type_args, fields, span));
+                                if is_union {
+                                    return Ok(Expr::UnionLiteral(name, type_args, fields, span));
+                                } else {
+                                    return Ok(Expr::StructLiteral(name, type_args, fields, span));
+                                }
                             }
                         } else if let Some(Ok((Token::LBRACE, _))) = self.peek() {
                             self.next()?;
@@ -820,7 +885,11 @@ impl<'a> Parser<'a> {
                                     }
                                 }
                             }
-                            return Ok(Expr::StructLiteral(name, Vec::new(), fields, span));
+                            if is_union {
+                                return Ok(Expr::UnionLiteral(name, Vec::new(), fields, span));
+                            } else {
+                                return Ok(Expr::StructLiteral(name, Vec::new(), fields, span));
+                            }
                         }
                     }
 
@@ -942,7 +1011,11 @@ impl<'a> Parser<'a> {
                                 args = self.get_type_args_list()?;
                                 self.expect(Token::GT)?;
                             }
-                            Type::Struct(s, args)
+                            if self.unions.contains_key(&s) {
+                                Type::Union(s, args)
+                            } else {
+                                Type::Struct(s, args)
+                            }
                         };
 
                         if matches!(self.peek(), Some(Ok((Token::LBRACKET, _)))) {
@@ -1131,7 +1204,11 @@ impl<'a> Parser<'a> {
                         args = self.get_type_args_list()?;
                         self.expect(Token::GT)?;
                     }
-                    Type::Struct(name.to_string(), args)
+                    if self.unions.contains_key(name) {
+                        Type::Union(name.to_string(), args)
+                    } else {
+                        Type::Struct(name.to_string(), args)
+                    }
                 }
             },
             Token::IDENT(s) => {
@@ -1146,7 +1223,11 @@ impl<'a> Parser<'a> {
                         args = self.get_type_args_list()?;
                         self.expect(Token::GT)?;
                     }
-                    Type::Struct(s, args)
+                    if self.unions.contains_key(&s) {
+                        Type::Union(s, args)
+                    } else {
+                        Type::Struct(s, args)
+                    }
                 }
             }
             token => {

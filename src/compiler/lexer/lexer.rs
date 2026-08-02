@@ -355,6 +355,7 @@ impl<'a> Lexer<'a> {
                     "typedef" => Token::TYPEDEF,
                     "match" => Token::MATCH,
                     "struct" => Token::STRUCT,
+                    "union" => Token::UNION,
                     _ => Token::IDENT(ident),
                 }
             }

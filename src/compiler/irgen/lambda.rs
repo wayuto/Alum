@@ -235,6 +235,15 @@ pub(super) fn hoist_lambdas(
                 .collect(),
             crate::compiler::Span::new(0, 0),
         ),
+        Expr::UnionLiteral(name, type_args, fields, _) => Expr::UnionLiteral(
+            name,
+            type_args,
+            fields
+                .into_iter()
+                .map(|(n, e)| (n, hoist_lambdas(e, lambda_counter, lambda_map)))
+                .collect(),
+            crate::compiler::Span::new(0, 0),
+        ),
         Expr::MemberAccess(obj, field, _) => Expr::MemberAccess(
             Box::new(hoist_lambdas(*obj, lambda_counter, lambda_map)),
             field,

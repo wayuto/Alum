@@ -88,6 +88,7 @@ impl Context {
             HighType::Pointer(_) => IRType::Int,
             HighType::Function(_, _) => IRType::Int,
             HighType::Struct(_, _) => IRType::Int,
+            HighType::Union(_, _) => IRType::Int,
             HighType::Param(_) | HighType::TypeVar(_) | HighType::Unknown => IRType::Int,
         }
     }

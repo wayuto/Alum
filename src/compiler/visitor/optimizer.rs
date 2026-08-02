@@ -67,6 +67,9 @@ impl Optimizer {
             Expr::StructLiteral(_, _, fields, _) => {
                 fields.iter_mut().for_each(|(_, v)| self.optimize_expr(v));
             }
+            Expr::UnionLiteral(_, _, fields, _) => {
+                fields.iter_mut().for_each(|(_, v)| self.optimize_expr(v));
+            }
             Expr::MemberAccess(obj, _, _) => self.optimize_expr(obj),
             Expr::MemberAssign(obj, _, val, _) => {
                 self.optimize_expr(obj);
@@ -342,6 +345,11 @@ impl Optimizer {
                     self.dce(v);
                 }
             }
+            Expr::UnionLiteral(_, _, fields, _) => {
+                for (_, v) in fields {
+                    self.dce(v);
+                }
+            }
             Expr::MemberAccess(obj, _, _) => self.dce(obj),
             Expr::MemberAssign(obj, _, val, _) => {
                 self.dce(obj);
@@ -426,6 +434,7 @@ impl Optimizer {
             Expr::ArrayLiteral(elems, _) => elems.iter().all(|e| self.is_pure(e)),
             Expr::ArrayFill(_, len, _) => self.is_pure(len),
             Expr::StructLiteral(_, _, fields, _) => fields.iter().all(|(_, v)| self.is_pure(v)),
+            Expr::UnionLiteral(_, _, fields, _) => fields.iter().all(|(_, v)| self.is_pure(v)),
             Expr::MemberAccess(obj, _, _) => self.is_pure(obj),
             Expr::AddressOf(expr, _) => self.is_pure(expr),
             Expr::Deref(expr, _) => self.is_pure(expr),

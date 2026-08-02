@@ -37,6 +37,12 @@ impl TypeChecker {
                     .map(|t| self.fresh_instantiate(t, subst))
                     .collect(),
             ),
+            Type::Union(name, args) => Type::Union(
+                name.clone(),
+                args.iter()
+                    .map(|t| self.fresh_instantiate(t, subst))
+                    .collect(),
+            ),
             _ => ty.clone(),
         }
     }
@@ -87,6 +93,10 @@ impl TypeChecker {
                 name.clone(),
                 args.iter().map(|t| self.resolve_params(t)).collect(),
             ),
+            Type::Union(name, args) => Type::Union(
+                name.clone(),
+                args.iter().map(|t| self.resolve_params(t)).collect(),
+            ),
             _ => ty.clone(),
         }
     }
@@ -108,6 +118,10 @@ impl TypeChecker {
                 }
                 Expr::Struct(name, type_params, fields, _) => {
                     self.structs
+                        .insert(name.clone(), (type_params.clone(), fields.clone()));
+                }
+                Expr::Union(name, type_params, fields, _) => {
+                    self.unions
                         .insert(name.clone(), (type_params.clone(), fields.clone()));
                 }
                 _ => {}
@@ -162,6 +176,10 @@ impl TypeChecker {
                 name.clone(),
                 args.iter().map(|t| self.resolve_type(t)).collect(),
             ),
+            Type::Union(name, args) => Type::Union(
+                name.clone(),
+                args.iter().map(|t| self.resolve_type(t)).collect(),
+            ),
             _ => ty.clone(),
         }
     }
@@ -182,6 +200,18 @@ impl TypeChecker {
                 }
             }
             Expr::StructLiteral(_, type_args, fields, _) => {
+                for ty in type_args.iter_mut() {
+                    let resolved = self.resolve_type_var(ty);
+                    *ty = match resolved {
+                        Type::TypeVar(_) => Type::Primitive(Primitive::Int),
+                        t => t,
+                    };
+                }
+                for (_, value) in fields.iter_mut() {
+                    self.resolve_call_type_args(value);
+                }
+            }
+            Expr::UnionLiteral(_, type_args, fields, _) => {
                 for ty in type_args.iter_mut() {
                     let resolved = self.resolve_type_var(ty);
                     *ty = match resolved {
@@ -330,22 +360,37 @@ impl TypeChecker {
                 let obj_type = self.get_expr_type(obj);
                 let inner_type = match obj_type {
                     Type::Pointer(inner) => *inner,
-                    Type::Struct(_, _) => obj_type,
+                    Type::Struct(_, _) | Type::Union(_, _) => obj_type,
                     _ => return Type::Primitive(Primitive::Int),
                 };
-                if let Type::Struct(struct_name, args) = inner_type {
-                    if let Some((_, fields)) = self.structs.get(&struct_name) {
-                        for (name, ty) in fields {
-                            if name == field_name {
-                                return self.resolve_type(&ty.substitute(&args));
+                match inner_type {
+                    Type::Struct(struct_name, args) => {
+                        if let Some((_, fields)) = self.structs.get(&struct_name) {
+                            for (name, ty) in fields {
+                                if name == field_name {
+                                    return self.resolve_type(&ty.substitute(&args));
+                                }
                             }
                         }
                     }
+                    Type::Union(union_name, args) => {
+                        if let Some((_, fields)) = self.unions.get(&union_name) {
+                            for (name, ty) in fields {
+                                if name == field_name {
+                                    return self.resolve_type(&ty.substitute(&args));
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
                 }
                 Type::Primitive(Primitive::Int)
             }
             Expr::StructLiteral(name, type_args, _, _) => {
                 Type::Struct(name.clone(), type_args.clone())
+            }
+            Expr::UnionLiteral(name, type_args, _, _) => {
+                Type::Union(name.clone(), type_args.clone())
             }
             Expr::ArrayLiteral(_, _) | Expr::ArrayFill(_, _, _) => {
                 Type::Array(Box::new(Type::Primitive(Primitive::Int)))
@@ -415,6 +460,14 @@ impl TypeChecker {
                         .zip(a2.iter())
                         .all(|(t1, t2)| self.types_compatible(t1, t2))
             }
+            (Type::Union(n1, a1), Type::Union(n2, a2)) => {
+                n1 == n2
+                    && a1.len() == a2.len()
+                    && a1
+                        .iter()
+                        .zip(a2.iter())
+                        .all(|(t1, t2)| self.types_compatible(t1, t2))
+            }
             _ => false,
         }
     }
@@ -431,6 +484,12 @@ impl TypeChecker {
                 self.validate_type(ret)
             }
             Type::Struct(_, args) => {
+                for arg in args {
+                    self.validate_type(arg)?;
+                }
+                Ok(())
+            }
+            Type::Union(_, args) => {
                 for arg in args {
                     self.validate_type(arg)?;
                 }

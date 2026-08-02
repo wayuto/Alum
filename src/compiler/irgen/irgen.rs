@@ -35,6 +35,10 @@ impl IRGen {
                     self.structs
                         .insert(name.clone(), (type_params.clone(), fields.clone()));
                 }
+                Expr::Union(name, type_params, fields, _) => {
+                    self.unions
+                        .insert(name.clone(), (type_params.clone(), fields.clone()));
+                }
                 _ => {}
             }
         }

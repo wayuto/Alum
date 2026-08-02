@@ -22,6 +22,9 @@
             "include": "#struct-declaration"
         },
         {
+            "include": "#union-declaration"
+        },
+        {
             "include": "#struct-literal"
         },
         {
@@ -155,6 +158,10 @@
                 {
                     "name": "keyword.declaration.struct.alum",
                     "match": "\\bstruct\\b"
+                },
+                {
+                    "name": "keyword.declaration.union.alum",
+                    "match": "\\bunion\\b"
                 },
                 {
                     "name": "keyword.declaration.typedef.alum",
@@ -311,6 +318,51 @@
                                 },
                                 "2": {
                                     "name": "punctuation.separator.key-value.alum"
+                                }
+                            }
+                        },
+                        {
+                            "include": "$self"
+                        }
+                    ]
+                }
+            ]
+        },
+        "union-declaration": {
+            "patterns": [
+                {
+                    "name": "meta.union.declaration.alum",
+                    "begin": "(\\bunion)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(\\{)",
+                    "end": "(\\})",
+                    "beginCaptures": {
+                        "1": {
+                            "name": "keyword.declaration.union.alum"
+                        },
+                        "2": {
+                            "name": "entity.name.type.union.alum"
+                        },
+                        "3": {
+                            "name": "punctuation.definition.block.begin.alum"
+                        }
+                    },
+                    "endCaptures": {
+                        "1": {
+                            "name": "punctuation.definition.block.end.alum"
+                        }
+                    },
+                    "patterns": [
+                        {
+                            "include": "#comments"
+                        },
+                        {
+                            "name": "variable.other.member.alum",
+                            "match": "([A-Za-z_][A-Za-z0-9_]*)\\s*(:)",
+                            "captures": {
+                                "1": {
+                                    "name": "variable.other.member.alum"
+                                },
+                                "2": {
+                                    "name": "punctuation.separator.type-annotation.alum"
                                 }
                             }
                         },
