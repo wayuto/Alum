@@ -68,7 +68,7 @@
     },
     "onEnterRules": [
         {
-            "beforeText": "^\\s*(fun|struct|extern)\\s+.*\\{$",
+            "beforeText": "^\\s*(fun|struct|extern|for)\\s+.*\\{$",
             "action": {
                 "indent": "indent"
             }
@@ -80,7 +80,7 @@
             }
         },
         {
-            "beforeText": "^\\s*(else|while|for)\\s*\\{?\\s*$",
+            "beforeText": "^\\s*(else|while|match)\\s*\\{?\\s*$",
             "action": {
                 "indent": "indent"
             }

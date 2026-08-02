@@ -14,6 +14,9 @@ Alum is a lightweight, efficient programming language implemented in **Rust**. T
   - Lambda functions
   - Preprocessor directives
   - Structs, unions and enums (including generic declarations and literals)
+  - F-strings with interpolation
+  - Increment/decrement operators (`++`, `--`)
+  - Bitwise operators (`^`, `|`)
 
 ## Installation
 

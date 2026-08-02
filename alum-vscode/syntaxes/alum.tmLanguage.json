@@ -46,6 +46,9 @@
             "include": "#variable-declaration"
         },
         {
+            "include": "#for-loop"
+        },
+        {
             "include": "#builtin-functions"
         },
         {
@@ -180,7 +183,11 @@
                 },
                 {
                     "name": "constant.language.boolean.alum",
-                    "match": "\\b(true|false|nil)\\b"
+                    "match": "\\b(true|false)\\b"
+                },
+                {
+                    "name": "constant.language.null.alum",
+                    "match": "\\bnil\\b"
                 }
             ]
         },
@@ -789,7 +796,7 @@
                 },
                 {
                     "name": "support.function.builtin.string.alum",
-                    "match": "\\b(strlen|strcpy|strcat|memcpy|memset|bcmp|memcmp)\\b"
+                    "match": "\\b(strlen|strcpy|strcat|strcmp|memcpy|memset|bcmp|memcmp)\\b"
                 },
                 {
                     "name": "support.function.builtin.convert.alum",
@@ -814,6 +821,47 @@
                 {
                     "name": "constant.numeric.float.alum",
                     "match": "\\b[0-9]+\\.[0-9]+([eE][+-]?[0-9]+)?\\b"
+                },
+                {
+                    "name": "string.quoted.double.fstring.alum",
+                    "begin": "f\"",
+                    "end": "\"",
+                    "beginCaptures": {
+                        "0": {
+                            "name": "punctuation.definition.string.begin.alum"
+                        }
+                    },
+                    "endCaptures": {
+                        "0": {
+                            "name": "punctuation.definition.string.end.alum"
+                        }
+                    },
+                    "patterns": [
+                        {
+                            "name": "constant.character.escape.alum",
+                            "match": "\\\\."
+                        },
+                        {
+                            "name": "meta.interpolation.alum",
+                            "begin": "\\{",
+                            "end": "\\}",
+                            "beginCaptures": {
+                                "0": {
+                                    "name": "punctuation.definition.interpolation.begin.alum"
+                                }
+                            },
+                            "endCaptures": {
+                                "0": {
+                                    "name": "punctuation.definition.interpolation.end.alum"
+                                }
+                            },
+                            "patterns": [
+                                {
+                                    "include": "$self"
+                                }
+                            ]
+                        }
+                    ]
                 },
                 {
                     "name": "string.quoted.double.alum",
@@ -851,6 +899,45 @@
                         }
                     },
                     "patterns": [
+                        {
+                            "include": "$self"
+                        }
+                    ]
+                }
+            ]
+        },
+        "for-loop": {
+            "patterns": [
+                {
+                    "name": "meta.for-loop.alum",
+                    "begin": "(\\bfor)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+(\\bin)\\s+",
+                    "end": "(\\})",
+                    "beginCaptures": {
+                        "1": {
+                            "name": "keyword.control.alum"
+                        },
+                        "2": {
+                            "name": "variable.other.readwrite.alum"
+                        },
+                        "3": {
+                            "name": "keyword.control.alum"
+                        }
+                    },
+                    "endCaptures": {
+                        "1": {
+                            "name": "punctuation.definition.block.end.alum"
+                        }
+                    },
+                    "patterns": [
+                        {
+                            "include": "#operators"
+                        },
+                        {
+                            "include": "#literals"
+                        },
+                        {
+                            "include": "#comments"
+                        },
                         {
                             "include": "$self"
                         }
@@ -897,6 +984,14 @@
                     "match": "\\+|\\-|\\*|\\/"
                 },
                 {
+                    "name": "keyword.operator.increment.alum",
+                    "match": "\\+\\+"
+                },
+                {
+                    "name": "keyword.operator.decrement.alum",
+                    "match": "\\-\\-"
+                },
+                {
                     "name": "keyword.operator.assignment.alum",
                     "match": "((?<![\\w=])(=)|\\+=|\\-=|\\*=|\\/=|%=)"
                 },
@@ -907,6 +1002,10 @@
                 {
                     "name": "keyword.operator.logical.alum",
                     "match": "&&|\\|\\||!"
+                },
+                {
+                    "name": "keyword.operator.bitwise.alum",
+                    "match": "\\^|\\|"
                 },
                 {
                     "name": "keyword.operator.address.alum",
