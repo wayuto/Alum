@@ -1,12 +1,10 @@
 $import "result.ah"
 $import "io.ah"
-$import "string.ah"
-$import "convert.ah"
 
 // Result Example
 
 fun auth(password: string): Result<int, string> {
-    if memcmp(password, "123456", 6) == 0 {
+    if password == "123456" {
         return Result<int, string> {
             result: Ok, 
             value: ResultValue<int, string> {
