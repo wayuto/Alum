@@ -22,4 +22,5 @@ pub struct Parser<'a> {
     enums: HashMap<String, Vec<(String, isize)>>,
     type_param_scopes: Vec<HashMap<String, usize>>,
     has_fstring: bool,
+    scope_depth: usize,
 }

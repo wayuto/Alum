@@ -9,7 +9,7 @@ fun sqrt(n: int): int {
     if n <= 0 {
         return 0
     }
-    let i: int = 1
+    var i: int = 1
     while i * i <= n {
         i = i + 1
     }
@@ -38,8 +38,8 @@ fun pow(base: int, exp: int): int {
         return 0
     }
     
-    let result: int = 1
-    let i: int = 0
+    var result: int = 1
+    var i: int = 0
     while i < exp {
         result = result * base
         i = i + 1

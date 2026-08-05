@@ -33,12 +33,12 @@ fun(pub) vec_new<T>(): Vec<T> {
 		},
 		push: \(v: *Vec<T>, elem: T): void {
 			if v.len >= v.capacity {
-				let new_capacity: int = if v.capacity == 0 {
+				var new_capacity: int = if v.capacity == 0 {
 					4
 				} else {
 					v.capacity * 2
 				}
-				let new_data: T[] = [T; new_capacity]
+				var new_data: T[] = [T; new_capacity]
 				for i in 0..v.len {
 					new_data[i] = v.data[i]
 				}
@@ -54,7 +54,7 @@ fun(pub) vec_new<T>(): Vec<T> {
 				value: nil
 			}
 			v.len = v.len - 1
-			let elem: T = v.data[v.len]
+			var elem: T = v.data[v.len]
 			return Maybe<T> {
 				tag: Just,
 				value: elem
@@ -68,7 +68,7 @@ fun(pub) vec_new<T>(): Vec<T> {
 					value: nil
 				}
 			}
-			let elem: T = v.data[v.iter]
+			var elem: T = v.data[v.iter]
 			v.iter = v.iter + 1
 			return Maybe<T> {
 				tag: Just,

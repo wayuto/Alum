@@ -132,7 +132,7 @@ After running `almk build`, this will generate `target/libmylib.a`.
 fun(extern) add(int, int): int
 
 fun main(): int {
-    let result: int = add(10, 20)
+    var result: int = add(10, 20)
     return 0
 }
 ```
@@ -234,7 +234,7 @@ fun(extern) c_add(int, int): int
 fun(extern) c_print_int(int): void
 
 fun main(): int {
-    let result: int = c_add(10, 20);
+    var result: int = c_add(10, 20);
     c_print_int(result);
     return 0;
 }

@@ -117,7 +117,7 @@ impl TypeChecker {
                     return Err(CheckerError::InvalidOperation {
                         op: "declaration".to_string(),
                         type_name: format!(
-                            "global mutable variable '{}' (only allowed at top level)",
+                            "global variable '{}' (only allowed at top level)",
                             name
                         ),
                         span: span,

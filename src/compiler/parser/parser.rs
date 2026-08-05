@@ -18,6 +18,7 @@ impl<'a> Parser<'a> {
             enums: HashMap::new(),
             type_param_scopes: Vec::new(),
             has_fstring: false,
+            scope_depth: 0,
         }
     }
 
@@ -76,6 +77,7 @@ impl<'a> Parser<'a> {
             enums: self.enums.clone(),
             type_param_scopes: self.type_param_scopes.clone(),
             has_fstring: false,
+            scope_depth: self.scope_depth,
         };
         sub.expr()
     }
@@ -83,8 +85,20 @@ impl<'a> Parser<'a> {
     fn expr(&mut self) -> Result<Expr, ParserError> {
         if let Some(token) = self.peek().cloned() {
             match token {
-                Ok((Token::LET, _)) => {
+                Ok((Token::VAR, _)) => {
                     self.next()?;
+                    let is_pub = if self.scope_depth == 0 {
+                        self.parse_global_annotation("var")?
+                    } else {
+                        if matches!(self.peek(), Some(Ok((Token::LPAREN, _)))) {
+                            return Err(ParserError::UnexpectedToken {
+                                expected: Some(Token::IDENT("NAME".to_string())),
+                                found: Token::LPAREN,
+                                span: self.last_span,
+                            });
+                        }
+                        false
+                    };
                     let (token, span) = self.next()?;
                     let name = match token {
                         Token::IDENT(s) => s,
@@ -102,16 +116,30 @@ impl<'a> Parser<'a> {
                     } else {
                         Type::Unknown
                     };
-                    let (token, span) = self.next()?;
-                    if token != Token::EQ {
-                        return Err(ParserError::UnexpectedToken {
-                            expected: Some(Token::EQ),
-                            found: token,
-                            span,
-                        });
+                    let init = if matches!(self.peek(), Some(Ok((Token::EQ, _)))) {
+                        self.next()?;
+                        Some(Box::new(self.expr()?))
+                    } else {
+                        None
+                    };
+                    if self.scope_depth == 0 {
+                        Ok(Expr::GlobalVar(name, is_pub, ty, init, span))
+                    } else {
+                        let init = match init {
+                            Some(init) => init,
+                            None => {
+                                return Err(ParserError::UnexpectedToken {
+                                    expected: Some(Token::EQ),
+                                    found: match self.peek().cloned() {
+                                        Some(Ok((t, _))) => t,
+                                        _ => Token::EOF,
+                                    },
+                                    span,
+                                });
+                            }
+                        };
+                        Ok(Expr::VarDecl(name, ty, init, span))
                     }
-
-                    Ok(Expr::VarDecl(name, ty, Box::new(self.expr()?), span))
                 }
                 Ok((Token::CST, _)) => {
                     self.next()?;
@@ -149,34 +177,6 @@ impl<'a> Parser<'a> {
                         is_pub,
                         span,
                     ))
-                }
-                Ok((Token::MUT, _)) => {
-                    self.next()?;
-                    let is_pub = self.parse_global_annotation("mut")?;
-                    let (token, span) = self.next()?;
-                    let name = match token {
-                        Token::IDENT(s) => s,
-                        token => {
-                            return Err(ParserError::UnexpectedToken {
-                                expected: Some(Token::IDENT("NAME".to_string())),
-                                found: token,
-                                span,
-                            });
-                        }
-                    };
-                    let ty = if matches!(self.peek(), Some(Ok((Token::COLON, _)))) {
-                        self.next()?;
-                        self.parse_type()?
-                    } else {
-                        Type::Unknown
-                    };
-                    let init = if matches!(self.peek(), Some(Ok((Token::EQ, _)))) {
-                        self.next()?;
-                        Some(Box::new(self.expr()?))
-                    } else {
-                        None
-                    };
-                    Ok(Expr::GlobalVar(name, is_pub, ty, init, span))
                 }
                 Ok((Token::FUN, _)) => {
                     self.next()?;
@@ -257,7 +257,9 @@ impl<'a> Parser<'a> {
                         }
                         Box::new(Expr::Nil(Span::new(0, 0)))
                     } else {
+                        self.scope_depth += 1;
                         let body = self.expr()?;
+                        self.scope_depth -= 1;
                         if !type_params.is_empty() {
                             self.type_param_scopes.pop();
                         }
@@ -957,7 +959,10 @@ impl<'a> Parser<'a> {
                     self.expect(Token::RPAREN)?;
                     self.expect(Token::COLON)?;
                     let ret_type = self.parse_type()?;
-                    return Ok(Expr::Lambda(params, Box::new(self.expr()?), ret_type, span));
+                    self.scope_depth += 1;
+                    let body = self.expr()?;
+                    self.scope_depth -= 1;
+                    return Ok(Expr::Lambda(params, Box::new(body), ret_type, span));
                 }
                 Ok((Token::LPAREN, _)) => {
                     self.next()?;
@@ -987,6 +992,7 @@ impl<'a> Parser<'a> {
                 Ok((Token::LBRACE, span)) => {
                     let mut exprs: Vec<Expr> = Vec::new();
                     self.next()?;
+                    self.scope_depth += 1;
                     let last_span = self.last_span;
                     loop {
                         match self.peek().ok_or(ParserError::UnexpectedToken {
@@ -1018,6 +1024,7 @@ impl<'a> Parser<'a> {
                             }
                         }
                     }
+                    self.scope_depth -= 1;
                     return Ok(Expr::Block(exprs, span));
                 }
                 Ok((Token::LBRACKET, span)) => {

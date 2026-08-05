@@ -10,7 +10,7 @@ Alum is a modern, systems programming language designed for simplicity and perfo
 - **Native Compilation**: Compiles directly to machine code via built-in assembler + LLD
 - **Build Toolkit**: Integrated `almk` build system and `almk run` for project management
 - **Standard Library**: Rich `alum-std` with I/O, strings, vectors, math, and memory management
-- **Statically Typed**: Explicit annotations with `let` type inference, generics, and monomorphic instantiation
+- **Statically Typed**: Explicit annotations with `var` type inference, generics, and monomorphic instantiation
 - **Rich Types**: Structs, unions, C-style enums (bare references when unambiguous), arrays, pointers, lambdas, and tagged-style `Result`/`Maybe`
 - **Preprocessor**: `$import`, `$define` macros, and conditional compilation
 
@@ -110,21 +110,21 @@ fun apply(f: int(int), v: int): int {
 }
 
 fun main(): int {
-    // type inference on `let`
-    let name = "Alum"
-    let n = 42
+    // type inference on `var`
+    var name = "Alum"
+    var n = 42
     println(name)
     println(itoa(n))
 
     // nested member access
-    let line = Line {
+    var line = Line {
         a: Point { x: 1, y: 2 },
         b: Point { x: 3, y: 4 }
     }
     println(itoa(line.b.x))  // 3
 
     // union member access
-    let u = Value<int> { i: 7 }
+    var u = Value<int> { i: 7 }
     println(itoa(u.i))       // 7
 
     // enum member access (qualified + bare)
@@ -132,33 +132,33 @@ fun main(): int {
     println(itoa(BLUE))         // 6
 
     // arrays + for loop over array
-    let arr = [10, 20, 30]
+    var arr = [10, 20, 30]
     for x in arr {
         println(itoa(x))
     }
 
     // while loop + reassignment
-    let i = 0
+    var i = 0
     while i < 3 {
         i = i + 1
     }
     println(itoa(i))  // 3
 
     // pointers
-    let p: *int = &n
+    var p: *int = &n
     println(itoa(*p))  // 42
 
     // generic function
     println(itoa(identity(99)))  // 99
 
     // lambda
-    let square: int(int) = \(x: int): int {
+    var square: int(int) = \(x: int): int {
         return x * x
     }
     println(itoa(apply(square, 4)))  // 16
 
     // match with default
-    let c: Color = Color.RED
+    var c: Color = Color.RED
     match c {
         Color.GREEN: {
             println("green")
@@ -169,13 +169,13 @@ fun main(): int {
     }
 
     // Vec container
-    let vec: Vec<int> = vec_new()
+    var vec: Vec<int> = vec_new()
     vec.push(&vec, 1)
     vec.push(&vec, 2)
     println(itoa(vec.at(&vec, 1)))  // 2
 
     // Result (enum tag + union payload)
-    let ok = Result<int, string> {
+    var ok = Result<int, string> {
         result: ResultStatus.Ok,
         value: ResultValue<int, string> {
             ok: 114514

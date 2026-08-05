@@ -364,9 +364,8 @@ impl<'a> Lexer<'a> {
 
     fn keyword(&self, ident: String) -> Token {
         match ident.as_str() {
-            "let" => Token::LET,
+            "var" => Token::VAR,
             "cst" => Token::CST,
-            "mut" => Token::MUT,
             "fun" => Token::FUN,
             "for" => Token::FOR,
             "in" => Token::IN,

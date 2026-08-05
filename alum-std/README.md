@@ -102,7 +102,7 @@ $import "vec.ah"
 $import "convert.ah"
 
 fun main(): int {
-    let vec: Vec<int> = vec_new()
+    var vec: Vec<int> = vec_new()
 
     vec.push(&vec, 10)
     vec.push(&vec, 20)
@@ -167,7 +167,7 @@ fun auth(password: string): Result<int, string> {
 }
 
 fun main(): int {
-    let r = auth("123456")
+    var r = auth("123456")
     if r.result == ResultStatus.Ok {
         println(itoa(r.value.ok))  // 114514
     }
@@ -199,7 +199,7 @@ $import "convert.ah"
 $import "maybe.ah"
 
 fun main(): int {
-    let a = Maybe<int> {
+    var a = Maybe<int> {
         tag: Just,
         value: 42
     }
@@ -229,13 +229,13 @@ Alum supports global mutable variables and exported constants, which are linkabl
 | --- | --- |
 | `cst NAME: T = expr` | Compile-time constant (inlined, no runtime symbol) |
 | `cst(pub) NAME: T = expr` | Constant that also exports a read-only data symbol |
-| `mut NAME: T [= expr]` | Global mutable variable (internal linkage, zero-initialized if no init) |
-| `mut(pub) NAME: T [= expr]` | Global mutable variable (external linkage) |
+| `var NAME: T [= expr]` | Global mutable variable (internal linkage, zero-initialized if no init) |
+| `var(pub) NAME: T [= expr]` | Global mutable variable (external linkage) |
 | `extern NAME: T` | Reference a variable defined in another file or in C |
 
 ```al
 cst(pub) LIMIT: int = 100
-mut(pub) counter: int = 0
+var(pub) counter: int = 0
 
 fun main(): int {
     counter = counter + 1
@@ -243,7 +243,7 @@ fun main(): int {
 }
 ```
 
-A `mut(pub)`/`cst(pub)` definition can be consumed from another `.al` file with `extern NAME: T`, and from C as a plain global symbol. Initializers must be compile-time constants; only `int`/`float`/`bool` globals are currently supported.
+A `var(pub)`/`cst(pub)` definition can be consumed from another `.al` file with `extern NAME: T`, and from C as a plain global symbol. Initializers must be compile-time constants; only `int`/`float`/`bool` globals are currently supported.
 
 ## Building from Source
 

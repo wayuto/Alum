@@ -111,8 +111,7 @@ impl IRGen {
                             None => {
                                 return Err(CodeGenError::TypeError {
                                     message: format!(
-                                        "initializer of global variable '{}' is not a compile-time constant",
-                                        name
+                                        "initializer of global variable '{}' is not a compile-time constant",                                        name
                                     ),
                                 });
                             }
@@ -133,7 +132,7 @@ impl IRGen {
                     if !matches!(ir_type, IRType::Int | IRType::Float | IRType::Bool) {
                         return Err(CodeGenError::TypeError {
                             message: format!(
-                                "unsupported type '{}' for global mutable variable '{}' (only int/float/bool)",
+                                "unsupported type '{}' for global variable '{}' (only int/float/bool)",
                                 ty, name
                             ),
                         });
