@@ -273,6 +273,28 @@ impl IRGen {
         Ok((offset, field_type.unwrap().substitute(&type_args)))
     }
 
+    fn extern_op(&self, name: &str) -> Option<Operand> {
+        if self.extern_vars.contains_key(name) {
+            Some(Operand::Global(name.to_string()))
+        } else {
+            None
+        }
+    }
+
+    fn extern_load_op(&self, name: &str) -> Option<Op> {
+        self.extern_vars.get(name).map(|t| match Context::type2ir_type(t) {
+            IRType::Float => Op::FGlobLoad,
+            _ => Op::GlobLoad,
+        })
+    }
+
+    fn extern_store_op(&self, name: &str) -> Option<Op> {
+        self.extern_vars.get(name).map(|t| match Context::type2ir_type(t) {
+            IRType::Float => Op::FGlobStore,
+            _ => Op::GlobStore,
+        })
+    }
+
     pub(super) fn const_array_len(&self, value: &Operand, ctx: &Context) -> Option<usize> {
         let last_inst = ctx.instructions.last()?;
         if !matches!(last_inst.op, Op::Move | Op::FMove) {
@@ -393,9 +415,61 @@ impl IRGen {
                 Ok(ctx.new_tmp(IRType::Void))
             }
 
+            Expr::ConstDecl(name, typ, value, _) => {
+                let resolved_typ =
+                    if matches!(typ, Type::Unknown | Type::TypeVar(_) | Type::Param(_)) {
+                        self.expr_high_type(&value, ctx)
+                            .unwrap_or_else(|| typ.clone())
+                    } else {
+                        typ.clone()
+                    };
+                let value = self.compile_expr(*value, ctx)?;
+                let var_ir_type = Context::type2ir_type(&resolved_typ);
+
+                if matches!(var_ir_type, IRType::Array) {
+                    if let Some(len) = self.const_array_len(&value, ctx) {
+                        ctx.array_lengths.insert(name.clone(), len);
+                    }
+                }
+
+                ctx.declare_var_with_type(name.clone(), var_ir_type.clone(), resolved_typ)?;
+                match var_ir_type {
+                    IRType::Float => ctx.instructions.push(Instruction {
+                        op: Op::FStore,
+                        dst: Some(Operand::Var(name)),
+                        src1: Some(value),
+                        src2: None,
+                    }),
+                    _ => ctx.instructions.push(Instruction {
+                        op: Op::Store,
+                        dst: Some(Operand::Var(name)),
+                        src1: Some(value),
+                        src2: None,
+                    }),
+                }
+                Ok(ctx.new_tmp(IRType::Void))
+            }
+
             Expr::VarAssign(name, value, _) => {
                 let value = self.compile_expr(*value, ctx)?;
                 let typ = ctx.get_operand_type(&value, &self.constants)?;
+                if let Some(store_op) = self.extern_store_op(&name) {
+                    let is_float = matches!(store_op, Op::FGlobStore);
+                    let var_typ = if is_float { IRType::Float } else { IRType::Int };
+                    if typ != var_typ && typ != IRType::Array {
+                        return Err(CodeGenError::TypeError {
+                            message: format!("unexpected type: {:?}", typ),
+                        });
+                    }
+                    let dst = self.extern_op(&name).unwrap();
+                    ctx.instructions.push(Instruction {
+                        op: store_op,
+                        dst: Some(dst),
+                        src1: Some(value),
+                        src2: None,
+                    });
+                    return Ok(ctx.new_tmp(IRType::Void));
+                }
                 let var_typ = ctx.get_var_type(&name)?;
                 if typ != var_typ {
                     return Err(CodeGenError::TypeError {
@@ -442,8 +516,37 @@ impl IRGen {
                         }),
                     }
                     Ok(res_tmp)
+                } else if let Some(ty) = self.extern_vars.get(&name).cloned() {
+                    let ir_type = Context::type2ir_type(&ty);
+                    let res_tmp = ctx.new_tmp(ir_type.clone());
+                    let op = match ir_type {
+                        IRType::Float => Op::FGlobLoad,
+                        _ => Op::GlobLoad,
+                    };
+                    ctx.instructions.push(Instruction {
+                        op,
+                        dst: Some(res_tmp.clone()),
+                        src1: Some(Operand::Global(name)),
+                        src2: None,
+                    });
+                    Ok(res_tmp)
                 } else if let Ok(func) = self.find_func(&name) {
                     Ok(Operand::Function(func.name))
+                } else if let Some((ir_const, ir_type)) = self.globals.get(&name).cloned() {
+                    let const_idx = self.get_const_index(ir_const);
+                    let res_tmp = ctx.new_tmp(ir_type);
+                    let op = if matches!(res_tmp, Operand::Temp(_, IRType::Float)) {
+                        Op::FMove
+                    } else {
+                        Op::Move
+                    };
+                    ctx.instructions.push(Instruction {
+                        op,
+                        dst: Some(res_tmp.clone()),
+                        src1: Some(Operand::ConstIdx(const_idx)),
+                        src2: None,
+                    });
+                    Ok(res_tmp)
                 } else if let Some(value) = self.enum_member_value(&name)? {
                     let const_idx = self.get_const_index(IRConst::Int(value as i64));
                     let res_tmp = ctx.new_tmp(IRType::Int);
@@ -667,6 +770,29 @@ impl IRGen {
             }
 
             Expr::Inc(name, _) => {
+                if let Some(load_op) = self.extern_load_op(&name) {
+                    let dst = self.extern_op(&name).unwrap();
+                    let res_tmp = ctx.new_tmp(IRType::Int);
+                    ctx.instructions.push(Instruction {
+                        op: load_op,
+                        dst: Some(res_tmp.clone()),
+                        src1: Some(dst.clone()),
+                        src2: None,
+                    });
+                    ctx.instructions.push(Instruction {
+                        op: Op::Inc,
+                        dst: Some(res_tmp.clone()),
+                        src1: Some(res_tmp.clone()),
+                        src2: None,
+                    });
+                    ctx.instructions.push(Instruction {
+                        op: Op::GlobStore,
+                        dst: Some(dst),
+                        src1: Some(res_tmp.clone()),
+                        src2: None,
+                    });
+                    return Ok(res_tmp);
+                }
                 let var_op = Operand::Var(name);
                 let res_tmp = ctx.new_tmp(IRType::Int);
                 ctx.instructions.push(Instruction {
@@ -691,6 +817,29 @@ impl IRGen {
             }
 
             Expr::Dec(name, _) => {
+                if let Some(load_op) = self.extern_load_op(&name) {
+                    let dst = self.extern_op(&name).unwrap();
+                    let res_tmp = ctx.new_tmp(IRType::Int);
+                    ctx.instructions.push(Instruction {
+                        op: load_op,
+                        dst: Some(res_tmp.clone()),
+                        src1: Some(dst.clone()),
+                        src2: None,
+                    });
+                    ctx.instructions.push(Instruction {
+                        op: Op::Dec,
+                        dst: Some(res_tmp.clone()),
+                        src1: Some(res_tmp.clone()),
+                        src2: None,
+                    });
+                    ctx.instructions.push(Instruction {
+                        op: Op::GlobStore,
+                        dst: Some(dst),
+                        src1: Some(res_tmp.clone()),
+                        src2: None,
+                    });
+                    return Ok(res_tmp);
+                }
                 let var_op = Operand::Var(name);
                 let res_tmp = ctx.new_tmp(IRType::Int);
                 ctx.instructions.push(Instruction {
@@ -715,7 +864,12 @@ impl IRGen {
             }
 
             Expr::AddAssign(name, value, _) => {
-                let var_op = Operand::Var(name.clone());
+                let is_extern = self.extern_vars.contains_key(name.as_str());
+                let var_op = if is_extern {
+                    Operand::Global(name.clone())
+                } else {
+                    Operand::Var(name.clone())
+                };
                 let var_high = ctx.get_var_high_type(name.as_str()).cloned();
                 let scale = var_high
                     .as_ref()
@@ -741,7 +895,7 @@ impl IRGen {
                 };
                 let var_tmp = ctx.new_tmp(IRType::Int);
                 ctx.instructions.push(Instruction {
-                    op: Op::Load,
+                    op: if is_extern { Op::GlobLoad } else { Op::Load },
                     dst: Some(var_tmp.clone()),
                     src1: Some(var_op.clone()),
                     src2: None,
@@ -754,7 +908,7 @@ impl IRGen {
                     src2: Some(rhs),
                 });
                 ctx.instructions.push(Instruction {
-                    op: Op::Store,
+                    op: if is_extern { Op::GlobStore } else { Op::Store },
                     dst: Some(var_op),
                     src1: Some(res_tmp.clone()),
                     src2: None,
@@ -763,7 +917,12 @@ impl IRGen {
             }
 
             Expr::SubAssign(name, value, _) => {
-                let var_op = Operand::Var(name.clone());
+                let is_extern = self.extern_vars.contains_key(name.as_str());
+                let var_op = if is_extern {
+                    Operand::Global(name.clone())
+                } else {
+                    Operand::Var(name.clone())
+                };
                 let var_high = ctx.get_var_high_type(name.as_str()).cloned();
                 let scale = var_high
                     .as_ref()
@@ -789,7 +948,7 @@ impl IRGen {
                 };
                 let var_tmp = ctx.new_tmp(IRType::Int);
                 ctx.instructions.push(Instruction {
-                    op: Op::Load,
+                    op: if is_extern { Op::GlobLoad } else { Op::Load },
                     dst: Some(var_tmp.clone()),
                     src1: Some(var_op.clone()),
                     src2: None,
@@ -802,7 +961,7 @@ impl IRGen {
                     src2: Some(rhs),
                 });
                 ctx.instructions.push(Instruction {
-                    op: Op::Store,
+                    op: if is_extern { Op::GlobStore } else { Op::Store },
                     dst: Some(var_op),
                     src1: Some(res_tmp.clone()),
                     src2: None,
@@ -1277,7 +1436,7 @@ impl IRGen {
                 Ok(ctx.new_tmp(IRType::Void))
             }
 
-            Expr::FuncDecl(_, _, _, _, _, _) => Err(CodeGenError::SyntaxError {
+            Expr::FuncDecl(_, _, _, _, _, _, _) => Err(CodeGenError::SyntaxError {
                 message: "cannot declare a function in a function".to_string(),
             }),
 
@@ -1560,9 +1719,17 @@ impl IRGen {
                 Ok(res_tmp)
             }
 
-            Expr::Extern(_, _, _, _) => Err(CodeGenError::SyntaxError {
-                message: "cannot extern a function in a function".to_string(),
-            }),
+            Expr::ExternVar(name, _, _) => {
+                if let Some(ty) = self.extern_vars.get(&name).cloned() {
+                    let ir_ty = Context::type2ir_type(&ty);
+                    Ok(ctx.new_tmp(ir_ty))
+                } else {
+                    Err(CodeGenError::UndefinedVariable {
+                        name: name.clone(),
+                        span: crate::compiler::Span::new(0, 0),
+                    })
+                }
+            }
 
             Expr::StructLiteral(name, _, fields, _) => {
                 self.compile_struct_literal(&name, fields, ctx)
@@ -1823,7 +1990,10 @@ impl IRGen {
             Expr::Bool(_, _) => Some(Type::Primitive(Primitive::Boolean)),
             Expr::String(_, _) => Some(Type::Primitive(Primitive::String)),
             Expr::Nil(_) => Some(Type::Primitive(Primitive::Void)),
-            Expr::Var(name, _) => ctx.get_var_high_type(name.as_str()).cloned(),
+            Expr::Var(name, _) => ctx
+                .get_var_high_type(name.as_str())
+                .cloned()
+                .or_else(|| self.extern_vars.get(name).cloned()),
             Expr::AddressOf(inner, _) => match inner.as_ref() {
                 Expr::Var(n, _) => ctx
                     .get_var_high_type(n.as_str())
@@ -1936,6 +2106,7 @@ impl IRGen {
                 Some(Type::Function(param_types, Box::new(ret_type.clone())))
             }
             Expr::Return(value, _) => self.expr_high_type(value, ctx),
+            Expr::ExternVar(_, ty, _) => Some(ty.clone()),
             Expr::IndexAssign(arr, value, _) => self
                 .expr_high_type(value, ctx)
                 .or_else(|| self.index_info(arr, ctx).0),

@@ -9,6 +9,9 @@ use std::collections::HashMap;
 
 pub struct TypeChecker {
     pub(super) type_stack: Vec<HashMap<String, Type>>,
+    pub(super) const_stack: Vec<std::collections::HashSet<String>>,
+    pub(super) constants: HashMap<String, Type>,
+    pub(super) extern_vars: HashMap<String, Type>,
     pub(super) functions: HashMap<String, (Vec<String>, Vec<Type>, Type)>,
     pub(super) structs: HashMap<String, (Vec<String>, Vec<(String, Type)>)>,
     pub(super) unions: HashMap<String, (Vec<String>, Vec<(String, Type)>)>,
@@ -23,6 +26,9 @@ impl TypeChecker {
     pub fn new() -> Self {
         Self {
             type_stack: vec![HashMap::new()],
+            const_stack: vec![std::collections::HashSet::new()],
+            constants: HashMap::new(),
+            extern_vars: HashMap::new(),
             functions: HashMap::new(),
             structs: HashMap::new(),
             unions: HashMap::new(),

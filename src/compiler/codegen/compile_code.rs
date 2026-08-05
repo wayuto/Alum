@@ -38,6 +38,34 @@ impl AsmCodeGen {
                 self.store_dst_xmm(dst, Reg::Xmm0)?;
                 Ok(())
             }
+            Op::GlobLoad => {
+                let src = code.src1.as_ref().unwrap();
+                let dst = code.dst.as_ref().unwrap();
+                self.load(src, Reg::Rax)?;
+                self.store_dst(dst, Reg::Rax)?;
+                Ok(())
+            }
+            Op::FGlobLoad => {
+                let src = code.src1.as_ref().unwrap();
+                let dst = code.dst.as_ref().unwrap();
+                self.load(src, Reg::Xmm0)?;
+                self.store_dst_xmm(dst, Reg::Xmm0)?;
+                Ok(())
+            }
+            Op::GlobStore => {
+                let src = code.src1.as_ref().unwrap();
+                let dst = code.dst.as_ref().unwrap();
+                self.load(src, Reg::Rax)?;
+                self.store_global(dst, Reg::Rax)?;
+                Ok(())
+            }
+            Op::FGlobStore => {
+                let src = code.src1.as_ref().unwrap();
+                let dst = code.dst.as_ref().unwrap();
+                self.load(src, Reg::Xmm0)?;
+                self.store_global_xmm(dst, Reg::Xmm0)?;
+                Ok(())
+            }
             Op::Add | Op::Sub | Op::Mul | Op::Div | Op::LAnd | Op::LOr | Op::Xor => {
                 let dst = code.dst.as_ref().unwrap();
                 let src1 = code.src1.as_ref().unwrap();

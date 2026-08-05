@@ -353,12 +353,12 @@ impl Assembler {
                     self.emit_slice(section, &[0x8d]);
                     self.emit_modrm_sib(section, r.reg_id() & 7, m, offset)?;
                 }
-                Operand::DataLabel(l) => {
-                    self.emit_rex(section, true, false, false, r.rex_b());
-                    self.emit_slice(section, &[0x8d]);
-                    self.emit_rm_disp32(section, r.reg_id() & 7);
-                    self.emit_reloc(section, RelocKind::Pc32, l.clone(), -4);
-                }
+Operand::DataLabel(l) => {
+                        self.emit_rex(section, true, r.rex_b(), false, false);
+                        self.emit_slice(section, &[0x8d]);
+                        self.emit_rm_disp32(section, r.reg_id() & 7);
+                        self.emit_reloc(section, RelocKind::Pc32, l.clone(), -4);
+                    }
                 _ => return Err(format!("unsupported lea src: {:?}", src)),
             },
             _ => return Err(format!("unsupported instruction: {:?}", asm)),
@@ -383,7 +383,7 @@ impl Assembler {
         self.emit_slice(section, &[self.modrm(0, reg & 7, 5)]);
     }
     fn emit_mov_label(&mut self, r: Reg, lbl: &str, section: &str, _offset: u64) {
-        self.emit_rex(section, true, false, false, r.rex_b());
+        self.emit_rex(section, true, r.rex_b(), false, false);
         self.emit_slice(section, &[0x8d]);
         self.emit_rm_disp32(section, r.reg_id() & 7);
         self.emit_reloc(section, RelocKind::Pc32, lbl.to_string(), -4);

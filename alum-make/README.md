@@ -129,7 +129,7 @@ After running `almk build`, this will generate `target/libmylib.a`.
 **Using the static library in another project:**
 ```al
 // main.al
-extern add(int, int): int
+fun(extern) add(int, int): int
 
 fun main(): int {
     let result: int = add(10, 20)
@@ -230,8 +230,8 @@ mixed_project/
 
 ```al
 // src/main.al
-extern c_add(int, int): int
-extern c_print_int(int): void
+fun(extern) c_add(int, int): int
+fun(extern) c_print_int(int): void
 
 fun main(): int {
     let result: int = c_add(10, 20);

@@ -270,7 +270,13 @@ impl Expr {
                 val.fmt_with_indent(f, indent + 1)?;
                 write!(f, "\n{})", indent_str)
             }
-            Expr::FuncDecl(name, type_params, params, ret_type, body, _) => {
+            Expr::ConstDecl(name, ty, val, _) => {
+                write!(f, "{}ConstDecl(\"{}\": {} =", indent_str, name, ty)?;
+                write!(f, "\n")?;
+                val.fmt_with_indent(f, indent + 1)?;
+                write!(f, "\n{})", indent_str)
+            }
+            Expr::FuncDecl(name, attrs, type_params, params, ret_type, body, _) => {
                 let param_str: Vec<String> = params
                     .iter()
                     .map(|(n, t)| format!("{}: {}", n, t))
@@ -280,10 +286,21 @@ impl Expr {
                 } else {
                     format!("<{}>", type_params.join(", "))
                 };
+                let attr_str: Vec<String> = std::iter::empty()
+                    .chain(attrs.is_pub.then(|| "pub".to_string()))
+                    .chain(attrs.is_external.then(|| "extern".to_string()))
+                    .chain(attrs.is_pure.then(|| "pure".to_string()))
+                    .collect();
+                let ann_str = if attr_str.is_empty() {
+                    String::new()
+                } else {
+                    format!("({})", attr_str.join(", "))
+                };
                 write!(
                     f,
-                    "{}FuncDecl(\"{}{}\" ({}) -> {}",
+                    "{}FuncDecl{}(\"{}{}\" ({}) -> {}",
                     indent_str,
+                    ann_str,
                     name,
                     tp_str,
                     param_str.join(", "),
@@ -293,19 +310,8 @@ impl Expr {
                 body.fmt_with_indent(f, indent + 1)?;
                 write!(f, "\n{})", indent_str)
             }
-            Expr::Extern(name, params, ret_type, _) => {
-                let param_str: Vec<String> = params
-                    .iter()
-                    .map(|(n, t)| format!("{}: {}", n, t))
-                    .collect();
-                write!(
-                    f,
-                    "{}Extern(\"{}\" ({}) -> {})",
-                    indent_str,
-                    name,
-                    param_str.join(", "),
-                    ret_type
-                )
+            Expr::ExternVar(name, ty, _) => {
+                write!(f, "{}ExternVar(\"{}\": {})", indent_str, name, ty)
             }
             Expr::Call(func, _, args, _) => {
                 write!(f, "{}Call(", indent_str)?;

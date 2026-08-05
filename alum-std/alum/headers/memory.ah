@@ -1,7 +1,7 @@
 $ifndef ALUM_MEMORY
 $define ALUM_MEMORY 1
 
-extern malloc(int): *void
-extern free(*void): void
+fun(extern) malloc(int): *void
+fun(extern) free(*void): void
 
 $endif

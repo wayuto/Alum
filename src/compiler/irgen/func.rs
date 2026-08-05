@@ -3,7 +3,7 @@ use super::ir::{IRFunction, IRType, Instruction, Op, Operand};
 use crate::compiler::{
     codegen::CodeGenError,
     irgen::IRGen,
-    parser::{Expr, Type},
+    parser::{Expr, FuncAttrs, Type},
 };
 use std::mem::take;
 
@@ -11,6 +11,7 @@ impl IRGen {
     pub(super) fn func_decl(
         &mut self,
         name: String,
+        attrs: FuncAttrs,
         params: Vec<(String, Type)>,
         ret_type: Type,
     ) -> Result<(), CodeGenError> {
@@ -19,13 +20,15 @@ impl IRGen {
             .map(|(name, typ)| (Operand::Var(name.clone()), Context::type2ir_type(typ)))
             .collect();
         let ir_ret_type = Context::type2ir_type(&ret_type);
+        let is_pub = attrs.is_pub || name == "main";
         self.functions.push(IRFunction {
             name,
             params: ir_params,
             ret_type: ir_ret_type,
             instructions: Vec::new(),
-            is_pub: true,
-            is_external: false,
+            is_pub,
+            is_external: attrs.is_external,
+            is_pure: attrs.is_pure,
         });
         Ok(())
     }
@@ -80,39 +83,6 @@ impl IRGen {
 
         if let Some(f) = self.functions.iter_mut().rev().find(|f| f.name == name) {
             f.instructions = take(&mut ctx.instructions);
-        }
-        Ok(())
-    }
-
-    pub(super) fn extern_decl(
-        &mut self,
-        name: String,
-        params: Vec<(String, Type)>,
-        ret_type: Type,
-    ) -> Result<(), CodeGenError> {
-        let ir_params: Vec<(Operand, IRType)> = params
-            .into_iter()
-            .enumerate()
-            .map(|(i, (_, typ))| {
-                let param_name = format!("a{}", i);
-                (Operand::Var(param_name), Context::type2ir_type(&typ))
-            })
-            .collect();
-        let ir_ret_type = Context::type2ir_type(&ret_type);
-        let signature = IRFunction {
-            name: name.clone(),
-            params: ir_params,
-            ret_type: ir_ret_type,
-            instructions: Vec::new(),
-            is_pub: false,
-            is_external: true,
-        };
-        let already_defined = self
-            .functions
-            .iter()
-            .any(|f| f.name == name && !f.is_external);
-        if !already_defined {
-            self.functions.push(signature);
         }
         Ok(())
     }
@@ -181,18 +151,18 @@ impl IRGen {
         let lambda_funcs: Vec<Expr> = lambda_map.into_values().collect();
 
         for lambda in &lambda_funcs {
-            if let Expr::FuncDecl(name, _, params, ret_type, _, _) = lambda {
-                self.func_decl(name.clone(), params.clone(), ret_type.clone())?;
+            if let Expr::FuncDecl(name, _, _, params, ret_type, _, _) = lambda {
+                self.func_decl(name.clone(), FuncAttrs::default(), params.clone(), ret_type.clone())?;
             }
         }
         for lambda in &lambda_funcs {
-            if let Expr::FuncDecl(name, _, params, _, body, _) = lambda {
+            if let Expr::FuncDecl(name, _, _, params, _, body, _) = lambda {
                 self.compile_fn(name.clone(), params.clone(), body.as_ref().clone())?;
             }
         }
 
         self.mono_in_progress.push(mangled.clone());
-        self.func_decl(mangled.clone(), concrete_params.clone(), concrete_ret)?;
+        self.func_decl(mangled.clone(), FuncAttrs::default(), concrete_params.clone(), concrete_ret)?;
         self.compile_fn(mangled.clone(), concrete_params, concrete_body)?;
         self.mono_in_progress.pop();
 
@@ -206,7 +176,10 @@ pub(super) fn substitute_expr(expr: Expr, args: &[Type]) -> Expr {
     let sub_val = |e: Expr| substitute_expr(e, args);
     match expr {
         VarDecl(name, ty, value, span) => VarDecl(name, ty.substitute(args), sub_box(value), span),
-        FuncDecl(name, type_params, params, ret_type, body, span) => {
+        ConstDecl(name, ty, value, span) => {
+            ConstDecl(name, ty.substitute(args), sub_box(value), span)
+        }
+        FuncDecl(name, attrs, type_params, params, ret_type, body, span) => {
             let params = if type_params.is_empty() {
                 params
                     .into_iter()
@@ -220,17 +193,9 @@ pub(super) fn substitute_expr(expr: Expr, args: &[Type]) -> Expr {
             } else {
                 ret_type
             };
-            FuncDecl(name, type_params, params, ret_type, sub_box(body), span)
+            FuncDecl(name, attrs, type_params, params, ret_type, sub_box(body), span)
         }
-        Extern(name, params, ret_type, span) => Extern(
-            name,
-            params
-                .into_iter()
-                .map(|(n, t)| (n, t.substitute(args)))
-                .collect(),
-            ret_type.substitute(args),
-            span,
-        ),
+        ExternVar(name, ty, span) => ExternVar(name, ty.substitute(args), span),
         Call(callee, type_args, call_args, span) => Call(
             sub_box(callee),
             type_args.into_iter().map(|t| t.substitute(args)).collect(),

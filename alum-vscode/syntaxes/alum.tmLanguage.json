@@ -19,6 +19,12 @@
             "include": "#enum-declaration"
         },
         {
+            "include": "#function-declaration"
+        },
+        {
+            "include": "#extern-declaration"
+        },
+        {
             "include": "#keywords"
         },
         {
@@ -35,12 +41,6 @@
         },
         {
             "include": "#lambda"
-        },
-        {
-            "include": "#function-declaration"
-        },
-        {
-            "include": "#extern-declaration"
         },
         {
             "include": "#variable-declaration"
@@ -591,16 +591,29 @@
             "patterns": [
                 {
                     "name": "meta.function.declaration.alum",
-                    "begin": "(\\bfun)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(<[^>]*>)?\\s*(\\()",
-                    "end": "(\\))\\s*(:)\\s*([\\w\\[\\]]+)\\s*(\\{)",
+                    "begin": "(\\bfun)\\s*(\\((?![^)]*\\bextern\\b)[^)]*\\))?\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*(<[^>]*>)?\\s*(\\()",
+                    "end": "(\\))\\s*(:)\\s*([\\w\\[\\]<>*]+)\\s*(\\{)",
                     "beginCaptures": {
                         "1": {
                             "name": "keyword.declaration.function.alum"
                         },
                         "2": {
-                            "name": "entity.name.function.alum"
+                            "name": "meta.function.annotations.alum",
+                            "patterns": [
+                                {
+                                    "name": "keyword.declaration.extern.alum",
+                                    "match": "\\bextern\\b"
+                                },
+                                {
+                                    "name": "storage.modifier.function-annotation.alum",
+                                    "match": "\\b(pub|pure)\\b"
+                                }
+                            ]
                         },
                         "3": {
+                            "name": "entity.name.function.alum"
+                        },
+                        "4": {
                             "patterns": [
                                 {
                                     "name": "punctuation.definition.generic.begin.alum",
@@ -616,7 +629,7 @@
                                 }
                             ]
                         },
-                        "4": {
+                        "5": {
                             "name": "punctuation.definition.parameters.begin.alum"
                         }
                     },
@@ -672,17 +685,30 @@
         "extern-declaration": {
             "patterns": [
                 {
-                    "name": "meta.extern.declaration.alum",
-                    "begin": "(\\bextern)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(<[^>]*>)?\\s*(\\()",
-                    "end": "(\\))\\s*(:)\\s*([\\w\\[\\]]+)\\s*(;)",
+                    "name": "meta.extern.function.declaration.alum",
+                    "begin": "(\\bfun)\\s*(\\([^)]*\\bextern\\b[^)]*\\))\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*(<[^>]*>)?\\s*(\\()",
+                    "end": "(\\))\\s*(:)\\s*([\\w\\[\\]<>*]+)",
                     "beginCaptures": {
                         "1": {
-                            "name": "keyword.declaration.extern.alum"
+                            "name": "keyword.declaration.function.alum"
                         },
                         "2": {
-                            "name": "entity.name.function.extern.alum"
+                            "name": "meta.function.annotations.alum",
+                            "patterns": [
+                                {
+                                    "name": "keyword.declaration.extern.alum",
+                                    "match": "\\bextern\\b"
+                                },
+                                {
+                                    "name": "storage.modifier.function-annotation.alum",
+                                    "match": "\\b(pub|pure)\\b"
+                                }
+                            ]
                         },
                         "3": {
+                            "name": "entity.name.function.extern.alum"
+                        },
+                        "4": {
                             "patterns": [
                                 {
                                     "name": "punctuation.definition.generic.begin.alum",
@@ -698,7 +724,7 @@
                                 }
                             ]
                         },
-                        "4": {
+                        "5": {
                             "name": "punctuation.definition.parameters.begin.alum"
                         }
                     },
@@ -715,9 +741,6 @@
                                     "include": "#types"
                                 }
                             ]
-                        },
-                        "4": {
-                            "name": "punctuation.terminator.alum"
                         }
                     },
                     "patterns": [
@@ -748,6 +771,28 @@
                             "match": ","
                         }
                     ]
+                },
+                {
+                    "name": "meta.extern.variable.declaration.alum",
+                    "match": "(\\bextern)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(:)\\s*([\\w\\[\\]<>*]+)",
+                    "captures": {
+                        "1": {
+                            "name": "keyword.declaration.extern.alum"
+                        },
+                        "2": {
+                            "name": "variable.other.extern.alum"
+                        },
+                        "3": {
+                            "name": "punctuation.separator.type-annotation.alum"
+                        },
+                        "4": {
+                            "patterns": [
+                                {
+                                    "include": "#types"
+                                }
+                            ]
+                        }
+                    }
                 }
             ]
         },

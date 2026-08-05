@@ -2,7 +2,7 @@ use super::error::ParserError;
 use crate::compiler::{
     Span,
     lexer::{FstringSeg, Lexer, LexerError, Token},
-    parser::{Expr, Parser, Primitive, Program, Type},
+    parser::{Expr, FuncAttrs, Parser, Primitive, Program, Type},
 };
 use std::collections::HashMap;
 
@@ -30,16 +30,26 @@ impl<'a> Parser<'a> {
             }
         }
         if self.has_fstring {
-            body.push(Expr::Extern(
+            let mut itoa_attrs = FuncAttrs::default();
+            itoa_attrs.is_external = true;
+            body.push(Expr::FuncDecl(
                 "itoa".to_string(),
+                itoa_attrs,
+                Vec::new(),
                 vec![("n".to_string(), Type::Primitive(Primitive::Int))],
                 Type::Primitive(Primitive::String),
+                Box::new(Expr::Nil(Span::new(0, 0))),
                 Span::new(0, 0),
             ));
-            body.push(Expr::Extern(
+            let mut ftoa_attrs = FuncAttrs::default();
+            ftoa_attrs.is_external = true;
+            body.push(Expr::FuncDecl(
                 "ftoa".to_string(),
+                ftoa_attrs,
+                Vec::new(),
                 vec![("n".to_string(), Type::Primitive(Primitive::Float))],
                 Type::Primitive(Primitive::String),
+                Box::new(Expr::Nil(Span::new(0, 0))),
                 Span::new(0, 0),
             ));
         }
@@ -103,8 +113,82 @@ impl<'a> Parser<'a> {
 
                     Ok(Expr::VarDecl(name, ty, Box::new(self.expr()?), span))
                 }
+                Ok((Token::CST, _)) => {
+                    self.next()?;
+                    let (token, span) = self.next()?;
+                    let name = match token {
+                        Token::IDENT(s) => s,
+                        token => {
+                            return Err(ParserError::UnexpectedToken {
+                                expected: Some(Token::IDENT("NAME".to_string())),
+                                found: token,
+                                span,
+                            });
+                        }
+                    };
+                    let ty = if matches!(self.peek(), Some(Ok((Token::COLON, _)))) {
+                        self.next()?;
+                        self.parse_type()?
+                    } else {
+                        Type::Unknown
+                    };
+                    let (token, span) = self.next()?;
+                    if token != Token::EQ {
+                        return Err(ParserError::UnexpectedToken {
+                            expected: Some(Token::EQ),
+                            found: token,
+                            span,
+                        });
+                    }
+
+                    Ok(Expr::ConstDecl(name, ty, Box::new(self.expr()?), span))
+                }
                 Ok((Token::FUN, _)) => {
                     self.next()?;
+                    let mut attrs = FuncAttrs::default();
+                    if matches!(self.peek(), Some(Ok((Token::LPAREN, _)))) {
+                        self.next()?;
+                        loop {
+                            let (token, span) = self.next()?;
+                            match token {
+                                Token::IDENT(s) if s == "pub" => attrs.is_pub = true,
+                                Token::IDENT(s) if s == "pure" => attrs.is_pure = true,
+                                Token::EXTERN => attrs.is_external = true,
+                                token => {
+                                    return Err(ParserError::UnexpectedToken {
+                                        expected: Some(Token::IDENT(
+                                            "ANNOTATION (pub|extern|pure)".to_string(),
+                                        )),
+                                        found: token,
+                                        span,
+                                    });
+                                }
+                            }
+                            match self.peek().cloned() {
+                                Some(Ok((Token::COMMA, _))) => {
+                                    self.next()?;
+                                }
+                                Some(Ok((Token::RPAREN, _))) => {
+                                    self.next()?;
+                                    break;
+                                }
+                                Some(Ok((token, span))) => {
+                                    return Err(ParserError::UnexpectedToken {
+                                        expected: Some(Token::COMMA),
+                                        found: token,
+                                        span,
+                                    });
+                                }
+                                _ => {
+                                    return Err(ParserError::UnexpectedToken {
+                                        expected: Some(Token::RPAREN),
+                                        found: Token::EOF,
+                                        span: self.last_span,
+                                    });
+                                }
+                            }
+                        }
+                    }
                     let (token, span) = self.next()?;
                     let name = match token {
                         Token::IDENT(s) => s,
@@ -132,16 +216,25 @@ impl<'a> Parser<'a> {
                     self.expect(Token::RPAREN)?;
                     self.expect(Token::COLON)?;
                     let ret_type = self.parse_type()?;
-                    let body = self.expr()?;
-                    if !type_params.is_empty() {
-                        self.type_param_scopes.pop();
-                    }
+                    let body = if attrs.is_external {
+                        if !type_params.is_empty() {
+                            self.type_param_scopes.pop();
+                        }
+                        Box::new(Expr::Nil(Span::new(0, 0)))
+                    } else {
+                        let body = self.expr()?;
+                        if !type_params.is_empty() {
+                            self.type_param_scopes.pop();
+                        }
+                        Box::new(body)
+                    };
                     Ok(Expr::FuncDecl(
                         name,
+                        attrs,
                         type_params,
                         params,
                         ret_type,
-                        Box::new(body),
+                        body,
                         span,
                     ))
                 }
@@ -158,12 +251,30 @@ impl<'a> Parser<'a> {
                             });
                         }
                     };
-                    self.expect(Token::LPAREN)?;
-                    let params = self.get_params_list()?;
-                    self.expect(Token::RPAREN)?;
-                    self.expect(Token::COLON)?;
-                    let ret_type = self.parse_type()?;
-                    Ok(Expr::Extern(name, params, ret_type, span))
+                    match self.peek() {
+                        Some(Ok((Token::COLON, _))) => {
+                            self.next()?;
+                            let ty = self.parse_type()?;
+                            Ok(Expr::ExternVar(name, ty, span))
+                        }
+                        Some(Ok((Token::LPAREN, _))) => Err(ParserError::UnexpectedToken {
+                            expected: Some(Token::IDENT(
+                                "': ' for an extern variable (functions use fun(extern) ...)".to_string(),
+                            )),
+                            found: Token::LPAREN,
+                            span,
+                        }),
+                        Some(Ok((token, found_span))) => Err(ParserError::UnexpectedToken {
+                            expected: Some(Token::COLON),
+                            found: token.clone(),
+                            span: *found_span,
+                        }),
+                        _ => Err(ParserError::UnexpectedToken {
+                            expected: Some(Token::COLON),
+                            found: Token::EOF,
+                            span,
+                        }),
+                    }
                 }
                 Ok((Token::TYPEDEF, _)) => {
                     self.next()?;

@@ -1,15 +1,15 @@
 $ifndef ALUM_IO
 $define ALUM_IO 1
 
-extern write(int, string, int): int
-extern read(int, string, int): int
-extern print(string): int
-extern println(string): int
-extern input(string): string
-extern fopen(string, int, int): int
-extern fclose(int): int
-extern fread(int): string
-extern fwrite(int, string, int): int
-extern lseek(int, int, int): int
+fun(extern) write(int, string, int): int
+fun(extern) read(int, string, int): int
+fun(extern) print(string): int
+fun(extern) println(string): int
+fun(extern) input(string): string
+fun(extern) fopen(string, int, int): int
+fun(extern) fclose(int): int
+fun(extern) fread(int): string
+fun(extern) fwrite(int, string, int): int
+fun(extern) lseek(int, int, int): int
 
 $endif

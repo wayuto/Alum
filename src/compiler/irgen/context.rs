@@ -109,6 +109,7 @@ impl Context {
             Operand::Temp(_, t) => Ok(t.to_owned()),
             Operand::Label(_) => Ok(IRType::Void),
             Operand::Function(_) => Ok(IRType::Void),
+            Operand::Global(_) => Ok(IRType::Void),
         }
     }
 

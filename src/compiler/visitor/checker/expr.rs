@@ -28,6 +28,14 @@ impl TypeChecker {
                     return Ok(Type::Function(resolved_params, Box::new(resolved_ret)));
                 }
 
+                if let Some(ty) = self.constants.get(name) {
+                    return Ok(self.resolve_type(ty));
+                }
+
+                if let Some(ty) = self.extern_vars.get(name) {
+                    return Ok(self.resolve_type(ty));
+                }
+
                 match self.resolve_enum_member(name) {
                     Ok(Some(_)) => return Ok(Type::Primitive(Primitive::Int)),
                     Err(enums) => {
@@ -65,9 +73,70 @@ impl TypeChecker {
                 self.declare_var(name, actual_ty.clone());
                 Ok(actual_ty)
             }
+            Expr::ConstDecl(name, ty, value, _) => {
+                let resolved_ty = self.resolve_type(ty);
+                let value_type = self.check_expr(value)?;
+
+                let actual_ty = match &resolved_ty {
+                    Type::Unknown => value_type.clone(),
+                    _ => resolved_ty.clone(),
+                };
+
+                if matches!(value.as_ref(), Expr::Nil(_)) {
+                    return Err(CheckerError::TypeMismatch {
+                        expected: resolved_ty.clone(),
+                        found: Type::Primitive(Primitive::Void),
+                        context: format!("constant declaration '{}'", name),
+                        span: span,
+                    });
+                }
+
+                self.unify_types(&actual_ty, &value_type).map_err(|_| {
+                    CheckerError::TypeMismatch {
+                        expected: self.resolve_type(&actual_ty),
+                        found: self.resolve_type(&value_type),
+                        context: format!("constant declaration '{}'", name),
+                        span: span,
+                    }
+                })?;
+
+                if self.is_global_scope() {
+                    self.constants.insert(name.clone(), actual_ty.clone());
+                } else {
+                    self.declare_const(name);
+                    self.declare_var(name, actual_ty.clone());
+                }
+                Ok(actual_ty)
+            }
+            Expr::ExternVar(name, ty, _) => {
+                let resolved_ty = self.resolve_type(ty);
+                if self.extern_vars.contains_key(name.as_str()) {
+                    self.unify_types(
+                        &self.extern_vars.get(name).unwrap().clone(),
+                        &resolved_ty,
+                    )
+                    .map_err(|_| CheckerError::TypeMismatch {
+                        expected: self.extern_vars.get(name).unwrap().clone(),
+                        found: resolved_ty.clone(),
+                        context: format!("extern variable '{}'", name),
+                        span: span,
+                    })?;
+                } else {
+                    self.extern_vars.insert(name.clone(), resolved_ty.clone());
+                }
+                Ok(resolved_ty)
+            }
             Expr::VarAssign(name, value, _) => {
+                if self.is_constant(name) {
+                    return Err(CheckerError::InvalidOperation {
+                        op: "assignment".to_string(),
+                        type_name: format!("constant '{}'", name),
+                        span: span,
+                    });
+                }
                 let var_type = self
                     .lookup_var(name)
+                    .or_else(|| self.extern_vars.get(name).cloned())
                     .ok_or_else(|| CheckerError::UndefinedVariable(name.clone(), span))?;
                 let value_type = self.check_expr(value)?;
 
@@ -285,8 +354,16 @@ impl TypeChecker {
                 Ok(Type::Primitive(Primitive::Int))
             }
             Expr::Inc(name, _) | Expr::Dec(name, _) => {
+                if self.is_constant(name) {
+                    return Err(CheckerError::InvalidOperation {
+                        op: "increment/decrement".to_string(),
+                        type_name: format!("constant '{}'", name),
+                        span: span,
+                    });
+                }
                 let var_type = self
                     .lookup_var(name)
+                    .or_else(|| self.extern_vars.get(name).cloned())
                     .ok_or_else(|| CheckerError::UndefinedVariable(name.clone(), span))?;
                 if !var_type.is_numeric() {
                     return Err(CheckerError::InvalidOperation {
@@ -298,8 +375,16 @@ impl TypeChecker {
                 Ok(var_type)
             }
             Expr::AddAssign(name, value, _) | Expr::SubAssign(name, value, _) => {
+                if self.is_constant(name) {
+                    return Err(CheckerError::InvalidOperation {
+                        op: "compound assignment".to_string(),
+                        type_name: format!("constant '{}'", name),
+                        span: span,
+                    });
+                }
                 let var_type = self
                     .lookup_var(name)
+                    .or_else(|| self.extern_vars.get(name).cloned())
                     .ok_or_else(|| CheckerError::UndefinedVariable(name.clone(), span))?;
                 let value_type = self.check_expr(value)?;
                 if var_type.is_pointer() {
@@ -697,6 +782,13 @@ impl TypeChecker {
                 }
             }
             Expr::IndexAssign(array_idx, value, _) => {
+                if let Some(name) = self.const_root_name(array_idx) {
+                    return Err(CheckerError::InvalidOperation {
+                        op: "assignment".to_string(),
+                        type_name: format!("constant '{}'", name),
+                        span: span,
+                    });
+                }
                 let value_type = self.check_expr(value)?;
 
                 if let Expr::Index(array, idx, _) = array_idx.as_mut() {
@@ -809,7 +901,10 @@ impl TypeChecker {
 
                 Ok(Type::Array(Box::new(Type::Primitive(Primitive::Int))))
             }
-            Expr::FuncDecl(name, type_params, params, ret_type, body, _) => {
+            Expr::FuncDecl(name, attrs, type_params, params, ret_type, body, _) => {
+                if attrs.is_external {
+                    return Ok(Type::Primitive(Primitive::Void));
+                }
                 self.push_scope();
                 if !type_params.is_empty() {
                     self.push_generic_params(type_params.len());
@@ -840,7 +935,6 @@ impl TypeChecker {
 
                 Ok(Type::Primitive(Primitive::Void))
             }
-            Expr::Extern(_, _, _, _) => Ok(Type::Primitive(Primitive::Void)),
             Expr::Break(_) | Expr::Continue(_) => Ok(Type::Primitive(Primitive::Void)),
             Expr::TypeDef(_) => Ok(Type::Primitive(Primitive::Void)),
             Expr::Match(target, branches, default, _) => {
@@ -1111,6 +1205,13 @@ impl TypeChecker {
                 })
             }
             Expr::MemberAssign(obj, field_name, value, _) => {
+                if let Some(name) = self.const_root_name(obj) {
+                    return Err(CheckerError::InvalidOperation {
+                        op: "assignment".to_string(),
+                        type_name: format!("constant '{}'", name),
+                        span: span,
+                    });
+                }
                 if let Expr::Var(name, _) = obj.as_ref() {
                     if self.enums.contains_key(name) {
                         return Err(CheckerError::InvalidOperation {

@@ -197,9 +197,10 @@ impl Expr {
             | Expr::StrCat(_, _, s)
             | Expr::Var(_, s)
             | Expr::VarDecl(_, _, _, s)
+            | Expr::ConstDecl(_, _, _, s)
+            | Expr::ExternVar(_, _, s)
             | Expr::VarAssign(_, _, s)
-            | Expr::FuncDecl(_, _, _, _, _, s)
-            | Expr::Extern(_, _, _, s)
+            | Expr::FuncDecl(_, _, _, _, _, _, s)
             | Expr::Call(_, _, _, s)
             | Expr::Return(_, s)
             | Expr::If(_, _, _, s)
@@ -238,6 +239,13 @@ impl Expr {
             | Expr::FString(_, s) => *s,
         }
     }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct FuncAttrs {
+    pub is_pub: bool,
+    pub is_external: bool,
+    pub is_pure: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -281,16 +289,18 @@ pub enum Expr {
     StrCat(Box<Expr>, Box<Expr>, Span),
     Var(String, Span),
     VarDecl(String, Type, Box<Expr>, Span),
+    ConstDecl(String, Type, Box<Expr>, Span),
     VarAssign(String, Box<Expr>, Span),
     FuncDecl(
         String,
+        FuncAttrs,
         Vec<String>,
         Vec<(String, Type)>,
         Type,
         Box<Expr>,
         Span,
     ),
-    Extern(String, Vec<(String, Type)>, Type, Span),
+    ExternVar(String, Type, Span),
     Call(Box<Expr>, Vec<Type>, Vec<Expr>, Span),
     Return(Box<Expr>, Span),
     If(Box<Expr>, Box<Expr>, Option<Box<Expr>>, Span),

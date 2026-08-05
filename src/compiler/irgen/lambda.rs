@@ -16,6 +16,7 @@ pub(super) fn hoist_lambdas(
 
             let lambda_func = Expr::FuncDecl(
                 lambda_name.clone(),
+                crate::compiler::parser::FuncAttrs::default(),
                 Vec::new(),
                 params,
                 ret_type,
@@ -26,12 +27,13 @@ pub(super) fn hoist_lambdas(
 
             Expr::Var(lambda_name, crate::compiler::Span::new(0, 0))
         }
-        Expr::FuncDecl(name, type_params, params, ret_type, body, span) => {
+        Expr::FuncDecl(name, attrs, type_params, params, ret_type, body, span) => {
             if !type_params.is_empty() {
-                return Expr::FuncDecl(name, type_params, params, ret_type, body, span);
+                return Expr::FuncDecl(name, attrs, type_params, params, ret_type, body, span);
             }
             Expr::FuncDecl(
                 name,
+                attrs,
                 type_params,
                 params,
                 ret_type,
@@ -160,6 +162,12 @@ pub(super) fn hoist_lambdas(
             crate::compiler::Span::new(0, 0),
         ),
         Expr::VarDecl(name, ty, val, _) => Expr::VarDecl(
+            name,
+            ty,
+            Box::new(hoist_lambdas(*val, lambda_counter, lambda_map)),
+            crate::compiler::Span::new(0, 0),
+        ),
+        Expr::ConstDecl(name, ty, val, _) => Expr::ConstDecl(
             name,
             ty,
             Box::new(hoist_lambdas(*val, lambda_counter, lambda_map)),

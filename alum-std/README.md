@@ -34,16 +34,16 @@ $import "maybe.ah"
 Provides input/output and file operations.
 
 ```al
-extern write(int, string, int): int    // Write to file descriptor
-extern read(int, string, int): int     // Read from file descriptor
-extern print(string): int              // Print string
-extern println(string): int            // Print string with newline
-extern input(string): string           // Read user input with prompt
-extern fopen(string, int, int): int    // Open file
-extern fclose(int): int                // Close file
-extern fread(int): string              // Read from file
-extern fwrite(int, string, int): int   // Write to file
-extern lseek(int, int, int): int       // Seek in file
+fun(extern) write(int, string, int): int    // Write to file descriptor
+fun(extern) read(int, string, int): int     // Read from file descriptor
+fun(extern) print(string): int              // Print string
+fun(extern) println(string): int            // Print string with newline
+fun(extern) input(string): string           // Read user input with prompt
+fun(extern) fopen(string, int, int): int    // Open file
+fun(extern) fclose(int): int                // Close file
+fun(extern) fread(int): string              // Read from file
+fun(extern) fwrite(int, string, int): int   // Write to file
+fun(extern) lseek(int, int, int): int       // Seek in file
 ```
 
 ### String Module (`string.ah`)
@@ -51,13 +51,13 @@ extern lseek(int, int, int): int       // Seek in file
 Provides string (byte array) operations.
 
 ```al
-extern strlen(string): int             // String length
-extern strcpy(string, string): string  // Copy string
-extern strcat(string, string): string  // Concatenate strings
-extern memcpy(string, string, int): string  // Copy n bytes
-extern memset(string, int, int): string     // Fill n bytes with a value
-extern bcmp(string, string, int): int       // Byte comparison
-extern memcmp(string, string, int): int     // Byte comparison (n bytes)
+fun(extern) strlen(string): int             // String length
+fun(extern) strcpy(string, string): string  // Copy string
+fun(extern) strcat(string, string): string  // Concatenate strings
+fun(extern) memcpy(string, string, int): string  // Copy n bytes
+fun(extern) memset(string, int, int): string     // Fill n bytes with a value
+fun(extern) bcmp(string, string, int): int       // Byte comparison
+fun(extern) memcmp(string, string, int): int     // Byte comparison (n bytes)
 ```
 
 ### Math Module (`math.ah`)
@@ -65,12 +65,12 @@ extern memcmp(string, string, int): int     // Byte comparison (n bytes)
 Provides mathematical operations.
 
 ```al
-extern abs(int): int        // Absolute value
-extern sqrt(int): int       // Integer square root
-extern max(int, int): int   // Maximum of two numbers
-extern min(int, int): int   // Minimum of two numbers
-extern pow(int, int): int   // Power function
-extern fact(int): int       // Factorial
+fun(extern) abs(int): int        // Absolute value
+fun(extern) sqrt(int): int       // Integer square root
+fun(extern) max(int, int): int   // Maximum of two numbers
+fun(extern) min(int, int): int   // Minimum of two numbers
+fun(extern) pow(int, int): int   // Power function
+fun(extern) fact(int): int       // Factorial
 ```
 
 ### Memory Module (`memory.ah`)
@@ -78,8 +78,8 @@ extern fact(int): int       // Factorial
 Provides memory management functions using a free-list allocator with block headers.
 
 ```al
-extern malloc(int): *void  // Allocate memory, returns byte pointer
-extern free(*void): void   // Free memory (no size needed)
+fun(extern) malloc(int): *void  // Allocate memory, returns byte pointer
+fun(extern) free(*void): void   // Free memory (no size needed)
 ```
 
 ### Convert Module (`convert.ah`)
@@ -87,10 +87,10 @@ extern free(*void): void   // Free memory (no size needed)
 Provides type conversion functions.
 
 ```al
-extern itoa(int): string    // Integer to string
-extern atoi(string): int    // String to integer
-extern atof(string): float  // String to float
-extern ftoa(float): string  // Float to string
+fun(extern) itoa(int): string    // Integer to string
+fun(extern) atoi(string): int    // String to integer
+fun(extern) atof(string): float  // String to float
+fun(extern) ftoa(float): string  // Float to string
 ```
 
 ### Vec Container (`vec.ah`)
@@ -217,8 +217,8 @@ Note: as a plain struct, `Maybe<T>` always stores a `value` of type `T` — the 
 The main library module provides system call access.
 
 ```al
-extern syscall(int, int, int, int): int
-extern exit(int): void
+fun(extern) syscall(int, int, int, int): int
+fun(extern) exit(int): void
 ```
 
 ## Building from Source

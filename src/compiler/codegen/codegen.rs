@@ -193,6 +193,9 @@ impl AsmCodeGen {
         self.text_asms.push(Asm::Extern("strlen".to_string()));
         self.text_asms.push(Asm::Extern("memcpy".to_string()));
         self.text_asms.push(Asm::Extern("strcpy".to_string()));
+        for var in &self.program.extern_vars {
+            self.text_asms.push(Asm::Extern(var.clone()));
+        }
 
         self.data_asms.push(Asm::Section(Section::Data));
         self.data_asms.push(Asm::Align(16));

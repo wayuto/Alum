@@ -30,7 +30,7 @@ impl Optimizer {
     fn visit(&self, expr: &mut Expr) {
         match expr {
             Expr::Block(body, _) => body.iter_mut().for_each(|e| self.optimize_expr(e)),
-            Expr::FuncDecl(_, _, _, _, body, _) => self.optimize_expr(body),
+            Expr::FuncDecl(_, _, _, _, _, body, _) => self.optimize_expr(body),
             Expr::Lambda(_, body, _, _) => self.optimize_expr(body),
             Expr::If(cond, t, e, _) => {
                 self.optimize_expr(cond);
@@ -48,6 +48,7 @@ impl Optimizer {
                 self.optimize_expr(body);
             }
             Expr::VarDecl(_, _, v, _)
+            | Expr::ConstDecl(_, _, v, _)
             | Expr::VarAssign(_, v, _)
             | Expr::Return(v, _)
             | Expr::AddAssign(_, v, _)
@@ -312,9 +313,10 @@ impl Optimizer {
                 self.dce(array);
                 self.dce(body);
             }
-            Expr::FuncDecl(_, _, _, _, body, _) => self.dce(body),
+            Expr::FuncDecl(_, _, _, _, _, body, _) => self.dce(body),
             Expr::Lambda(_, body, _, _) => self.dce(body),
             Expr::VarDecl(_, _, v, _) => self.dce(v),
+            Expr::ConstDecl(_, _, v, _) => self.dce(v),
             Expr::VarAssign(_, v, _) | Expr::AddAssign(_, v, _) | Expr::SubAssign(_, v, _) => {
                 self.dce(v)
             }
@@ -439,6 +441,7 @@ impl Optimizer {
             Expr::AddressOf(expr, _) => self.is_pure(expr),
             Expr::Deref(expr, _) => self.is_pure(expr),
             Expr::DerefAssign(ptr, val, _) => self.is_pure(ptr) && self.is_pure(val),
+            Expr::ConstDecl(_, _, v, _) => self.is_pure(v),
             _ => false,
         }
     }
@@ -448,6 +451,7 @@ impl Optimizer {
             expr,
             Expr::VarDecl(_, _, _, _)
                 | Expr::VarAssign(_, _, _)
+                | Expr::ConstDecl(_, _, _, _)
                 | Expr::AddAssign(_, _, _)
                 | Expr::SubAssign(_, _, _)
                 | Expr::Inc(_, _)

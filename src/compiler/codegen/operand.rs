@@ -1,4 +1,4 @@
-use super::codegen::{AsmCodeGen, m_base_disp, m_rbp, m_rbp_q, rel};
+use super::codegen::{AsmCodeGen, m_base, m_base_disp, m_rbp, m_rbp_q, rel};
 use super::error::CodeGenError;
 use crate::compiler::{
     codegen::asm::*,
@@ -63,6 +63,11 @@ impl AsmCodeGen {
             }
             IROperand::Function(name) => Ok(rel(name.clone())),
             IROperand::Label(name) => Ok(Operand::Label(name.clone())),
+            IROperand::Global(name) => {
+                self.invalidate_cached_reg(Reg::R10);
+                self.push_text(Asm::Mov(Operand::Reg(Reg::R10), rel(name.clone())));
+                Ok(m_base(Reg::R10))
+            }
         }
     }
 
@@ -139,6 +144,17 @@ impl AsmCodeGen {
             }
             IROperand::Function(name) => {
                 self.push_text(Asm::Lea(Operand::Reg(dst_reg), rel(name.clone())));
+            }
+            IROperand::Global(name) => {
+                if is_xmm {
+                    self.push_text(Asm::Mov(Operand::Reg(Reg::R10), rel(name.clone())));
+                    self.push_text(Asm::Movsd(Operand::Reg(dst_reg), m_base(Reg::R10)));
+                    self.invalidate_cached_reg(Reg::R10);
+                } else {
+                    self.push_text(Asm::Mov(Operand::Reg(dst_reg), rel(name.clone())));
+                    self.push_text(Asm::Mov(Operand::Reg(dst_reg), m_base(dst_reg)));
+                }
+                return Ok(());
             }
             _ => {}
         }
@@ -229,6 +245,32 @@ impl AsmCodeGen {
         self.invalidate_cached_operand(dst, Some(reg));
         self.push_text(Asm::Movsd(m_rbp(self.get_offset(dst)?), Operand::Reg(reg)));
         self.regs.insert(reg, Some(dst.clone()));
+        Ok(())
+    }
+
+    pub(super) fn store_global(&mut self, dst: &IROperand, reg: Reg) -> Result<(), CodeGenError> {
+        let IROperand::Global(name) = dst else {
+            return Err(CodeGenError::InvalidOperand {
+                message: "store_global requires a global operand".to_string(),
+            });
+        };
+        self.invalidate_cached_reg(Reg::R10);
+        self.push_text(Asm::Mov(Operand::Reg(Reg::R10), rel(name.clone())));
+        self.push_text(Asm::Mov(m_base(Reg::R10), Operand::Reg(reg)));
+        self.regs.remove(&reg);
+        Ok(())
+    }
+
+    pub(super) fn store_global_xmm(&mut self, dst: &IROperand, reg: Reg) -> Result<(), CodeGenError> {
+        let IROperand::Global(name) = dst else {
+            return Err(CodeGenError::InvalidOperand {
+                message: "store_global_xmm requires a global operand".to_string(),
+            });
+        };
+        self.invalidate_cached_reg(Reg::R10);
+        self.push_text(Asm::Mov(Operand::Reg(Reg::R10), rel(name.clone())));
+        self.push_text(Asm::Movsd(m_base(Reg::R10), Operand::Reg(reg)));
+        self.regs.remove(&reg);
         Ok(())
     }
 

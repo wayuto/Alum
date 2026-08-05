@@ -104,17 +104,22 @@ impl TypeChecker {
     pub fn check(mut self, program: &mut Program) -> Result<(), CheckerError> {
         for expr in &program.body {
             match expr {
-                Expr::FuncDecl(name, type_params, params, ret_type, _, _) => {
+                Expr::FuncDecl(name, attrs, type_params, params, ret_type, _, _) => {
                     let param_types: Vec<Type> = params.iter().map(|(_, t)| t.clone()).collect();
-                    self.functions.insert(
-                        name.clone(),
-                        (type_params.clone(), param_types, ret_type.clone()),
-                    );
+                    if attrs.is_external {
+                        self.functions.insert(
+                            name.clone(),
+                            (Vec::new(), param_types, ret_type.clone()),
+                        );
+                    } else {
+                        self.functions.insert(
+                            name.clone(),
+                            (type_params.clone(), param_types, ret_type.clone()),
+                        );
+                    }
                 }
-                Expr::Extern(name, params, ret_type, _) => {
-                    let param_types: Vec<Type> = params.iter().map(|(_, t)| t.clone()).collect();
-                    self.functions
-                        .insert(name.clone(), (Vec::new(), param_types, ret_type.clone()));
+                Expr::ExternVar(name, ty, _) => {
+                    self.extern_vars.insert(name.clone(), ty.clone());
                 }
                 Expr::Struct(name, type_params, fields, _) => {
                     self.structs
@@ -144,10 +149,12 @@ impl TypeChecker {
 
     pub(super) fn push_scope(&mut self) {
         self.type_stack.push(HashMap::new());
+        self.const_stack.push(std::collections::HashSet::new());
     }
 
     pub(super) fn pop_scope(&mut self) {
         self.type_stack.pop();
+        self.const_stack.pop();
     }
 
     pub(super) fn declare_var(&mut self, name: &str, ty: Type) {
@@ -164,6 +171,44 @@ impl TypeChecker {
             }
         }
         None
+    }
+
+    pub(super) fn declare_const(&mut self, name: &str) {
+        self.const_stack
+            .last_mut()
+            .unwrap()
+            .insert(name.to_string());
+    }
+
+    pub(super) fn is_constant(&self, name: &str) -> bool {
+        if self.constants.contains_key(name) {
+            return true;
+        }
+        for scope in self.const_stack.iter().rev() {
+            if scope.contains(name) {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub(super) fn const_root_name(&self, expr: &Expr) -> Option<String> {
+        let mut e = expr;
+        loop {
+            match e {
+                Expr::Var(name, _) => return self.is_constant(name).then(|| name.clone()),
+                Expr::Index(base, _, _) | Expr::MemberAccess(base, _, _) => {
+                    e = base;
+                }
+                _ => return None,
+            }
+        }
+    }
+
+    pub(super) fn is_global_scope(&self) -> bool {
+        self.type_stack.len() == 1
+            && self.return_types.is_empty()
+            && self.generic_params.is_empty()
     }
 
     pub(super) fn resolve_enum_member(&self, name: &str) -> Result<Option<isize>, Vec<String>> {
@@ -249,7 +294,7 @@ impl TypeChecker {
                     self.resolve_call_type_args(e);
                 }
             }
-            Expr::FuncDecl(_, _, _, _, body, _) => self.resolve_call_type_args(body),
+            Expr::FuncDecl(_, _, _, _, _, body, _) => self.resolve_call_type_args(body),
             Expr::Lambda(_, body, _, _) => self.resolve_call_type_args(body),
             Expr::If(cond, then_branch, else_branch, _) => {
                 self.resolve_call_type_args(cond);
@@ -267,6 +312,7 @@ impl TypeChecker {
                 self.resolve_call_type_args(body);
             }
             Expr::VarDecl(_, _, value, _)
+            | Expr::ConstDecl(_, _, value, _)
             | Expr::VarAssign(_, value, _)
             | Expr::Return(value, _)
             | Expr::AddAssign(_, value, _)
@@ -340,7 +386,11 @@ impl TypeChecker {
             Expr::Nil(_) => Type::Primitive(Primitive::Void),
             Expr::Var(name, _) => self
                 .lookup_var(name)
+                .or_else(|| self.constants.get(name).cloned())
+                .or_else(|| self.extern_vars.get(name).cloned())
                 .unwrap_or(Type::Primitive(Primitive::Int)),
+            Expr::ConstDecl(_, ty, _, _) => ty.clone(),
+            Expr::ExternVar(_, ty, _) => ty.clone(),
             Expr::FAdd(_, _, _)
             | Expr::FSub(_, _, _)
             | Expr::FMul(_, _, _)

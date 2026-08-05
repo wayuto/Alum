@@ -25,6 +25,7 @@ pub enum Operand {
     ConstIdx(usize),
     Label(String),
     Function(String),
+    Global(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,6 +73,10 @@ pub enum Op {
     FLoad,
     Store,
     FStore,
+    GlobLoad,
+    FGlobLoad,
+    GlobStore,
+    FGlobStore,
     Call,
     Arg(usize),
     FArg(usize),
@@ -108,10 +113,13 @@ pub struct IRFunction {
     pub ret_type: IRType,
     pub is_pub: bool,
     pub is_external: bool,
+    #[allow(dead_code)]
+    pub is_pure: bool,
 }
 
 #[derive(Debug, Clone)]
 pub struct IRProgram {
     pub functions: Vec<IRFunction>,
     pub constants: Vec<IRConst>,
+    pub extern_vars: Vec<String>,
 }
