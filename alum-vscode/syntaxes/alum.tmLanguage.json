@@ -10,7 +10,7 @@
             "include": "#preprocessor"
         },
         {
-            "include": "#global-declaration"
+            "include": "#variable-declaration"
         },
         {
             "include": "#typedef"
@@ -40,7 +40,7 @@
             "include": "#lambda"
         },
         {
-            "include": "#variable-declaration"
+            "include": "#global-declaration"
         },
         {
             "include": "#for-loop"
@@ -122,7 +122,7 @@
             "patterns": [
                 {
                     "name": "meta.global.variable.declaration.alum",
-                    "match": "\\b(cst|mut)(\\s*\\(\\s*(pub)\\s*\\))?\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(:)\\s*([A-Za-z_][A-Za-z0-9_]*(?:<[^>\\n]*>)?(?:\\[[0-9]*\\])?(?:\\s*\\([^)\\n]*\\))?)",
+                    "match": "\\b(cst)(\\s*\\(\\s*(pub)\\s*\\))?\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(:)\\s*([A-Za-z_][A-Za-z0-9_]*(?:<[^>\\n]*>)?(?:\\[[0-9]*\\])?(?:\\s*\\([^)\\n]*\\))?)",
                     "captures": {
                         "1": {
                             "name": "keyword.declaration.global.alum"
@@ -751,15 +751,18 @@
             "patterns": [
                 {
                     "name": "meta.variable.declaration.alum",
-                    "match": "\\b(let)\\s+([A-Za-z_][A-Za-z0-9_]*)(\\s*(:)\\s*([A-Za-z_][A-Za-z0-9_]*(?:<[^>\\n]*>)?(?:\\[[0-9]*\\])?(?:\\s*\\([^)\\n]*\\))?))?\\s*(=)",
+                    "match": "\\b(var)(\\s*\\(\\s*(pub)\\s*\\))?\\s+([A-Za-z_][A-Za-z0-9_]*)(\\s*(:)\\s*([A-Za-z_][A-Za-z0-9_]*(?:<[^>\\n]*>)?(?:\\[[0-9]*\\])?(?:\\s*\\([^)\\n]*\\))?))?\\s*(=)",
                     "captures": {
                         "1": {
-                            "name": "storage.modifier.alum"
-                        },
-                        "2": {
-                            "name": "variable.other.readwrite.alum"
+                            "name": "storage.modifier.variable.alum"
                         },
                         "3": {
+                            "name": "storage.modifier.pub.alum"
+                        },
+                        "4": {
+                            "name": "variable.other.readwrite.alum"
+                        },
+                        "6": {
                             "patterns": [
                                 {
                                     "name": "punctuation.separator.type-annotation.alum",
@@ -770,7 +773,7 @@
                                 }
                             ]
                         },
-                        "6": {
+                        "9": {
                             "name": "keyword.operator.assignment.alum"
                         }
                     }
@@ -839,12 +842,8 @@
                     "match": "\\breturn\\b"
                 },
                 {
-                    "name": "storage.modifier.alum",
-                    "match": "\\blet\\b"
-                },
-                {
                     "name": "storage.modifier.variable.alum",
-                    "match": "\\bmut\\b"
+                    "match": "\\bvar\\b"
                 },
                 {
                     "name": "keyword.declaration.constant.alum",
