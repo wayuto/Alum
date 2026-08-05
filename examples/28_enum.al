@@ -39,7 +39,7 @@ fun main(): int {
     println(f"NORTH = {NORTH}")          // -1
 
     // Enums are ints and work in expressions
-    let next: int = Color.BLACK + 1
+    var next: int = Color.BLACK + 1
     println(f"BLACK + 1 = {next}")
 
     // Enums as function arguments and comparisons

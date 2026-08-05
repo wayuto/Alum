@@ -16,13 +16,13 @@ cst NEGF: float = -2.5
 
 fun area(r: float): float {
     cst TWO: float = 2.0
-    let scaled: float = r * TWO
+    var scaled: float = r * TWO
     return scaled
 }
 
 fun main(): int {
     cst LOCAL: int = 42
-    let total: int = LOCAL + MAX + SUM + NEG
+    var total: int = LOCAL + MAX + SUM + NEG
     println(f"MAX = {MAX}")
     println(f"PI = {PI}")
     println(f"GREETING = {GREETING}")

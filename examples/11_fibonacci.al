@@ -4,11 +4,11 @@ $import "io.ah"
 // Generates and displays Fibonacci numbers
 
 fun main(): int {
-    let n: int = 10
-    let a: int = 0
-    let b: int = 1
-    let temp: int = 0
-    let i: int = 0
+    var n: int = 10
+    var a: int = 0
+    var b: int = 1
+    var temp: int = 0
+    var i: int = 0
     
     println("Fibonacci sequence (first 10 numbers):")
     
@@ -24,7 +24,7 @@ fun main(): int {
     
     // Calculate nth Fibonacci number
     println("\nCalculating 10th Fibonacci number:")
-    let fib_n: int = fibonacci(10)
+    var fib_n: int = fibonacci(10)
     println(f"fibonacci(10) = {fib_n}")
     
     return 0

@@ -6,7 +6,7 @@ $import "io.ah"
 fun main(): int {
     // Array literal with explicit values
     // Type is inferred from elements
-    let numbers: int[5] = [1, 2, 3, 4, 5]
+    var numbers: int[5] = [1, 2, 3, 4, 5]
 
     // Access array elements
     println(f"First element: {numbers[0]}")

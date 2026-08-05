@@ -3,7 +3,7 @@ $import "io.ah"
 fun main(): int {
     // break in while loop
     println("break in while loop:");
-    let i: int = 0;
+    var i: int = 0;
     while i < 10 {
         if i == 5 {
             break;

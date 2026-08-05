@@ -3,7 +3,7 @@ $import "io.ah"
 fun main(): int {
     // continue in while loop
     println("continue in while loop:");
-    let i: int = 0;
+    var i: int = 0;
     while i < 10 {
         i = i + 1;
         if i == 5 {

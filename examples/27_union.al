@@ -8,7 +8,7 @@ union Value {
 }
 
 fun main(): int {
-    let v: Value = Value {
+    var v: Value = Value {
         i: 42
     }
 

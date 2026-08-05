@@ -7,8 +7,8 @@ fun main(): int {
     // Sum of first 10 natural numbers using while loop
     println("Sum of first 10 natural numbers (while loop):")
 
-    let i: int = 1
-    let sum: int = 0
+    var i: int = 1
+    var sum: int = 0
 
     while i <= 10 {
         sum = sum + i
@@ -42,7 +42,7 @@ fun main(): int {
 
     // Iterate over an array directly
     println("\nIterating over array [10, 20, 30, 40, 50]:")
-    let arr: int[5] = [10, 20, 30, 40, 50]
+    var arr: int[5] = [10, 20, 30, 40, 50]
     for val in arr {
         println(f"{val}")
     }
@@ -51,7 +51,7 @@ fun main(): int {
     println("\nFactorial of 5:")
 
     i = 5
-    let factorial: int = 1
+    var factorial: int = 1
 
     while i > 0 {
         factorial = factorial * i

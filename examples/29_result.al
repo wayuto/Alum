@@ -22,8 +22,8 @@ fun auth(password: string): Result<int, string> {
 }
 
 fun main(): int {
-    let password = input("Enter your password: ")
-    let result = auth(password)
+    var password = input("Enter your password: ")
+    var result = auth(password)
     match result.result {
         Ok: {
             println(f"{result.value.ok}")

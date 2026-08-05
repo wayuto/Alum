@@ -6,9 +6,9 @@ $import "memory.ah"
 // Demonstrates reading user input
 
 fun main(): int {
-    let name: string = malloc(100)
-    let age_str: string = malloc(100)
-    let age: int = 0
+    var name: string = malloc(100)
+    var age_str: string = malloc(100)
+    var age: int = 0
     
     // Get user's name
     println("Enter your name: ")
@@ -24,7 +24,7 @@ fun main(): int {
     println(f"You are {age} years old.")
     
     // Calculate age in 5 years
-    let future_age: int = age + 5
+    var future_age: int = age + 5
     println(f"In 5 years, you will be {future_age} years old.")
     
     // Check if user is an adult

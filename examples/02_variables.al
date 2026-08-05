@@ -5,19 +5,19 @@ $import "io.ah"
 
 fun main(): int {
     // Integer variable
-    let age: int = 25
+    var age: int = 25
     
     // Float variable
-    let pi: float = 3.14159
+    var pi: float = 3.14159
     
     // Boolean variable
-    let is_student: bool = true
+    var is_student: bool = true
     
     // String variable
-    let name: string = "Alum"
+    var name: string = "Alum"
     
     // Nil value for integer
-    let empty: int = nil
+    var empty: int = nil
     
     // Print values
     println(f"Name: {name}")

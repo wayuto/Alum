@@ -4,11 +4,11 @@ $import "io.ah"
 // Demonstrates bubble sort algorithm
 
 fun main(): int {
-    let numbers: int[8] = [64, 34, 25, 12, 22, 11, 90, 45]
-    let n: int = 8
-    let i: int = 0
-    let j: int = 0
-    let temp: int = 0
+    var numbers: int[8] = [64, 34, 25, 12, 22, 11, 90, 45]
+    var n: int = 8
+    var i: int = 0
+    var j: int = 0
+    var temp: int = 0
 
     println("Original array:")
     for i in 0..n {

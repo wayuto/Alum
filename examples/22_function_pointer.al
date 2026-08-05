@@ -8,17 +8,17 @@ fun add(a: int, b: int): int {
 
 fun main(): int {
     // Test 1: Assign function to function pointer variable
-    let f: string(int) = itoa
+    var f: string(int) = itoa
 
     // Test 2: Call through function pointer
-    let result: string = f(10)
+    var result: string = f(10)
 
     println("Function pointer test:")
     println(f"f(10) = {result}")
 
     // Test 3: Another function pointer
-    let g: int(int, int) = add
-    let sum: int = g(5, 7)
+    var g: int(int, int) = add
+    var sum: int = g(5, 7)
 
     println(f"g(5, 7) = {sum}")
 

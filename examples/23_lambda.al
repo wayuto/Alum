@@ -3,7 +3,7 @@ $import "io.ah"
 // Lambda function example
 
 fun main(): int {
-    let f: int(int) = \(n: int): int {
+    var f: int(int) = \(n: int): int {
         return n + 1
     }
 

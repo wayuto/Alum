@@ -10,13 +10,13 @@ fun identity<T>(x: T): T {
 
 fun main(): int {
     // Test 1: identity with integer
-    let x: int = 42
-    let result: int = identity(x)
+    var x: int = 42
+    var result: int = identity(x)
     println(f"identity(42) = {result}")
 
     // Test 2: identity with float
-    let y: float = 3.14
-    let f_result: float = identity(y)
+    var y: float = 3.14
+    var f_result: float = identity(y)
     println(f"identity(3.14) = {f_result}")
 
     return 0

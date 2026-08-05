@@ -8,7 +8,7 @@ struct Point {
 }
 
 fun main(): int {
-    let p: Point = Point {
+    var p: Point = Point {
         x: 1,
         y: 1
     }

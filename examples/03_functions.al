@@ -29,12 +29,12 @@ fun greet(name: string): void {
 }
 
 fun main(): int {
-    let x: int = 10
-    let y: int = 20
+    var x: int = 10
+    var y: int = 20
     
-    let sum: int = add(x, y)
-    let product: int = multiply(x, y)
-    let maximum: int = get_max(x, y)
+    var sum: int = add(x, y)
+    var product: int = multiply(x, y)
+    var maximum: int = get_max(x, y)
     
     greet("Alum")
     

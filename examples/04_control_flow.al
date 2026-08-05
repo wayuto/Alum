@@ -5,7 +5,7 @@ $import "io.ah"
 
 fun main(): int {
     // If-Else statement
-    let x: int = 15
+    var x: int = 15
     
     if x > 10 {
         println("x is greater than 10")
@@ -14,7 +14,7 @@ fun main(): int {
     }
     
     // Nested if-else
-    let y: int = 0
+    var y: int = 0
     
     if y > 0 {
         println("y is positive")
@@ -28,7 +28,7 @@ fun main(): int {
     
     // While loop
     println("Counting with while loop:")
-    let i: int = 0
+    var i: int = 0
     while i < 5 {
         println(f"{i}")
         i = i + 1

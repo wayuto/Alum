@@ -4,12 +4,12 @@ $import "io.ah"
 // Demonstrates searching for elements in an array
 
 fun main(): int {
-    let numbers: int[10] = [5, 12, 8, 25, 3, 10, 15, 7, 20, 1]
-    let n: int = 10
-    let target: int = 15
-    let found: int = 0
-    let index: int = 0
-    let i: int = 0
+    var numbers: int[10] = [5, 12, 8, 25, 3, 10, 15, 7, 20, 1]
+    var n: int = 10
+    var target: int = 15
+    var found: int = 0
+    var index: int = 0
+    var i: int = 0
 
     println("Array elements:")
     for i in 0..n {
@@ -40,8 +40,8 @@ fun main(): int {
     // Find minimum and maximum
     println("\nFinding min and max:")
 
-    let min_val: int = numbers[0]
-    let max_val: int = numbers[0]
+    var min_val: int = numbers[0]
+    var max_val: int = numbers[0]
 
     for i in 1..n {
         if numbers[i] < min_val {

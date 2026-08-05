@@ -8,20 +8,20 @@ $import "memory.ah"
 
 fun main(): int {
     // String length
-    let hello: string = "Hello, World!"
-    let len: int = strlen(hello)
+    var hello: string = "Hello, World!"
+    var len: int = strlen(hello)
     print("Length of '")
     print(hello)
     println(f"': {len}")
     
     // String copy
-    let copy: string = malloc(100)
+    var copy: string = malloc(100)
     strcpy(copy, hello)
     
     println(f"Copy: {copy}")
     
     // String comparison using memcmp
-    let result: int = memcmp(hello, copy, len + 1)
+    var result: int = memcmp(hello, copy, len + 1)
     if result == 0 {
         println("Strings are equal")
     } else {
@@ -29,8 +29,8 @@ fun main(): int {
     }
     
     // Different string
-    let other: string = "Goodbye"
-    let diff: int = memcmp(hello, other, strlen(other) + 1)
+    var other: string = "Goodbye"
+    var diff: int = memcmp(hello, other, strlen(other) + 1)
     if diff == 0 {
         println("Strings are equal")
     } else {

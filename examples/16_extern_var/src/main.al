@@ -5,7 +5,7 @@ $import "vars.ah"
 // The C file `src/vars.c` defines `counter` and `ratio`.
 
 fun main(): int {
-    let initial: int = counter
+    var initial: int = counter
     println(f"initial counter = {initial}")
 
     counter = 42
@@ -13,13 +13,13 @@ fun main(): int {
     ++counter
     println(f"counter after writes = {counter}")
 
-    let r0: float = ratio
+    var r0: float = ratio
     println(f"ratio = {r0}")
 
     ratio = 2.5
     println(f"ratio after write = {ratio}")
 
-    let twice: float = ratio * 2.0
+    var twice: float = ratio * 2.0
     println(f"ratio * 2 = {twice}")
 
     --counter
