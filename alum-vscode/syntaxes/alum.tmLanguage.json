@@ -125,7 +125,7 @@
                     "match": "\\b(cst)(\\s*\\(\\s*(pub)\\s*\\))?\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(:)\\s*([A-Za-z_][A-Za-z0-9_]*(?:<[^>\\n]*>)?(?:\\[[0-9]*\\])?(?:\\s*\\([^)\\n]*\\))?)",
                     "captures": {
                         "1": {
-                            "name": "keyword.declaration.global.alum"
+                            "name": "storage.modifier.variable.alum"
                         },
                         "2": {
                             "patterns": [
