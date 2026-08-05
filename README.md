@@ -99,6 +99,11 @@ struct Line {
     b: Point
 }
 
+// pure function (no side effects, can be optimized/constant-folded)
+fun(pure) add(a: int, b: int): int {
+    return a + b
+}
+
 // generic function
 fun identity<T>(x: T): T {
     return x

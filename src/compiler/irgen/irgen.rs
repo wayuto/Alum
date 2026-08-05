@@ -111,7 +111,8 @@ impl IRGen {
                             None => {
                                 return Err(CodeGenError::TypeError {
                                     message: format!(
-                                        "initializer of global variable '{}' is not a compile-time constant",                                        name
+                                        "initializer of global variable '{}' is not a compile-time constant",
+                                        name
                                     ),
                                 });
                             }

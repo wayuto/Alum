@@ -51,13 +51,13 @@ fun(extern) lseek(int, int, int): int       // Seek in file
 Provides string (byte array) operations.
 
 ```al
-fun(extern) strlen(string): int             // String length
+fun(pure,extern) strlen(string): int             // String length
 fun(extern) strcpy(string, string): string  // Copy string
 fun(extern) strcat(string, string): string  // Concatenate strings
 fun(extern) memcpy(string, string, int): string  // Copy n bytes
 fun(extern) memset(string, int, int): string     // Fill n bytes with a value
-fun(extern) bcmp(string, string, int): int       // Byte comparison
-fun(extern) memcmp(string, string, int): int     // Byte comparison (n bytes)
+fun(pure,extern) bcmp(string, string, int): int       // Byte comparison
+fun(pure,extern) memcmp(string, string, int): int     // Byte comparison (n bytes)
 ```
 
 ### Math Module (`math.ah`)
@@ -65,12 +65,12 @@ fun(extern) memcmp(string, string, int): int     // Byte comparison (n bytes)
 Provides mathematical operations.
 
 ```al
-fun(extern) abs(int): int        // Absolute value
-fun(extern) sqrt(int): int       // Integer square root
-fun(extern) max(int, int): int   // Maximum of two numbers
-fun(extern) min(int, int): int   // Minimum of two numbers
-fun(extern) pow(int, int): int   // Power function
-fun(extern) fact(int): int       // Factorial
+fun(pure,extern) abs(int): int        // Absolute value
+fun(pure,extern) sqrt(int): int       // Integer square root
+fun(pure,extern) max(int, int): int   // Maximum of two numbers
+fun(pure,extern) min(int, int): int   // Minimum of two numbers
+fun(pure,extern) pow(int, int): int   // Power function
+fun(pure,extern) fact(int): int       // Factorial
 ```
 
 ### Memory Module (`memory.ah`)
@@ -87,10 +87,10 @@ fun(extern) free(*void): void   // Free memory (no size needed)
 Provides type conversion functions.
 
 ```al
-fun(extern) itoa(int): string    // Integer to string
-fun(extern) atoi(string): int    // String to integer
-fun(extern) atof(string): float  // String to float
-fun(extern) ftoa(float): string  // Float to string
+fun(pure,extern) itoa(int): string    // Integer to string
+fun(pure,extern) atoi(string): int    // String to integer
+fun(pure,extern) atof(string): float  // String to float
+fun(pure,extern) ftoa(float): string  // Float to string
 ```
 
 ### Vec Container (`vec.ah`)
@@ -118,7 +118,7 @@ fun main(): int {
 ```
 
 **Methods:**
-- `vec_new<T>()`: Creates a new empty `Vec<T>`
+- `vec_new<T>()`: Creates a new empty `Vec<T>` (pure function)
 - `vec.at(&vec, index)`: Access element at the given index
 - `vec.push(&vec, element)`: Add an element to the end
 - `vec.pop(&vec)`: Remove and return the last element
@@ -189,7 +189,7 @@ struct Maybe<T> {
     value: T
 }
 
-fun is_some<T>(m: Maybe<T>): int  // 1 if Just, 0 if Nothing
+fun(pure) is_some<T>(m: Maybe<T>): int  // 1 if Just, 0 if Nothing
 ```
 
 **Usage:**
@@ -220,6 +220,18 @@ The main library module provides system call access.
 fun(extern) syscall(int, int, int, int): int
 fun(extern) exit(int): void
 ```
+
+### Function Annotations
+
+Alum supports function annotations for controlling linkage and optimization:
+
+| Annotation | Meaning |
+| --- | --- |
+| `pub` | Export the function symbol for linking |
+| `pure` | Mark the function as side-effect-free (enables optimization) |
+| `extern` | Declare an external function (no body, linked at compile time) |
+
+Annotations can be combined, e.g. `fun(pure,pub) name(params): ret`.
 
 ## Global Variables
 

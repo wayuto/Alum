@@ -1,12 +1,12 @@
 $ifndef ALUM_STRING
 $define ALUM_STRING 1
 
-fun(extern) strlen(string): int
+fun(pure,extern) strlen(string): int
 fun(extern) strcpy(string, string): string
 fun(extern) strcat(string, string): string
 fun(extern) memcpy(string, string, int): string
 fun(extern) memset(string, int, int): string
-fun(extern) bcmp(string, string, int): int
-fun(extern) memcmp(string, string, int): int
+fun(pure,extern) bcmp(string, string, int): int
+fun(pure,extern) memcmp(string, string, int): int
 
 $endif

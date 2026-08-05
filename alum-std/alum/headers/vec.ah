@@ -15,7 +15,7 @@ struct Vec<T> {
     clear: void(*Vec<T>),
 }
 
-fun(pub) vec_new<T>(): Vec<T> {
+fun(pure,pub) vec_new<T>(): Vec<T> {
     return Vec<T> {
         data: [T; 0],
         len: 0,

@@ -1,9 +1,9 @@
 $ifndef ALUM_CONVERT
 $define ALUM_CONVERT 1
 
-fun(extern) itoa(int): string
-fun(extern) atoi(string): int
-fun(extern) atof(string): float
-fun(extern) ftoa(float): string
+fun(pure,extern) itoa(int): string
+fun(pure,extern) atoi(string): int
+fun(pure,extern) atof(string): float
+fun(pure,extern) ftoa(float): string
 
 $endif

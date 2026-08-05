@@ -751,7 +751,7 @@
             "patterns": [
                 {
                     "name": "meta.variable.declaration.alum",
-                    "match": "\\b(var)(\\s*\\(\\s*(pub)\\s*\\))?\\s+([A-Za-z_][A-Za-z0-9_]*)(\\s*(:)\\s*([A-Za-z_][A-Za-z0-9_]*(?:<[^>\\n]*>)?(?:\\[[0-9]*\\])?(?:\\s*\\([^)\\n]*\\))?))?\\s*(=)",
+                    "match": "\\b(var)(\\s*\\(\\s*(pub)\\s*\\))?\\s+([A-Za-z_][A-Za-z0-9_]*)(\\s*(:)\\s*([A-Za-z_][A-Za-z0-9_]*(?:<[^>\\n]*>)?(?:\\[[0-9]*\\])?(?:\\s*\\([^)\\n]*\\))?))?(?:\\s*(=))?",
                     "captures": {
                         "1": {
                             "name": "storage.modifier.variable.alum"

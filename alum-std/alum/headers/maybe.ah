@@ -11,7 +11,7 @@ struct Maybe<T> {
     value: T
 }
 
-fun is_some<T>(m: Maybe<T>): int {
+fun(pure) is_some<T>(m: Maybe<T>): int {
     if m.tag == Just {
         return 1
     }

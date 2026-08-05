@@ -1,11 +1,11 @@
 $ifndef ALUM_MATH
 $define ALUM_MATH 1
 
-fun(extern) abs(int): int
-fun(extern) sqrt(int): int
-fun(extern) max(int, int): int
-fun(extern) min(int, int): int
-fun(extern) pow(int, int): int
-fun(extern) fact(int): int
+fun(pure,extern) abs(int): int
+fun(pure,extern) sqrt(int): int
+fun(pure,extern) max(int, int): int
+fun(pure,extern) min(int, int): int
+fun(pure,extern) pow(int, int): int
+fun(pure,extern) fact(int): int
 
 $endif
