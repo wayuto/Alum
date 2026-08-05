@@ -152,7 +152,12 @@ impl IRGen {
 
         for lambda in &lambda_funcs {
             if let Expr::FuncDecl(name, _, _, params, ret_type, _, _) = lambda {
-                self.func_decl(name.clone(), FuncAttrs::default(), params.clone(), ret_type.clone())?;
+                self.func_decl(
+                    name.clone(),
+                    FuncAttrs::default(),
+                    params.clone(),
+                    ret_type.clone(),
+                )?;
             }
         }
         for lambda in &lambda_funcs {
@@ -162,7 +167,12 @@ impl IRGen {
         }
 
         self.mono_in_progress.push(mangled.clone());
-        self.func_decl(mangled.clone(), FuncAttrs::default(), concrete_params.clone(), concrete_ret)?;
+        self.func_decl(
+            mangled.clone(),
+            FuncAttrs::default(),
+            concrete_params.clone(),
+            concrete_ret,
+        )?;
         self.compile_fn(mangled.clone(), concrete_params, concrete_body)?;
         self.mono_in_progress.pop();
 
@@ -176,9 +186,16 @@ pub(super) fn substitute_expr(expr: Expr, args: &[Type]) -> Expr {
     let sub_val = |e: Expr| substitute_expr(e, args);
     match expr {
         VarDecl(name, ty, value, span) => VarDecl(name, ty.substitute(args), sub_box(value), span),
-        ConstDecl(name, ty, value, span) => {
-            ConstDecl(name, ty.substitute(args), sub_box(value), span)
+        ConstDecl(name, ty, value, is_pub, span) => {
+            ConstDecl(name, ty.substitute(args), sub_box(value), is_pub, span)
         }
+        GlobalVar(name, is_pub, ty, value, span) => GlobalVar(
+            name,
+            is_pub,
+            ty.substitute(args),
+            value.map(|v| sub_box(v)),
+            span,
+        ),
         FuncDecl(name, attrs, type_params, params, ret_type, body, span) => {
             let params = if type_params.is_empty() {
                 params
@@ -193,7 +210,15 @@ pub(super) fn substitute_expr(expr: Expr, args: &[Type]) -> Expr {
             } else {
                 ret_type
             };
-            FuncDecl(name, attrs, type_params, params, ret_type, sub_box(body), span)
+            FuncDecl(
+                name,
+                attrs,
+                type_params,
+                params,
+                ret_type,
+                sub_box(body),
+                span,
+            )
         }
         ExternVar(name, ty, span) => ExternVar(name, ty.substitute(args), span),
         Call(callee, type_args, call_args, span) => Call(

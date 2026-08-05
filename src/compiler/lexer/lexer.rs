@@ -366,6 +366,7 @@ impl<'a> Lexer<'a> {
         match ident.as_str() {
             "let" => Token::LET,
             "cst" => Token::CST,
+            "mut" => Token::MUT,
             "fun" => Token::FUN,
             "for" => Token::FOR,
             "in" => Token::IN,

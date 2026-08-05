@@ -115,6 +115,7 @@ impl<'a> Parser<'a> {
                 }
                 Ok((Token::CST, _)) => {
                     self.next()?;
+                    let is_pub = self.parse_global_annotation("cst")?;
                     let (token, span) = self.next()?;
                     let name = match token {
                         Token::IDENT(s) => s,
@@ -141,7 +142,41 @@ impl<'a> Parser<'a> {
                         });
                     }
 
-                    Ok(Expr::ConstDecl(name, ty, Box::new(self.expr()?), span))
+                    Ok(Expr::ConstDecl(
+                        name,
+                        ty,
+                        Box::new(self.expr()?),
+                        is_pub,
+                        span,
+                    ))
+                }
+                Ok((Token::MUT, _)) => {
+                    self.next()?;
+                    let is_pub = self.parse_global_annotation("mut")?;
+                    let (token, span) = self.next()?;
+                    let name = match token {
+                        Token::IDENT(s) => s,
+                        token => {
+                            return Err(ParserError::UnexpectedToken {
+                                expected: Some(Token::IDENT("NAME".to_string())),
+                                found: token,
+                                span,
+                            });
+                        }
+                    };
+                    let ty = if matches!(self.peek(), Some(Ok((Token::COLON, _)))) {
+                        self.next()?;
+                        self.parse_type()?
+                    } else {
+                        Type::Unknown
+                    };
+                    let init = if matches!(self.peek(), Some(Ok((Token::EQ, _)))) {
+                        self.next()?;
+                        Some(Box::new(self.expr()?))
+                    } else {
+                        None
+                    };
+                    Ok(Expr::GlobalVar(name, is_pub, ty, init, span))
                 }
                 Ok((Token::FUN, _)) => {
                     self.next()?;
@@ -259,7 +294,8 @@ impl<'a> Parser<'a> {
                         }
                         Some(Ok((Token::LPAREN, _))) => Err(ParserError::UnexpectedToken {
                             expected: Some(Token::IDENT(
-                                "': ' for an extern variable (functions use fun(extern) ...)".to_string(),
+                                "': ' for an extern variable (functions use fun(extern) ...)"
+                                    .to_string(),
                             )),
                             found: Token::LPAREN,
                             span,
@@ -1157,6 +1193,14 @@ impl<'a> Parser<'a> {
                         let val = self.expr()?;
                         return Ok(Expr::SubAssign(name, Box::new(val), span));
                     }
+                    if let Some(Ok((Token::PLUSPLUS, _))) = self.peek() {
+                        self.next()?;
+                        return Ok(Expr::Inc(name, span));
+                    }
+                    if let Some(Ok((Token::MINUSMINUS, _))) = self.peek() {
+                        self.next()?;
+                        return Ok(Expr::Dec(name, span));
+                    }
                     return Ok(Expr::Var(name, span));
                 }
                 Ok((Token::MINUS, span)) => {
@@ -1234,6 +1278,36 @@ impl<'a> Parser<'a> {
                 span,
             })
         }
+    }
+
+    fn parse_global_annotation(&mut self, kw: &str) -> Result<bool, ParserError> {
+        let mut is_pub = false;
+        if matches!(self.peek(), Some(Ok((Token::LPAREN, _)))) {
+            self.next()?;
+            let (token, span) = self.next()?;
+            match token {
+                Token::IDENT(s) if s == "pub" => is_pub = true,
+                token => {
+                    return Err(ParserError::UnexpectedToken {
+                        expected: Some(Token::IDENT("ANNOTATION (pub)".to_string())),
+                        found: token,
+                        span,
+                    });
+                }
+            }
+            self.expect(Token::RPAREN)?;
+        }
+        if !matches!(self.peek(), Some(Ok((Token::IDENT(_), _)))) {
+            return Err(ParserError::UnexpectedToken {
+                expected: Some(Token::IDENT(format!("{}(pub) NAME", kw).to_string())),
+                found: match self.peek().cloned() {
+                    Some(Ok((t, _))) => t,
+                    _ => Token::EOF,
+                },
+                span: self.last_span,
+            });
+        }
+        Ok(is_pub)
     }
 
     fn get_params_list(&mut self) -> Result<Vec<(String, Type)>, ParserError> {

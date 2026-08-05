@@ -261,7 +261,11 @@ impl AsmCodeGen {
         Ok(())
     }
 
-    pub(super) fn store_global_xmm(&mut self, dst: &IROperand, reg: Reg) -> Result<(), CodeGenError> {
+    pub(super) fn store_global_xmm(
+        &mut self,
+        dst: &IROperand,
+        reg: Reg,
+    ) -> Result<(), CodeGenError> {
         let IROperand::Global(name) = dst else {
             return Err(CodeGenError::InvalidOperand {
                 message: "store_global_xmm requires a global operand".to_string(),

@@ -167,10 +167,18 @@ pub(super) fn hoist_lambdas(
             Box::new(hoist_lambdas(*val, lambda_counter, lambda_map)),
             crate::compiler::Span::new(0, 0),
         ),
-        Expr::ConstDecl(name, ty, val, _) => Expr::ConstDecl(
+        Expr::ConstDecl(name, ty, val, is_pub, _) => Expr::ConstDecl(
             name,
             ty,
             Box::new(hoist_lambdas(*val, lambda_counter, lambda_map)),
+            is_pub,
+            crate::compiler::Span::new(0, 0),
+        ),
+        Expr::GlobalVar(name, is_pub, ty, val, _) => Expr::GlobalVar(
+            name,
+            is_pub,
+            ty,
+            val.map(|v| Box::new(hoist_lambdas(*v, lambda_counter, lambda_map))),
             crate::compiler::Span::new(0, 0),
         ),
         Expr::VarAssign(name, val, _) => Expr::VarAssign(

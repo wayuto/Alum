@@ -274,22 +274,30 @@ impl IRGen {
     }
 
     fn extern_op(&self, name: &str) -> Option<Operand> {
-        if self.extern_vars.contains_key(name) {
+        if self.extern_vars.contains_key(name) || self.global_storage.contains_key(name) {
             Some(Operand::Global(name.to_string()))
         } else {
             None
         }
     }
 
+    fn glob_ir_type(&self, name: &str) -> Option<IRType> {
+        if let Some(t) = self.extern_vars.get(name) {
+            Some(Context::type2ir_type(t))
+        } else {
+            self.global_storage.get(name).map(|(t, _, _)| t.clone())
+        }
+    }
+
     fn extern_load_op(&self, name: &str) -> Option<Op> {
-        self.extern_vars.get(name).map(|t| match Context::type2ir_type(t) {
+        self.glob_ir_type(name).map(|t| match t {
             IRType::Float => Op::FGlobLoad,
             _ => Op::GlobLoad,
         })
     }
 
     fn extern_store_op(&self, name: &str) -> Option<Op> {
-        self.extern_vars.get(name).map(|t| match Context::type2ir_type(t) {
+        self.glob_ir_type(name).map(|t| match t {
             IRType::Float => Op::FGlobStore,
             _ => Op::GlobStore,
         })
@@ -415,7 +423,7 @@ impl IRGen {
                 Ok(ctx.new_tmp(IRType::Void))
             }
 
-            Expr::ConstDecl(name, typ, value, _) => {
+            Expr::ConstDecl(name, typ, value, _, _) => {
                 let resolved_typ =
                     if matches!(typ, Type::Unknown | Type::TypeVar(_) | Type::Param(_)) {
                         self.expr_high_type(&value, ctx)
@@ -449,6 +457,8 @@ impl IRGen {
                 }
                 Ok(ctx.new_tmp(IRType::Void))
             }
+
+            Expr::GlobalVar(_, _, _, _, _) => Ok(ctx.new_tmp(IRType::Void)),
 
             Expr::VarAssign(name, value, _) => {
                 let value = self.compile_expr(*value, ctx)?;
@@ -516,8 +526,7 @@ impl IRGen {
                         }),
                     }
                     Ok(res_tmp)
-                } else if let Some(ty) = self.extern_vars.get(&name).cloned() {
-                    let ir_type = Context::type2ir_type(&ty);
+                } else if let Some(ir_type) = self.glob_ir_type(&name) {
                     let res_tmp = ctx.new_tmp(ir_type.clone());
                     let op = match ir_type {
                         IRType::Float => Op::FGlobLoad,
@@ -864,7 +873,8 @@ impl IRGen {
             }
 
             Expr::AddAssign(name, value, _) => {
-                let is_extern = self.extern_vars.contains_key(name.as_str());
+                let is_extern = self.extern_vars.contains_key(name.as_str())
+                    || self.global_storage.contains_key(name.as_str());
                 let var_op = if is_extern {
                     Operand::Global(name.clone())
                 } else {
@@ -917,7 +927,8 @@ impl IRGen {
             }
 
             Expr::SubAssign(name, value, _) => {
-                let is_extern = self.extern_vars.contains_key(name.as_str());
+                let is_extern = self.extern_vars.contains_key(name.as_str())
+                    || self.global_storage.contains_key(name.as_str());
                 let var_op = if is_extern {
                     Operand::Global(name.clone())
                 } else {
@@ -2107,6 +2118,16 @@ impl IRGen {
             }
             Expr::Return(value, _) => self.expr_high_type(value, ctx),
             Expr::ExternVar(_, ty, _) => Some(ty.clone()),
+            Expr::GlobalVar(_, _, ty, value, _) => value
+                .as_ref()
+                .and_then(|v| self.expr_high_type(v, ctx))
+                .or_else(|| {
+                    if matches!(ty, Type::Unknown) {
+                        None
+                    } else {
+                        Some(ty.clone())
+                    }
+                }),
             Expr::IndexAssign(arr, value, _) => self
                 .expr_high_type(value, ctx)
                 .or_else(|| self.index_info(arr, ctx).0),

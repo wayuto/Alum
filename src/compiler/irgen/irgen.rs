@@ -1,5 +1,5 @@
 use super::context::Context;
-use super::ir::{IRConst, IRType, IRProgram, Op};
+use super::ir::{IRConst, IRGlobalVar, IRProgram, IRType, Op};
 use crate::compiler::{
     codegen::CodeGenError,
     irgen::IRGen,
@@ -16,7 +16,12 @@ impl IRGen {
             match expr {
                 Expr::FuncDecl(name, attrs, type_params, params, ret_type, body, _) => {
                     if type_params.is_empty() {
-                        self.func_decl(name.clone(), attrs.clone(), params.clone(), ret_type.clone())?;
+                        self.func_decl(
+                            name.clone(),
+                            attrs.clone(),
+                            params.clone(),
+                            ret_type.clone(),
+                        )?;
                         self.func_high_returns
                             .insert(name.clone(), ret_type.clone());
                     } else {
@@ -56,6 +61,7 @@ impl IRGen {
             .cloned()
             .collect();
         self.store_global_consts(&const_decls)?;
+        self.store_global_vars(&program.body)?;
 
         for expr in program.body {
             match expr {
@@ -64,7 +70,7 @@ impl IRGen {
                         self.compile_fn(name, params, *body)?;
                     }
                 }
-                Expr::ConstDecl(_, _, _, _) => {}
+                Expr::ConstDecl(_, _, _, _, _) | Expr::GlobalVar(_, _, _, _, _) => {}
                 Expr::Int(_, _)
                 | Expr::Float(_, _)
                 | Expr::Bool(_, _)
@@ -91,14 +97,88 @@ impl IRGen {
             functions: take(&mut self.functions),
             constants: take(&mut self.constants),
             extern_vars: take(&mut self.extern_vars).into_keys().collect(),
+            global_vars: take(&mut self.global_emits),
         })
+    }
+
+    pub(super) fn store_global_vars(&mut self, body: &[Expr]) -> Result<(), CodeGenError> {
+        for expr in body {
+            match expr {
+                Expr::GlobalVar(name, is_pub, ty, init, _) => {
+                    let value = match init {
+                        Some(init) => match self.eval_const(init) {
+                            Some((cv, _)) => Some(cv),
+                            None => {
+                                return Err(CodeGenError::TypeError {
+                                    message: format!(
+                                        "initializer of global variable '{}' is not a compile-time constant",
+                                        name
+                                    ),
+                                });
+                            }
+                        },
+                        None => None,
+                    };
+                    let ir_type = if matches!(ty, Type::Unknown) {
+                        value
+                            .as_ref()
+                            .map(|cv| match cv {
+                                IRConst::Float(_) => IRType::Float,
+                                _ => IRType::Int,
+                            })
+                            .unwrap_or(IRType::Int)
+                    } else {
+                        Context::type2ir_type(ty)
+                    };
+                    if !matches!(ir_type, IRType::Int | IRType::Float | IRType::Bool) {
+                        return Err(CodeGenError::TypeError {
+                            message: format!(
+                                "unsupported type '{}' for global mutable variable '{}' (only int/float/bool)",
+                                ty, name
+                            ),
+                        });
+                    }
+                    self.global_storage
+                        .insert(name.clone(), (ir_type.clone(), value.clone(), *is_pub));
+                    self.global_emits.push(IRGlobalVar {
+                        name: name.clone(),
+                        value,
+                        is_pub: *is_pub,
+                    });
+                }
+                Expr::ConstDecl(name, _, _, is_pub, _) => {
+                    if *is_pub {
+                        if let Some((cv, ct)) = self.globals.get(name).cloned() {
+                            if matches!(&cv, IRConst::Str(_) | IRConst::Array(_)) {
+                                return Err(CodeGenError::TypeError {
+                                    message: format!(
+                                        "unsupported value for global constant '{}' (only int/float/bool can be exported)",
+                                        name
+                                    ),
+                                });
+                            }
+                            let _ = ct;
+                            self.global_emits.push(IRGlobalVar {
+                                name: name.clone(),
+                                value: Some(cv),
+                                is_pub: true,
+                            });
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn store_global_consts(&mut self, exprs: &[Expr]) -> Result<(), CodeGenError> {
         let mut pending: Vec<(String, Expr)> = exprs
             .iter()
             .filter_map(|e| match e {
-                Expr::ConstDecl(name, _, value, _) => Some((name.clone(), value.as_ref().clone())),
+                Expr::ConstDecl(name, _, value, _, _) => {
+                    Some((name.clone(), value.as_ref().clone()))
+                }
                 _ => None,
             })
             .collect();

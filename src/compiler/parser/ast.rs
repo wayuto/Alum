@@ -197,7 +197,8 @@ impl Expr {
             | Expr::StrCat(_, _, s)
             | Expr::Var(_, s)
             | Expr::VarDecl(_, _, _, s)
-            | Expr::ConstDecl(_, _, _, s)
+            | Expr::ConstDecl(_, _, _, _, s)
+            | Expr::GlobalVar(_, _, _, _, s)
             | Expr::ExternVar(_, _, s)
             | Expr::VarAssign(_, _, s)
             | Expr::FuncDecl(_, _, _, _, _, _, s)
@@ -289,7 +290,8 @@ pub enum Expr {
     StrCat(Box<Expr>, Box<Expr>, Span),
     Var(String, Span),
     VarDecl(String, Type, Box<Expr>, Span),
-    ConstDecl(String, Type, Box<Expr>, Span),
+    ConstDecl(String, Type, Box<Expr>, bool, Span),
+    GlobalVar(String, bool, Type, Option<Box<Expr>>, Span),
     VarAssign(String, Box<Expr>, Span),
     FuncDecl(
         String,

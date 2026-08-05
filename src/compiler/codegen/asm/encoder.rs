@@ -353,12 +353,12 @@ impl Assembler {
                     self.emit_slice(section, &[0x8d]);
                     self.emit_modrm_sib(section, r.reg_id() & 7, m, offset)?;
                 }
-Operand::DataLabel(l) => {
-                        self.emit_rex(section, true, r.rex_b(), false, false);
-                        self.emit_slice(section, &[0x8d]);
-                        self.emit_rm_disp32(section, r.reg_id() & 7);
-                        self.emit_reloc(section, RelocKind::Pc32, l.clone(), -4);
-                    }
+                Operand::DataLabel(l) => {
+                    self.emit_rex(section, true, r.rex_b(), false, false);
+                    self.emit_slice(section, &[0x8d]);
+                    self.emit_rm_disp32(section, r.reg_id() & 7);
+                    self.emit_reloc(section, RelocKind::Pc32, l.clone(), -4);
+                }
                 _ => return Err(format!("unsupported lea src: {:?}", src)),
             },
             _ => return Err(format!("unsupported instruction: {:?}", asm)),

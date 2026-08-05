@@ -202,6 +202,24 @@ impl AsmCodeGen {
         self.data_asms.push(Asm::Label("neg_mask".to_string()));
         self.data_asms.push(Asm::Dq(vec![0x8000000000000000, 0]));
 
+        for gv in take(&mut self.program.global_vars) {
+            if gv.is_pub {
+                self.data_asms.push(Asm::Global(gv.name.clone()));
+            }
+            self.data_asms.push(Asm::Label(gv.name.clone()));
+            match &gv.value {
+                Some(crate::compiler::irgen::ir::IRConst::Int(v)) => {
+                    self.data_asms.push(Asm::Dq(vec![*v as u64]));
+                }
+                Some(crate::compiler::irgen::ir::IRConst::Float(f)) => {
+                    self.data_asms.push(Asm::Dq(vec![f.into_inner().to_bits()]));
+                }
+                _ => {
+                    self.data_asms.push(Asm::Dq(vec![0]));
+                }
+            }
+        }
+
         for func in take(&mut self.program.functions) {
             self.compile_fn(func)?;
         }

@@ -107,10 +107,8 @@ impl TypeChecker {
                 Expr::FuncDecl(name, attrs, type_params, params, ret_type, _, _) => {
                     let param_types: Vec<Type> = params.iter().map(|(_, t)| t.clone()).collect();
                     if attrs.is_external {
-                        self.functions.insert(
-                            name.clone(),
-                            (Vec::new(), param_types, ret_type.clone()),
-                        );
+                        self.functions
+                            .insert(name.clone(), (Vec::new(), param_types, ret_type.clone()));
                     } else {
                         self.functions.insert(
                             name.clone(),
@@ -120,6 +118,9 @@ impl TypeChecker {
                 }
                 Expr::ExternVar(name, ty, _) => {
                     self.extern_vars.insert(name.clone(), ty.clone());
+                }
+                Expr::GlobalVar(name, _, ty, _, _) => {
+                    self.globals.insert(name.clone(), ty.clone());
                 }
                 Expr::Struct(name, type_params, fields, _) => {
                     self.structs
@@ -206,9 +207,7 @@ impl TypeChecker {
     }
 
     pub(super) fn is_global_scope(&self) -> bool {
-        self.type_stack.len() == 1
-            && self.return_types.is_empty()
-            && self.generic_params.is_empty()
+        self.type_stack.len() == 1 && self.return_types.is_empty() && self.generic_params.is_empty()
     }
 
     pub(super) fn resolve_enum_member(&self, name: &str) -> Result<Option<isize>, Vec<String>> {
@@ -312,11 +311,16 @@ impl TypeChecker {
                 self.resolve_call_type_args(body);
             }
             Expr::VarDecl(_, _, value, _)
-            | Expr::ConstDecl(_, _, value, _)
+            | Expr::ConstDecl(_, _, value, _, _)
             | Expr::VarAssign(_, value, _)
             | Expr::Return(value, _)
             | Expr::AddAssign(_, value, _)
             | Expr::SubAssign(_, value, _) => self.resolve_call_type_args(value),
+            Expr::GlobalVar(_, _, _, value, _) => {
+                if let Some(v) = value {
+                    self.resolve_call_type_args(v);
+                }
+            }
             Expr::ArrayLiteral(elems, _) => {
                 for e in elems.iter_mut() {
                     self.resolve_call_type_args(e);
@@ -388,8 +392,10 @@ impl TypeChecker {
                 .lookup_var(name)
                 .or_else(|| self.constants.get(name).cloned())
                 .or_else(|| self.extern_vars.get(name).cloned())
+                .or_else(|| self.globals.get(name).cloned())
                 .unwrap_or(Type::Primitive(Primitive::Int)),
-            Expr::ConstDecl(_, ty, _, _) => ty.clone(),
+            Expr::ConstDecl(_, ty, _, _, _) => ty.clone(),
+            Expr::GlobalVar(_, _, ty, _, _) => ty.clone(),
             Expr::ExternVar(_, ty, _) => ty.clone(),
             Expr::FAdd(_, _, _)
             | Expr::FSub(_, _, _)

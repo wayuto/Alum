@@ -6,7 +6,7 @@ mod irgen;
 mod lambda;
 
 use crate::compiler::{
-    irgen::ir::{IRConst, IRFunction, IRType},
+    irgen::ir::{IRConst, IRFunction, IRGlobalVar, IRType},
     parser::{Expr, Type},
 };
 use std::collections::HashMap;
@@ -16,6 +16,8 @@ pub struct IRGen {
     pub(super) constants: Vec<IRConst>,
     constant_pool: HashMap<IRConst, usize>,
     pub(super) globals: HashMap<String, (IRConst, IRType)>,
+    pub(super) global_storage: HashMap<String, (IRType, Option<IRConst>, bool)>,
+    pub(super) global_emits: Vec<IRGlobalVar>,
     pub(super) structs: HashMap<String, (Vec<String>, Vec<(String, Type)>)>,
     pub(super) unions: HashMap<String, (Vec<String>, Vec<(String, Type)>)>,
     pub(super) enums: HashMap<String, Vec<(String, isize)>>,
@@ -33,6 +35,8 @@ impl IRGen {
             constants: Vec::new(),
             constant_pool: HashMap::new(),
             globals: HashMap::new(),
+            global_storage: HashMap::new(),
+            global_emits: Vec::new(),
             structs: HashMap::new(),
             unions: HashMap::new(),
             enums: HashMap::new(),

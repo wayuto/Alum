@@ -270,11 +270,37 @@ impl Expr {
                 val.fmt_with_indent(f, indent + 1)?;
                 write!(f, "\n{})", indent_str)
             }
-            Expr::ConstDecl(name, ty, val, _) => {
-                write!(f, "{}ConstDecl(\"{}\": {} =", indent_str, name, ty)?;
+            Expr::ConstDecl(name, ty, val, is_pub, _) => {
+                write!(
+                    f,
+                    "{}ConstDecl{}(\"{}\": {} =",
+                    indent_str,
+                    if *is_pub { "(pub)" } else { "" },
+                    name,
+                    ty
+                )?;
                 write!(f, "\n")?;
                 val.fmt_with_indent(f, indent + 1)?;
                 write!(f, "\n{})", indent_str)
+            }
+            Expr::GlobalVar(name, is_pub, ty, val, _) => {
+                write!(
+                    f,
+                    "{}GlobalVar{}(\"{}\": {}",
+                    indent_str,
+                    if *is_pub { "(pub)" } else { "" },
+                    name,
+                    ty
+                )?;
+                if let Some(val) = val {
+                    write!(f, " =")?;
+                    write!(f, "\n")?;
+                    val.fmt_with_indent(f, indent + 1)?;
+                    write!(f, "\n{})", indent_str)?;
+                } else {
+                    write!(f, ")")?;
+                }
+                Ok(())
             }
             Expr::FuncDecl(name, attrs, type_params, params, ret_type, body, _) => {
                 let param_str: Vec<String> = params

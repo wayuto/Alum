@@ -36,6 +36,10 @@ impl TypeChecker {
                     return Ok(self.resolve_type(ty));
                 }
 
+                if let Some(ty) = self.globals.get(name) {
+                    return Ok(self.resolve_type(ty));
+                }
+
                 match self.resolve_enum_member(name) {
                     Ok(Some(_)) => return Ok(Type::Primitive(Primitive::Int)),
                     Err(enums) => {
@@ -73,7 +77,7 @@ impl TypeChecker {
                 self.declare_var(name, actual_ty.clone());
                 Ok(actual_ty)
             }
-            Expr::ConstDecl(name, ty, value, _) => {
+            Expr::ConstDecl(name, ty, value, _, _) => {
                 let resolved_ty = self.resolve_type(ty);
                 let value_type = self.check_expr(value)?;
 
@@ -108,19 +112,60 @@ impl TypeChecker {
                 }
                 Ok(actual_ty)
             }
+            Expr::GlobalVar(name, _, ty, value, _) => {
+                if !self.is_global_scope() {
+                    return Err(CheckerError::InvalidOperation {
+                        op: "declaration".to_string(),
+                        type_name: format!(
+                            "global mutable variable '{}' (only allowed at top level)",
+                            name
+                        ),
+                        span: span,
+                    });
+                }
+                let resolved_ty = self.resolve_type(ty);
+                if let Some(value) = value {
+                    let value_type = self.check_expr(value)?;
+                    let actual_ty = match &resolved_ty {
+                        Type::Unknown => value_type.clone(),
+                        _ => resolved_ty.clone(),
+                    };
+                    self.unify_types(&actual_ty, &value_type).map_err(|_| {
+                        CheckerError::TypeMismatch {
+                            expected: self.resolve_type(&actual_ty),
+                            found: self.resolve_type(&value_type),
+                            context: format!("global variable declaration '{}'", name),
+                            span: span,
+                        }
+                    })?;
+                    self.globals.insert(name.clone(), actual_ty.clone());
+                    Ok(actual_ty)
+                } else {
+                    if matches!(resolved_ty, Type::Unknown) {
+                        return Err(CheckerError::TypeMismatch {
+                            expected: resolved_ty.clone(),
+                            found: Type::Primitive(Primitive::Void),
+                            context: format!(
+                                "global variable '{}' needs an explicit type or initializer",
+                                name
+                            ),
+                            span: span,
+                        });
+                    }
+                    self.globals.insert(name.clone(), resolved_ty.clone());
+                    Ok(resolved_ty)
+                }
+            }
             Expr::ExternVar(name, ty, _) => {
                 let resolved_ty = self.resolve_type(ty);
                 if self.extern_vars.contains_key(name.as_str()) {
-                    self.unify_types(
-                        &self.extern_vars.get(name).unwrap().clone(),
-                        &resolved_ty,
-                    )
-                    .map_err(|_| CheckerError::TypeMismatch {
-                        expected: self.extern_vars.get(name).unwrap().clone(),
-                        found: resolved_ty.clone(),
-                        context: format!("extern variable '{}'", name),
-                        span: span,
-                    })?;
+                    self.unify_types(&self.extern_vars.get(name).unwrap().clone(), &resolved_ty)
+                        .map_err(|_| CheckerError::TypeMismatch {
+                            expected: self.extern_vars.get(name).unwrap().clone(),
+                            found: resolved_ty.clone(),
+                            context: format!("extern variable '{}'", name),
+                            span: span,
+                        })?;
                 } else {
                     self.extern_vars.insert(name.clone(), resolved_ty.clone());
                 }
@@ -137,6 +182,7 @@ impl TypeChecker {
                 let var_type = self
                     .lookup_var(name)
                     .or_else(|| self.extern_vars.get(name).cloned())
+                    .or_else(|| self.globals.get(name).cloned())
                     .ok_or_else(|| CheckerError::UndefinedVariable(name.clone(), span))?;
                 let value_type = self.check_expr(value)?;
 
@@ -364,6 +410,7 @@ impl TypeChecker {
                 let var_type = self
                     .lookup_var(name)
                     .or_else(|| self.extern_vars.get(name).cloned())
+                    .or_else(|| self.globals.get(name).cloned())
                     .ok_or_else(|| CheckerError::UndefinedVariable(name.clone(), span))?;
                 if !var_type.is_numeric() {
                     return Err(CheckerError::InvalidOperation {
@@ -385,6 +432,7 @@ impl TypeChecker {
                 let var_type = self
                     .lookup_var(name)
                     .or_else(|| self.extern_vars.get(name).cloned())
+                    .or_else(|| self.globals.get(name).cloned())
                     .ok_or_else(|| CheckerError::UndefinedVariable(name.clone(), span))?;
                 let value_type = self.check_expr(value)?;
                 if var_type.is_pointer() {

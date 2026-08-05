@@ -221,6 +221,30 @@ fun(extern) syscall(int, int, int, int): int
 fun(extern) exit(int): void
 ```
 
+## Global Variables
+
+Alum supports global mutable variables and exported constants, which are linkable across translation units.
+
+| Syntax | Meaning |
+| --- | --- |
+| `cst NAME: T = expr` | Compile-time constant (inlined, no runtime symbol) |
+| `cst(pub) NAME: T = expr` | Constant that also exports a read-only data symbol |
+| `mut NAME: T [= expr]` | Global mutable variable (internal linkage, zero-initialized if no init) |
+| `mut(pub) NAME: T [= expr]` | Global mutable variable (external linkage) |
+| `extern NAME: T` | Reference a variable defined in another file or in C |
+
+```al
+cst(pub) LIMIT: int = 100
+mut(pub) counter: int = 0
+
+fun main(): int {
+    counter = counter + 1
+    return counter
+}
+```
+
+A `mut(pub)`/`cst(pub)` definition can be consumed from another `.al` file with `extern NAME: T`, and from C as a plain global symbol. Initializers must be compile-time constants; only `int`/`float`/`bool` globals are currently supported.
+
 ## Building from Source
 
 ```bash

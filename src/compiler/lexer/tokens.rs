@@ -47,6 +47,7 @@ pub enum Token {
     SEMICOLON,
     LET,
     CST,
+    MUT,
     FUN,
     FOR,
     IN,

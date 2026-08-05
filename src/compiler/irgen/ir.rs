@@ -118,8 +118,16 @@ pub struct IRFunction {
 }
 
 #[derive(Debug, Clone)]
+pub struct IRGlobalVar {
+    pub name: String,
+    pub value: Option<IRConst>,
+    pub is_pub: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct IRProgram {
     pub functions: Vec<IRFunction>,
     pub constants: Vec<IRConst>,
     pub extern_vars: Vec<String>,
+    pub global_vars: Vec<IRGlobalVar>,
 }
