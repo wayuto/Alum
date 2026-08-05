@@ -9,8 +9,10 @@ crate-type = ["staticlib"]
 path = "src/lib.rs"
 
 [profile.release]
-panic = "abort"
 opt-level = 3
+lto = "fat"      
+codegen-units = 1
+panic = "abort"
 
 [profile.dev]
 panic = "abort"

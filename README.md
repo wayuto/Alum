@@ -2,6 +2,9 @@
 
 Alum is a modern, systems programming language designed for simplicity and performance. It features a clean syntax, strong static typing, and compiles to native machine code via an optimizing IR pipeline.
 
+## Guide
+[Click Here](https://cr0.dpdns.org)
+
 ## Features
 
 - **Native Compilation**: Compiles directly to machine code via built-in assembler + LLD
