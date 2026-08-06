@@ -31,7 +31,7 @@ npx vsce package
 The resulting `.vsix` file can be installed via:
 
 ```bash
-code --install-alum-vscode-0.9.6.vsix
+code --install-alum-vscode-0.9.7.vsix
 ```
 
 ## Building
@@ -41,4 +41,4 @@ npm install
 npx vsce package
 ```
 
-This generates `alum-vscode-0.9.6.vsix` in the project root.
+This generates `alum-vscode-0.9.7.vsix` in the project root.
