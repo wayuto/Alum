@@ -247,7 +247,6 @@ fn is_pure(
         return false;
     };
     if *is_external {
-        // Calling any extern function from a pure context is forbidden.
         memo.insert(name.to_string(), false);
         return false;
     }

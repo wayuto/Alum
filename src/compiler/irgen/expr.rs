@@ -396,7 +396,12 @@ impl IRGen {
                     } else {
                         typ.clone()
                     };
-                let value = self.compile_expr(*value, ctx)?;
+                let value: Operand = match self.eval_const(&value) {
+                    Some((cv, IRType::Int | IRType::Float | IRType::Bool)) => {
+                        Operand::ConstIdx(self.get_const_index(cv))
+                    }
+                    _ => self.compile_expr(*value, ctx)?,
+                };
                 let var_ir_type = Context::type2ir_type(&resolved_typ);
 
                 if matches!(var_ir_type, IRType::Array) {

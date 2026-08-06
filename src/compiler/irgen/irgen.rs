@@ -210,7 +210,7 @@ impl IRGen {
         Ok(())
     }
 
-    fn eval_const(&self, expr: &Expr) -> Option<(IRConst, IRType)> {
+    pub(super) fn eval_const(&self, expr: &Expr) -> Option<(IRConst, IRType)> {
         match expr {
             Expr::Int(n, _) => Some((IRConst::Int(*n as i64), IRType::Int)),
             Expr::Float(f, _) => Some((IRConst::Float(OrderedFloat(*f)), IRType::Float)),
@@ -280,11 +280,7 @@ impl IRGen {
         }
     }
 
-    /// Slow-path compile-time evaluation: compile the pure function bodies from
-    /// the source program plus the target expression into bytecode, run it on the
-    /// GosVM, and translate the resulting value. Returns `None` if the expression
-    /// is not (purely) compile-time evaluable.
-    fn eval_const_vm(&self, expr: &Expr) -> Option<(IRConst, IRType)> {
+    pub(super) fn eval_const_vm(&self, expr: &Expr) -> Option<(IRConst, IRType)> {
         use crate::compiler::bytecode::{Compiler, GVM};
 
         let mut body: Vec<Expr> = self
