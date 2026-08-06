@@ -4,6 +4,7 @@ mod func;
 pub mod ir;
 mod irgen;
 mod lambda;
+mod purity;
 
 use crate::compiler::{
     irgen::ir::{IRConst, IRFunction, IRGlobalVar, IRType},
@@ -26,6 +27,7 @@ pub struct IRGen {
     pub(super) mono_in_progress: Vec<String>,
     pub(super) lambda_counter: u32,
     pub(super) extern_vars: HashMap<String, Type>,
+    pub(super) program_body: Vec<Expr>,
 }
 
 impl IRGen {
@@ -45,6 +47,7 @@ impl IRGen {
             mono_in_progress: Vec::new(),
             lambda_counter: 0,
             extern_vars: HashMap::new(),
+            program_body: Vec::new(),
         }
     }
 }

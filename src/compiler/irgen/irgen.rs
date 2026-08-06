@@ -11,6 +11,9 @@ use std::mem::take;
 impl IRGen {
     pub fn compile(&mut self, program: Program) -> Result<IRProgram, CodeGenError> {
         let program = self.lambda2function(program);
+        self.program_body = program.body.clone();
+
+        super::purity::check_pure_functions(&self.program_body)?;
 
         for expr in &program.body {
             match expr {
@@ -273,6 +276,46 @@ impl IRGen {
                     Some((IRConst::Int(v), IRType::Int))
                 }
             }
+            _ => self.eval_const_vm(expr),
+        }
+    }
+
+    /// Slow-path compile-time evaluation: compile the pure function bodies from
+    /// the source program plus the target expression into bytecode, run it on the
+    /// GosVM, and translate the resulting value. Returns `None` if the expression
+    /// is not (purely) compile-time evaluable.
+    fn eval_const_vm(&self, expr: &Expr) -> Option<(IRConst, IRType)> {
+        use crate::compiler::bytecode::{Compiler, GVM};
+
+        let mut body: Vec<Expr> = self
+            .program_body
+            .iter()
+            .filter(|e| {
+                matches!(e, Expr::FuncDecl(_, attrs, ..) if attrs.is_pure && !attrs.is_external)
+            })
+            .cloned()
+            .collect();
+        body.push(expr.clone());
+        let program = Program { body };
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let bc = Compiler::new().compile(program);
+            let mut vm = GVM::new(bc);
+            vm.run();
+            vm.result()
+        }))
+        .ok()
+        .flatten()?;
+
+        match result {
+            crate::compiler::bytecode::Value::Int(i) => Some((IRConst::Int(i), IRType::Int)),
+            crate::compiler::bytecode::Value::Float(f) => {
+                Some((IRConst::Float(OrderedFloat(f)), IRType::Float))
+            }
+            crate::compiler::bytecode::Value::Str(s) => Some((IRConst::Str(s), IRType::String)),
+            crate::compiler::bytecode::Value::Bool(b) => {
+                Some((IRConst::Int(if b { 1 } else { 0 }), IRType::Bool))
+            }
             _ => None,
         }
     }
@@ -319,5 +362,44 @@ impl IRGen {
                 message: "not a binary operation".to_string(),
             }),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compiler::lexer::Lexer;
+    use crate::compiler::parser::Parser;
+    use std::collections::HashMap;
+
+    fn compile_consts(src: &str) -> HashMap<String, IRConst> {
+        let lexer = Lexer::new(src);
+        let mut parser = Parser::new(lexer);
+        let program = parser.parse().expect("parse failed");
+        let mut irgen = IRGen::new();
+        irgen.compile(program).expect("compile failed");
+        irgen
+            .globals
+            .into_iter()
+            .map(|(k, (c, _))| (k, c))
+            .collect()
+    }
+
+    #[test]
+    fn const_via_pure_function() {
+        let src = "fun(pure) fact(n: int): int {
+    if n < 2 { return 1 }
+    return n * fact(n - 1)
+}
+cst FACT: int = fact(10)
+cst FIB: int = fib(20)
+fun(pure) fib(n: int): int {
+    if n < 2 { return n }
+    return fib(n - 1) + fib(n - 2)
+}
+";
+        let consts = compile_consts(src);
+        assert_eq!(consts.get("FACT"), Some(&IRConst::Int(3628800)));
+        assert_eq!(consts.get("FIB"), Some(&IRConst::Int(6765)));
     }
 }

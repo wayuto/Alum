@@ -1,3 +1,4 @@
+pub mod bytecode;
 pub mod codegen;
 pub mod error;
 pub mod irgen;
