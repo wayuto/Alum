@@ -348,7 +348,7 @@ impl IRGen {
             | TypeDef(_) | Struct(..) | Union(..) | Enum(..) => false,
             Var(..) => true,
             Call(f, _, args, _) => {
-                if self.expr_has_var(f) {
+                if !matches!(f.as_ref(), Var(..)) && self.expr_has_var(f) {
                     return true;
                 }
                 args.iter().any(|a| self.expr_has_var(a))
