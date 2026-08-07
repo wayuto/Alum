@@ -1,3 +1,5 @@
+use std::hash::{Hash, Hasher};
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Int(i64),
@@ -5,6 +7,32 @@ pub enum Value {
     Bool(bool),
     Str(String),
     Void,
+}
+
+impl Eq for Value {}
+
+impl Hash for Value {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match self {
+            Value::Int(i) => {
+                0u8.hash(state);
+                i.hash(state);
+            }
+            Value::Float(f) => {
+                1u8.hash(state);
+                f.to_bits().hash(state);
+            }
+            Value::Bool(b) => {
+                2u8.hash(state);
+                b.hash(state);
+            }
+            Value::Str(s) => {
+                3u8.hash(state);
+                s.hash(state);
+            }
+            Value::Void => 4u8.hash(state),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]

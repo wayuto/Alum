@@ -1,11 +1,13 @@
 use std::process::exit;
 
 use crate::compiler::bytecode::{Bytecode, Op, Value};
+use std::collections::HashMap;
 
 struct CallStack {
     return_ip: usize,
     base_slot: usize,
     operand_base: usize,
+    cache_key: Option<(usize, Vec<Value>)>,
 }
 
 pub struct GVM {
@@ -16,6 +18,7 @@ pub struct GVM {
     curr_base_slot: usize,
     curr_operand_base: usize,
     bytecode: Bytecode,
+    memo: HashMap<(usize, Vec<Value>), Value>,
 }
 
 impl GVM {
@@ -28,6 +31,7 @@ impl GVM {
             curr_base_slot: 0,
             curr_operand_base: 0,
             bytecode,
+            memo: HashMap::new(),
         }
     }
 
@@ -345,10 +349,17 @@ impl GVM {
                     let args: Vec<Value> = (0..args_count).map(|_| self.pop()).collect();
                     self.stack.truncate(operand_base);
 
+                    let key = (target, args.clone());
+                    if let Some(cached) = self.memo.get(&key).cloned() {
+                        self.stack.push(cached);
+                        continue;
+                    }
+
                     self.call_stack.push(CallStack {
                         return_ip: self.ip,
                         base_slot: self.curr_base_slot,
                         operand_base,
+                        cache_key: Some(key),
                     });
 
                     let new_base_slot = self.slots.len();
@@ -365,6 +376,9 @@ impl GVM {
                         panic!("RuntimeError: Call stack underflow on RET");
                     }
                     let frame = self.call_stack.pop().unwrap();
+                    if let Some(key) = frame.cache_key {
+                        self.memo.insert(key, val.clone());
+                    }
                     let frame_size = self.slots.len() - self.curr_base_slot;
                     self.slots
                         .drain(self.curr_base_slot..self.curr_base_slot + frame_size);
