@@ -297,6 +297,9 @@ impl IRGen {
         if !self.vm_expr_safe(expr, &pure_fns) {
             return None;
         }
+        if self.expr_has_var(expr) {
+            return None;
+        }
         for decl in self.program_body.iter() {
             if let Expr::FuncDecl(_, attrs, _, _, _, body, _) = decl {
                 if attrs.is_pure && !attrs.is_external && !self.vm_expr_safe(body, &pure_fns) {
@@ -335,6 +338,84 @@ impl IRGen {
                 Some((IRConst::Int(if b { 1 } else { 0 }), IRType::Bool))
             }
             _ => None,
+        }
+    }
+
+    fn expr_has_var(&self, expr: &Expr) -> bool {
+        use Expr::*;
+        match expr {
+            Int(..) | Float(..) | Bool(..) | String(..) | Nil(_) | Break(_) | Continue(_)
+            | TypeDef(_) | Struct(..) | Union(..) | Enum(..) => false,
+            Var(..) => true,
+            Call(f, _, args, _) => {
+                if self.expr_has_var(f) {
+                    return true;
+                }
+                args.iter().any(|a| self.expr_has_var(a))
+            }
+            Block(stmts, _) => stmts.iter().any(|s| self.expr_has_var(s)),
+            If(c, t, e, _) => {
+                self.expr_has_var(c)
+                    || self.expr_has_var(t)
+                    || e.as_ref().map(|x| self.expr_has_var(x)).unwrap_or(false)
+            }
+            While(c, b, _) => self.expr_has_var(c) || self.expr_has_var(b),
+            For(_, i, b, _) => self.expr_has_var(i) || self.expr_has_var(b),
+            Range(l, r, _) => self.expr_has_var(l) || self.expr_has_var(r),
+            Match(s, arms, d, _) => {
+                self.expr_has_var(s)
+                    || arms
+                        .iter()
+                        .any(|(p, a)| self.expr_has_var(p) || self.expr_has_var(a))
+                    || d.as_ref().map(|x| self.expr_has_var(x)).unwrap_or(false)
+            }
+            Return(v, _) => self.expr_has_var(v),
+            Lambda(_, b, _, _) => self.expr_has_var(b),
+            FuncDecl(_, _, _, _, _, b, _) => self.expr_has_var(b),
+            GlobalVar(..) | ExternVar(..) => false,
+            VarDecl(_, _, v, _) | ConstDecl(_, _, v, _, _) => self.expr_has_var(v),
+            Not(e, _) | Neg(e, _) | FNeg(e, _) | AddressOf(e, _) | Deref(e, _) => {
+                self.expr_has_var(e)
+            }
+            Add(l, r, _)
+            | Sub(l, r, _)
+            | Mul(l, r, _)
+            | Div(l, r, _)
+            | Mod(l, r, _)
+            | FAdd(l, r, _)
+            | FSub(l, r, _)
+            | FMul(l, r, _)
+            | FDiv(l, r, _)
+            | Eq(l, r, _)
+            | Ne(l, r, _)
+            | Lt(l, r, _)
+            | Le(l, r, _)
+            | Gt(l, r, _)
+            | Ge(l, r, _)
+            | FEq(l, r, _)
+            | FNe(l, r, _)
+            | FLt(l, r, _)
+            | FLe(l, r, _)
+            | FGt(l, r, _)
+            | FGe(l, r, _)
+            | Xor(l, r, _)
+            | LAnd(l, r, _)
+            | LOr(l, r, _)
+            | StrCat(l, r, _)
+            | Index(l, r, _)
+            | DerefAssign(l, r, _) => self.expr_has_var(l) || self.expr_has_var(r),
+            IndexAssign(o, v, _) | MemberAssign(o, _, v, _) => {
+                self.expr_has_var(o) || self.expr_has_var(v)
+            }
+            ArrayLiteral(items, _) => items.iter().any(|it| self.expr_has_var(it)),
+            ArrayFill(_, len, _) => self.expr_has_var(len),
+            StructLiteral(_, _, fields, _) | UnionLiteral(_, _, fields, _) => {
+                fields.iter().any(|(_, v)| self.expr_has_var(v))
+            }
+            MemberAccess(o, _, _) => self.expr_has_var(o),
+            Inc(..) | Dec(..) => false,
+            VarAssign(_, v, _) | AddAssign(_, v, _) | SubAssign(_, v, _) => self.expr_has_var(v),
+            FString(parts, _) => parts.iter().any(|p| self.expr_has_var(p)),
         }
     }
 
@@ -387,21 +468,17 @@ impl IRGen {
             }
             Return(v, _) => self.vm_expr_safe(v, pure_fns),
             Lambda(_, b, _, _) => self.vm_expr_safe(b, pure_fns),
-            VarDecl(_, _, v, _)
-            | ConstDecl(_, _, v, _, _)
-            | Not(v, _)
-            | Neg(v, _)
-            | FNeg(v, _)
-            | AddressOf(v, _)
-            | Deref(v, _) => self.vm_expr_safe(v, pure_fns),
+            VarDecl(_, _, v, _) | ConstDecl(_, _, v, _, _) | Not(v, _) | Neg(v, _) | FNeg(v, _) => {
+                self.vm_expr_safe(v, pure_fns)
+            }
+            AddressOf(..) => false,
+            Deref(..) => false,
             VarAssign(_, v, _) | AddAssign(_, v, _) | SubAssign(_, v, _) => {
                 self.vm_expr_safe(v, pure_fns)
             }
             Inc(..) | Dec(..) => true,
             IndexAssign(..) => false,
-            MemberAssign(o, _, v, _) => {
-                self.vm_expr_safe(o, pure_fns) && self.vm_expr_safe(v, pure_fns)
-            }
+            MemberAssign(..) => false,
             Add(l, r, _)
             | Sub(l, r, _)
             | Mul(l, r, _)
@@ -426,17 +503,14 @@ impl IRGen {
             | Xor(l, r, _)
             | LAnd(l, r, _)
             | LOr(l, r, _)
-            | StrCat(l, r, _)
-            | DerefAssign(l, r, _) => {
-                self.vm_expr_safe(l, pure_fns) && self.vm_expr_safe(r, pure_fns)
-            }
+            | StrCat(l, r, _) => self.vm_expr_safe(l, pure_fns) && self.vm_expr_safe(r, pure_fns),
+            DerefAssign(..) => false,
             Index(..) => false,
             ArrayLiteral(..) => false,
             ArrayFill(..) => false,
-            StructLiteral(_, _, fields, _) | UnionLiteral(_, _, fields, _) => {
-                fields.iter().all(|(_, v)| self.vm_expr_safe(v, pure_fns))
-            }
-            MemberAccess(o, _, _) => self.vm_expr_safe(o, pure_fns),
+            StructLiteral(..) => false,
+            UnionLiteral(..) => false,
+            MemberAccess(..) => false,
             FString(parts, _) => parts.iter().all(|p| self.vm_expr_safe(p, pure_fns)),
         }
     }

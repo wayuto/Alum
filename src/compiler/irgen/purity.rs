@@ -141,9 +141,16 @@ fn classify(
         VarDecl(_, _, value, _) => classify(fn_name, value, decls, globals, in_progress, memo),
         ConstDecl(_, _, value, _, _) => classify(fn_name, value, decls, globals, in_progress, memo),
 
-        Not(e, _) | Neg(e, _) | FNeg(e, _) | AddressOf(e, _) | Deref(e, _) => {
+        Not(e, _) | Neg(e, _) | FNeg(e, _) => {
             classify(fn_name, e, decls, globals, in_progress, memo)
         }
+        AddressOf(e, _) | Deref(e, _) => Err(format!(
+            "dereference or take address '{}' (pointer access escapes local state)",
+            match &**e {
+                Var(name, _) => name.clone(),
+                _ => "<expr>".to_string(),
+            }
+        )),
         Add(l, r, _)
         | Sub(l, r, _)
         | Mul(l, r, _)
@@ -169,10 +176,12 @@ fn classify(
         | LAnd(l, r, _)
         | LOr(l, r, _)
         | StrCat(l, r, _)
-        | Index(l, r, _)
-        | DerefAssign(l, r, _) => {
+        | Index(l, r, _) => {
             classify(fn_name, l, decls, globals, in_progress, memo)?;
             classify(fn_name, r, decls, globals, in_progress, memo)
+        }
+        DerefAssign(l, r, _) => {
+            Err("pointer store (write through pointer) in a pure function".to_string())
         }
         IndexAssign(obj, value, _) => {
             classify(fn_name, obj, decls, globals, in_progress, memo)?;
