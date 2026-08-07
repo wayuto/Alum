@@ -180,7 +180,7 @@ fn classify(
             classify(fn_name, l, decls, globals, in_progress, memo)?;
             classify(fn_name, r, decls, globals, in_progress, memo)
         }
-        DerefAssign(l, r, _) => {
+        DerefAssign(_, _, _) => {
             Err("pointer store (write through pointer) in a pure function".to_string())
         }
         IndexAssign(obj, value, _) => {
