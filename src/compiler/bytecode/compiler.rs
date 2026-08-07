@@ -94,6 +94,7 @@ pub struct Compiler {
     scopes: Vec<Scope>,
     next_slot: u32,
     funcs: Vec<HashMap<String, Func>>,
+    current_func: Option<(String, u32)>,
 }
 
 impl Compiler {
@@ -104,6 +105,7 @@ impl Compiler {
             scopes: Vec::new(),
             next_slot: 0,
             funcs: Vec::new(),
+            current_func: None,
         }
     }
 
@@ -362,8 +364,20 @@ impl Compiler {
             }
 
             Expr::Return(value, _) => {
-                self.compile_expr(value);
-                self.emit(Op::RET, &[]);
+                if let Some((target, param_count)) = self.tail_self_call(value) {
+                    if let Expr::Call(_, _, args, _) = value.as_ref() {
+                        for arg in args {
+                            self.compile_expr(arg);
+                        }
+                    }
+                    self.emit(
+                        Op::TAILCALL,
+                        &[((target >> 8) & 0xFF), (target & 0xFF), param_count as u32],
+                    );
+                } else {
+                    self.compile_expr(value);
+                    self.emit(Op::RET, &[]);
+                }
             }
             Expr::Block(body, _) => {
                 self.enter_scope();
@@ -475,6 +489,7 @@ impl Compiler {
             },
         );
 
+        self.current_func = Some((name.to_string(), func_addr));
         self.enter_scope();
         for (param, _) in params {
             self.decl_var(param);
@@ -486,6 +501,7 @@ impl Compiler {
             _ => self.emit(Op::RET, &[]),
         }
         self.exit_scope();
+        self.current_func = None;
 
         self.patch_jump_addr(jump_addr + 1, self.code.len() as u32);
     }
@@ -493,5 +509,21 @@ impl Compiler {
     fn patch_jump_addr(&mut self, pos: u32, addr: u32) {
         self.code[pos as usize] = ((addr >> 8) & 0xff) as u8;
         self.code[(pos + 1) as usize] = (addr & 0xff) as u8;
+    }
+
+    fn tail_self_call(&self, value: &Expr) -> Option<(u32, usize)> {
+        let Expr::Call(callee, _, args, _) = value else {
+            return None;
+        };
+        let Expr::Var(name, _) = callee.as_ref() else {
+            return None;
+        };
+        let Some((fname, faddr)) = &self.current_func else {
+            return None;
+        };
+        if name != fname {
+            return None;
+        }
+        Some((*faddr, args.len()))
     }
 }

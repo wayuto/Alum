@@ -79,6 +79,7 @@ pub enum Op {
     RET,
     EXIT,
     HALT,
+    TAILCALL,
 }
 impl Op {
     pub fn from_u8(op: u8) -> Option<Self> {
@@ -125,6 +126,7 @@ impl Op {
             39 => Some(Op::RET),
             40 => Some(Op::EXIT),
             41 => Some(Op::HALT),
+            42 => Some(Op::TAILCALL),
             _ => None,
         }
     }
@@ -174,6 +176,7 @@ impl Op {
             Op::RET => "RET".to_string(),
             Op::EXIT => "EXIT".to_string(),
             Op::HALT => "HALT".to_string(),
+            Op::TAILCALL => "TAIL_CALL".to_string(),
         }
     }
 
@@ -222,6 +225,7 @@ impl Op {
             Op::RET => 0,
             Op::EXIT => 0,
             Op::HALT => 0,
+            Op::TAILCALL => 3,
         }
     }
 }

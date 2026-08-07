@@ -370,6 +370,26 @@ impl GVM {
                     self.curr_operand_base = operand_base;
                     self.ip = target;
                 }
+                Op::TAILCALL => {
+                    let high = self.read() as usize;
+                    let low = self.read() as usize;
+                    let args_count = self.read() as usize;
+                    let target = (high << 8) | low;
+
+                    let operand_base = self.stack.len() - args_count;
+                    let args: Vec<Value> = (0..args_count).map(|_| self.pop()).collect();
+                    self.stack.truncate(operand_base);
+
+                    for i in 0..args_count {
+                        let index = self.curr_base_slot + i;
+                        if index >= self.slots.len() {
+                            self.slots.resize(index + 1, Value::Void);
+                        }
+                        self.slots[index] = args[args_count - i - 1].clone();
+                    }
+                    self.slots.truncate(self.curr_base_slot + args_count);
+                    self.ip = target;
+                }
                 Op::RET => {
                     let val = self.pop();
                     if self.call_stack.is_empty() {
