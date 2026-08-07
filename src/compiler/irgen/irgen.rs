@@ -297,6 +297,13 @@ impl IRGen {
         if !self.vm_expr_safe(expr, &pure_fns) {
             return None;
         }
+        for decl in self.program_body.iter() {
+            if let Expr::FuncDecl(_, attrs, _, _, _, body, _) = decl {
+                if attrs.is_pure && !attrs.is_external && !self.vm_expr_safe(body, &pure_fns) {
+                    return None;
+                }
+            }
+        }
 
         let mut body: Vec<Expr> = self
             .program_body
@@ -391,7 +398,8 @@ impl IRGen {
                 self.vm_expr_safe(v, pure_fns)
             }
             Inc(..) | Dec(..) => true,
-            IndexAssign(o, v, _) | MemberAssign(o, _, v, _) => {
+            IndexAssign(..) => false,
+            MemberAssign(o, _, v, _) => {
                 self.vm_expr_safe(o, pure_fns) && self.vm_expr_safe(v, pure_fns)
             }
             Add(l, r, _)
@@ -419,12 +427,12 @@ impl IRGen {
             | LAnd(l, r, _)
             | LOr(l, r, _)
             | StrCat(l, r, _)
-            | Index(l, r, _)
             | DerefAssign(l, r, _) => {
                 self.vm_expr_safe(l, pure_fns) && self.vm_expr_safe(r, pure_fns)
             }
-            ArrayLiteral(items, _) => items.iter().all(|it| self.vm_expr_safe(it, pure_fns)),
-            ArrayFill(_, len, _) => self.vm_expr_safe(len, pure_fns),
+            Index(..) => false,
+            ArrayLiteral(..) => false,
+            ArrayFill(..) => false,
             StructLiteral(_, _, fields, _) | UnionLiteral(_, _, fields, _) => {
                 fields.iter().all(|(_, v)| self.vm_expr_safe(v, pure_fns))
             }
