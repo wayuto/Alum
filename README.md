@@ -1,18 +1,41 @@
 # Alum Programming Language
 
-Alum is a modern, systems programming language designed for simplicity and performance. It features a clean syntax, strong static typing, and compiles to native machine code via an optimizing IR pipeline.
+Alum is a modern, systems programming language designed for simplicity and performance. It features a clean syntax, strong static typing, and compiles to native machine code via an optimizing IR pipeline. Currently supports the x86_64 Linux platform.
 
-## Guide
-[Click Here](https://cr0.dpdns.org)
+## 📖 Tutorial
+
+The official tutorial series (中文教程) walks through the language from scratch — installation, syntax, types, and advanced features like FFI, generics, and compile-time evaluation.
+
+**Read the tutorial: [Alum 系列教程](https://cr0.dpdns.org)**
+
+| | |
+|---|---|
+| [01-介绍](https://cr0.dpdns.org/2026/02/26/01-Introduction/) | [10-数组](https://cr0.dpdns.org/2026/03/01/10-Array/) |
+| [02-环境搭建](https://cr0.dpdns.org/2026/02/27/02-Installation/) | [11-指针](https://cr0.dpdns.org/2026/03/01/11-Pointer/) |
+| [03-数据类型](https://cr0.dpdns.org/2026/02/27/03-Types/) | [12-结构体](https://cr0.dpdns.org/2026/03/02/12-Struct/) |
+| [04-变量](https://cr0.dpdns.org/2026/02/27/04-Variable/) | [13-泛型](https://cr0.dpdns.org/2026/03/02/13-Generic/) |
+| [05-代码块](https://cr0.dpdns.org/2026/02/28/05-Block/) | [14-共用体](https://cr0.dpdns.org/2026/08/02/14-Union/) |
+| [06-流程控制](https://cr0.dpdns.org/2026/02/28/06-ProcessControl/) | [15-枚举](https://cr0.dpdns.org/2026/08/02/15-Enum/) |
+| [07-函数](https://cr0.dpdns.org/2026/02/28/07-Function/) | [16-Result与Maybe类型](https://cr0.dpdns.org/2026/08/02/16-Result-Maybe/) |
+| [08-函数式编程](https://cr0.dpdns.org/2026/02/28/08-FP/) | [17-函数注解](https://cr0.dpdns.org/2026/08/06/17-Function-Annotations/) |
+| [09-外部函数接口](https://cr0.dpdns.org/2026/02/28/09-FFI/) | [18-编译时求值](https://cr0.dpdns.org/2026/08/08/18-CTE/) |
 
 ## Features
 
-- **Native Compilation**: Compiles directly to machine code via built-in assembler + LLD
-- **Build Toolkit**: Integrated `almk` build system and `almk run` for project management
-- **Standard Library**: Rich `alum-std` with I/O, strings, vectors, math, and memory management
-- **Statically Typed**: Explicit annotations with `var` type inference, generics, and monomorphic instantiation
-- **Rich Types**: Structs, unions, C-style enums (bare references when unambiguous), arrays, pointers, lambdas, and tagged-style `Result`/`Maybe`
-- **Preprocessor**: `$import`, `$define` macros, and conditional compilation
+- **Native AOT Compilation** — compiles directly to native x86_64 machine code through an optimizing IR pipeline, with a built-in register allocator, assembler, and ELF encoder; links with `rust-lld`
+- **Strong Static Typing** — explicit type annotations on `var`/`cst`, full type inference, and compile-time type checking before code generation
+- **Rich Type System** — `int`, `float`, `bool`, `string`, arrays `T[]`, pointers `*T`, function pointers, structs, unions, C-style enums (bare references when unambiguous), and generics with monomorphic instantiation
+- **Tagged `Result`/`Maybe`** — `Result<T, E>` and `Maybe<T>` built on `struct` + `union` + `enum`, enabling error handling and null-safety
+- **Functional Programming** — lambdas, higher-order functions, first-class function pointers, and block expressions that produce values
+- **Expression-Oriented Control Flow** — `if-else` and `match` are expressions; `for` iterates arrays and ranges (`n..m`); `while` loops; implicit return of the last expression
+- **Function Annotations** — `fun(extern)` for FFI, `fun(pub)` to export symbols, `fun(pure)` to mark side-effect-free functions
+- **Compile-Time Evaluation (CTE)** — `pure` functions are evaluated at compile time by the built-in GosVM bytecode interpreter (e.g. `fib(40)` compiles to a single constant in ~10ms)
+- **F-String Interpolation** — `println(f"value: {x}")` with embedded expressions
+- **C Interop (FFI)** — call C functions directly via `fun(extern)`; memory layout is C-compatible with no conversion overhead
+- **Preprocessor** — `$import`, `$define` macros, and conditional compilation via `$ifdef`/`$ifndef`/`$else`/`$endif`
+- **Build Toolkit** — integrated `almk` build system for project scaffolding, building, running, dependency management, and mixed C/Alum projects
+- **Standard Library** — rich `alum-std` with I/O, string/convert, `Vec`, `Result`/`Maybe`, math, and memory management
+- **VS Code Support** — official syntax highlighting extension in `alum-vscode`
 
 ## Installation
 
@@ -173,11 +196,14 @@ fun main(): int {
         }
     }
 
-    // Vec container
+    // Vec container (nth returns Maybe<T>, check the tag)
     var vec: Vec<int> = vec_new()
     vec.push(&vec, 1)
     vec.push(&vec, 2)
-    println(itoa(vec.at(&vec, 1)))  // 2
+    var m: Maybe<int> = vec.nth(&vec, 1)
+    if m.tag == Just {
+        println(itoa(m.value))  // 2
+    }
 
     // Result (enum tag + union payload)
     var ok = Result<int, string> {
@@ -241,6 +267,7 @@ cargo build --release
 
 - **[Standard Library](./alum-std/README.md)** - Comprehensive standard library documentation
 - **[Build Tool](./alum-make/README.md)** - almk build tool documentation
+- **[Tutorial Series](https://cr0.dpdns.org)** - 18-part Chinese tutorial covering the language from scratch
 
 ## License
 
