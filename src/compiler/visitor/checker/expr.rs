@@ -884,6 +884,34 @@ impl TypeChecker {
                                 });
                             }
                         }
+                        Type::Struct(struct_name, args) => {
+                            let params = self
+                                .struct_method_params(&struct_name, &args, "set_nth")
+                                .ok_or(CheckerError::InvalidOperation {
+                                    op: "index assignment".to_string(),
+                                    type_name: format!(
+                                        "{:?} (no 'set_nth' method)",
+                                        Type::Struct(struct_name.clone(), args.clone())
+                                    ),
+                                    span: span,
+                                })?;
+                            let elem_ty = params.get(2).ok_or(CheckerError::InvalidOperation {
+                                op: "index assignment".to_string(),
+                                type_name: format!(
+                                    "'set_nth' of '{:?}' must take 3 parameters",
+                                    Type::Struct(struct_name.clone(), args.clone())
+                                ),
+                                span: span,
+                            })?;
+                            if !self.types_compatible(elem_ty, &value_type) {
+                                return Err(CheckerError::TypeMismatch {
+                                    expected: elem_ty.clone(),
+                                    found: value_type,
+                                    context: "array assignment".to_string(),
+                                    span: span,
+                                });
+                            }
+                        }
                         _ => {
                             return Err(CheckerError::InvalidOperation {
                                 op: "index assignment".to_string(),
@@ -1437,6 +1465,25 @@ impl TypeChecker {
                 let resolved = self.resolve_type(&substituted);
                 if let Type::Function(_, ret) = resolved {
                     return Some(*ret);
+                }
+            }
+        }
+        None
+    }
+
+    fn struct_method_params(
+        &self,
+        struct_name: &str,
+        type_args: &[Type],
+        method: &str,
+    ) -> Option<Vec<Type>> {
+        let (_, fields) = self.structs.get(struct_name)?;
+        for (fname, fty) in fields {
+            if fname == method {
+                let substituted = fty.substitute(type_args);
+                let resolved = self.resolve_type(&substituted);
+                if let Type::Function(params, _) = resolved {
+                    return Some(params);
                 }
             }
         }

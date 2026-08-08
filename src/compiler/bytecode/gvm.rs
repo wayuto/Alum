@@ -410,6 +410,60 @@ impl GVM {
                         self.stack.push(val);
                     }
                 }
+                Op::NEWARRAY => {
+                    let n = self.read() as usize;
+                    let mut elems = Vec::with_capacity(n);
+                    for _ in 0..n {
+                        elems.push(self.pop());
+                    }
+                    elems.reverse();
+                    self.stack.push(Value::Array(elems));
+                }
+                Op::ARRAYFILL => {
+                    let elem = self.pop();
+                    let len = match self.pop() {
+                        Value::Int(n) if n >= 0 => n as usize,
+                        Value::Int(_) => 0,
+                        _ => panic!("TypeError: Wrong types for ARRAY_FILL operation"),
+                    };
+                    self.stack.push(Value::Array(vec![elem; len]));
+                }
+                Op::ARRAYGET => {
+                    let idx = self.pop();
+                    let arr = self.pop();
+                    match (&arr, &idx) {
+                        (Value::Array(a), Value::Int(i)) => {
+                            if *i < 0 || *i as usize >= a.len() {
+                                panic!("IndexError: Array index out of bounds: {i}");
+                            }
+                            self.stack.push(a[*i as usize].clone());
+                        }
+                        (Value::Void, _) | (_, Value::Void) => self.stack.push(Value::Void),
+                        _ => panic!("TypeError: Wrong types for ARRAY_GET operation"),
+                    }
+                }
+                Op::ARRAYSET => {
+                    let slot = self.read() as usize;
+                    let index = self.curr_base_slot + slot;
+                    let value = self.pop();
+                    let idx = self.pop();
+                    let arr = self.slots.get(index).cloned().unwrap_or(Value::Void);
+                    match (&arr, &idx) {
+                        (Value::Array(a), Value::Int(i)) => {
+                            if *i < 0 || *i as usize >= a.len() {
+                                panic!("IndexError: Array index out of bounds: {i}");
+                            }
+                            let mut a = a.clone();
+                            a[*i as usize] = value;
+                            if index >= self.slots.len() {
+                                self.slots.resize(index + 1, Value::Void);
+                            }
+                            self.slots[index] = Value::Array(a);
+                        }
+                        (Value::Void, _) | (_, Value::Void) => {}
+                        _ => panic!("TypeError: Wrong types for ARRAY_SET operation"),
+                    }
+                }
                 Op::EXIT => match self.pop() {
                     Value::Int(s) => exit(s as i32),
                     _ => exit(0),

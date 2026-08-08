@@ -17,7 +17,9 @@ fn key(op: &IROperand) -> String {
 impl AsmCodeGen {
     pub(super) fn compile_fn(&mut self, func: IRFunction) -> Result<(), CodeGenError> {
         if func.is_external {
-            self.push_text(Asm::Extern(func.name.clone()));
+            if !self.internals.contains(&func.name) {
+                self.push_text(Asm::Extern(func.name.clone()));
+            }
             return Ok(());
         }
 

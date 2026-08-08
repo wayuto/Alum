@@ -373,7 +373,16 @@ impl<'a> Parser<'a> {
                 }
                 Ok((Token::RET, span)) => {
                     self.next()?;
-                    Ok(Expr::Return(Box::new(self.expr()?), span))
+                    let val = match self.peek() {
+                        Some(Ok((Token::SEMICOLON, _))) | Some(Ok((Token::RBRACE, _))) | None => {
+                            Box::new(Expr::Nil(span))
+                        }
+                        Some(Ok((_, next_span))) if next_span.line > span.line => {
+                            Box::new(Expr::Nil(span))
+                        }
+                        _ => Box::new(self.expr()?),
+                    };
+                    Ok(Expr::Return(val, span))
                 }
                 Ok((Token::IF, _)) => {
                     self.next()?;

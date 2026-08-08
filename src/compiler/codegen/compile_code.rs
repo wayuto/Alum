@@ -291,15 +291,13 @@ impl AsmCodeGen {
                         base: None,
                         index: Some(Reg::Rax),
                         scale: 8,
-                        disp: 8,
+                        disp: 0,
                         size: None,
                     }),
                 ));
                 self.push_text(Asm::Call(Operand::PLT("malloc".to_string())));
                 self.push_text(Asm::Add(Operand::Reg(Reg::Rsp), Operand::Imm(8)));
                 self.push_text(Asm::Pop(Reg::Rdx));
-                self.push_text(Asm::Mov(m_base(Reg::Rax), Operand::Reg(Reg::Rdx)));
-                self.push_text(Asm::Add(Operand::Reg(Reg::Rax), Operand::Imm(8)));
                 self.push_text(Asm::Xor(Operand::Reg(Reg::Rcx), Operand::Reg(Reg::Rcx)));
                 self.push_text(Asm::Pop(Reg::Rsi));
                 self.push_text(Asm::Pop(Reg::Rdi));

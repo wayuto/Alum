@@ -397,7 +397,7 @@ impl IRGen {
                         typ.clone()
                     };
                 let value: Operand = match self.eval_const(&value) {
-                    Some((cv, IRType::Int | IRType::Float | IRType::Bool)) => {
+                    Some((cv, IRType::Int | IRType::Float | IRType::Bool | IRType::Array)) => {
                         Operand::ConstIdx(self.get_const_index(cv))
                     }
                     _ => self.compile_expr(*value, ctx)?,
@@ -407,6 +407,10 @@ impl IRGen {
                 if matches!(var_ir_type, IRType::Array) {
                     if let Some(len) = self.const_array_len(&value, ctx) {
                         ctx.array_lengths.insert(name.clone(), len);
+                    } else if let Operand::ConstIdx(idx) = &value {
+                        if let IRConst::Array(elems) = &self.constants[*idx] {
+                            ctx.array_lengths.insert(name.clone(), elems.len());
+                        }
                     }
                 }
 
@@ -437,7 +441,7 @@ impl IRGen {
                         typ.clone()
                     };
                 let value = match self.eval_const(&value) {
-                    Some((cv, IRType::Int | IRType::Float | IRType::Bool)) => {
+                    Some((cv, IRType::Int | IRType::Float | IRType::Bool | IRType::Array)) => {
                         Operand::ConstIdx(self.get_const_index(cv))
                     }
                     _ => self.compile_expr(*value, ctx)?,
@@ -447,6 +451,10 @@ impl IRGen {
                 if matches!(var_ir_type, IRType::Array) {
                     if let Some(len) = self.const_array_len(&value, ctx) {
                         ctx.array_lengths.insert(name.clone(), len);
+                    } else if let Operand::ConstIdx(idx) = &value {
+                        if let IRConst::Array(elems) = &self.constants[*idx] {
+                            ctx.array_lengths.insert(name.clone(), elems.len());
+                        }
                     }
                 }
 
@@ -499,6 +507,10 @@ impl IRGen {
                 if matches!(var_typ, IRType::Array) {
                     if let Some(len) = self.const_array_len(&value, ctx) {
                         ctx.array_lengths.insert(name.clone(), len);
+                    } else if let Operand::ConstIdx(idx) = &value {
+                        if let IRConst::Array(elems) = &self.constants[*idx] {
+                            ctx.array_lengths.insert(name.clone(), elems.len());
+                        }
                     }
                 }
                 match typ {
@@ -1140,6 +1152,102 @@ impl IRGen {
             }
 
             Expr::For(var, iter, body, _) => {
+                if let Expr::Range(start, end, _) = *iter {
+                    let start_op = self.compile_expr(*start, ctx)?;
+                    let end_op = self.compile_expr(*end, ctx)?;
+                    let label_cond = ctx.new_label("rfor_cond");
+                    let label_end = ctx.new_label("rfor_end");
+                    let label_inc = ctx.new_label("rfor_inc");
+                    ctx.loop_end_labels.push(label_end.clone());
+                    ctx.loop_inc_labels.push(label_inc.clone());
+                    ctx.enter_scope();
+                    let idx_name = ctx.new_label("idx");
+                    let idx_var = Operand::Var(idx_name.clone());
+                    ctx.declare_var(idx_name.clone(), IRType::Int)?;
+                    ctx.instructions.push(Instruction {
+                        op: Op::Store,
+                        dst: Some(idx_var.clone()),
+                        src1: Some(start_op),
+                        src2: None,
+                    });
+                    ctx.instructions.push(Instruction {
+                        op: Op::Label(label_cond.clone()),
+                        dst: None,
+                        src1: None,
+                        src2: None,
+                    });
+                    let curr_idx = ctx.new_tmp(IRType::Int);
+                    ctx.instructions.push(Instruction {
+                        op: Op::Load,
+                        dst: Some(curr_idx.clone()),
+                        src1: Some(idx_var.clone()),
+                        src2: None,
+                    });
+                    let cond_tmp = ctx.new_tmp(IRType::Bool);
+                    ctx.instructions.push(Instruction {
+                        op: Op::Lt,
+                        dst: Some(cond_tmp.clone()),
+                        src1: Some(curr_idx.clone()),
+                        src2: Some(end_op),
+                    });
+                    ctx.instructions.push(Instruction {
+                        op: Op::JumpIfFalse,
+                        dst: None,
+                        src1: Some(cond_tmp),
+                        src2: Some(Operand::Label(label_end.clone())),
+                    });
+                    ctx.declare_var(var.clone(), IRType::Int)?;
+                    ctx.instructions.push(Instruction {
+                        op: Op::Store,
+                        dst: Some(Operand::Var(var)),
+                        src1: Some(curr_idx),
+                        src2: None,
+                    });
+                    self.compile_expr(*body, ctx)?;
+                    ctx.instructions.push(Instruction {
+                        op: Op::Label(label_inc.clone()),
+                        dst: None,
+                        src1: None,
+                        src2: None,
+                    });
+                    let one_idx = self.get_const_index(IRConst::Int(1));
+                    let curr_idx2 = ctx.new_tmp(IRType::Int);
+                    ctx.instructions.push(Instruction {
+                        op: Op::Load,
+                        dst: Some(curr_idx2.clone()),
+                        src1: Some(idx_var.clone()),
+                        src2: None,
+                    });
+                    let next_idx = ctx.new_tmp(IRType::Int);
+                    ctx.instructions.push(Instruction {
+                        op: Op::Add,
+                        dst: Some(next_idx.clone()),
+                        src1: Some(curr_idx2),
+                        src2: Some(Operand::ConstIdx(one_idx)),
+                    });
+                    ctx.instructions.push(Instruction {
+                        op: Op::Store,
+                        dst: Some(idx_var),
+                        src1: Some(next_idx),
+                        src2: None,
+                    });
+                    ctx.instructions.push(Instruction {
+                        op: Op::Jump,
+                        dst: None,
+                        src1: Some(Operand::Label(label_cond)),
+                        src2: None,
+                    });
+                    ctx.instructions.push(Instruction {
+                        op: Op::Label(label_end),
+                        dst: None,
+                        src1: None,
+                        src2: None,
+                    });
+                    ctx.exit_scope()?;
+                    ctx.loop_end_labels.pop();
+                    ctx.loop_inc_labels.pop();
+                    return Ok(ctx.new_tmp(IRType::Void));
+                }
                 if let Some(Type::Struct(sname, ta)) = self.expr_high_type(&iter, ctx) {
                     let maybe_ty =
                         self.struct_field_fn_ret(&sname, &ta, "next")
@@ -1619,6 +1727,47 @@ impl IRGen {
                         });
                     }
                 };
+                if let Some(Type::Struct(sname, ta)) = self.expr_high_type(&arr, ctx) {
+                    self.struct_field_fn_ret(&sname, &ta, "set_nth")
+                        .ok_or_else(|| CodeGenError::TypeError {
+                            message: format!("type '{}' has no 'set_nth' method", sname),
+                        })?;
+                    let s_op = self.compile_expr(*arr, ctx)?;
+                    let i_op = self.compile_expr(*idx, ctx)?;
+                    let v_op = self.compile_expr(*value, ctx)?;
+                    let fn_ptr = self.load_function_field(
+                        s_op.clone(),
+                        &Type::Struct(sname, ta),
+                        "set_nth",
+                        ctx,
+                    )?;
+                    ctx.instructions.push(Instruction {
+                        op: Op::Arg(0),
+                        dst: None,
+                        src1: Some(s_op),
+                        src2: None,
+                    });
+                    ctx.instructions.push(Instruction {
+                        op: Op::Arg(1),
+                        dst: None,
+                        src1: Some(i_op),
+                        src2: None,
+                    });
+                    ctx.instructions.push(Instruction {
+                        op: Op::Arg(2),
+                        dst: None,
+                        src1: Some(v_op),
+                        src2: None,
+                    });
+                    let res_tmp = ctx.new_tmp(IRType::Void);
+                    ctx.instructions.push(Instruction {
+                        op: Op::Call,
+                        dst: Some(res_tmp.clone()),
+                        src1: Some(fn_ptr),
+                        src2: None,
+                    });
+                    return Ok(res_tmp);
+                }
                 let (_elem_type, byte) = self.index_info(&arr, ctx);
                 let arr_op = self.compile_expr(*arr, ctx)?;
                 let offset = self.compile_expr(*idx, ctx)?;
@@ -1676,9 +1825,9 @@ impl IRGen {
                     let n_val = if let IRConst::Int(v) = &self.constants[*n] {
                         *v
                     } else {
-                        elem_size * 8
+                        elem_size
                     };
-                    let total_size = (n_val + 1) * 8;
+                    let total_size = n_val * elem_size;
                     let total_size_idx = self.get_const_index(IRConst::Int(total_size));
                     ctx.instructions.push(Instruction {
                         op: Op::Malloc,
@@ -1686,42 +1835,20 @@ impl IRGen {
                         src1: Some(Operand::ConstIdx(total_size_idx)),
                         src2: None,
                     });
-                    let zero_idx = self.get_const_index(IRConst::Int(0));
-                    ctx.instructions.push(Instruction {
-                        op: Op::StoreAt,
-                        dst: Some(ptr_tmp.clone()),
-                        src1: Some(Operand::ConstIdx(zero_idx)),
-                        src2: Some(len_op),
-                    });
                 } else {
                     let esize_idx = self.get_const_index(IRConst::Int(elem_size));
                     let byte_len_tmp = ctx.new_tmp(IRType::Int);
                     ctx.instructions.push(Instruction {
                         op: Op::Mul,
                         dst: Some(byte_len_tmp.clone()),
-                        src1: Some(len_op.clone()),
+                        src1: Some(len_op),
                         src2: Some(Operand::ConstIdx(esize_idx)),
-                    });
-                    let header_idx = self.get_const_index(IRConst::Int(8));
-                    let total_size_tmp = ctx.new_tmp(IRType::Int);
-                    ctx.instructions.push(Instruction {
-                        op: Op::Add,
-                        dst: Some(total_size_tmp.clone()),
-                        src1: Some(byte_len_tmp),
-                        src2: Some(Operand::ConstIdx(header_idx)),
                     });
                     ctx.instructions.push(Instruction {
                         op: Op::Malloc,
                         dst: Some(ptr_tmp.clone()),
-                        src1: Some(total_size_tmp),
+                        src1: Some(byte_len_tmp),
                         src2: None,
-                    });
-                    let zero_idx = self.get_const_index(IRConst::Int(0));
-                    ctx.instructions.push(Instruction {
-                        op: Op::StoreAt,
-                        dst: Some(ptr_tmp.clone()),
-                        src1: Some(Operand::ConstIdx(zero_idx)),
-                        src2: Some(len_op),
                     });
                 }
                 Ok(ptr_tmp)

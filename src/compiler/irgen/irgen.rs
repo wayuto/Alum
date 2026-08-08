@@ -1,5 +1,5 @@
 use super::context::Context;
-use super::ir::{IRConst, IRGlobalVar, IRProgram, IRType, Op};
+use super::ir::{IRConst, IRGlobalVar, IRProgram, IRType, Op, Operand};
 use crate::compiler::{
     codegen::CodeGenError,
     irgen::IRGen,
@@ -211,7 +211,7 @@ impl IRGen {
         Ok(())
     }
 
-    pub(super) fn eval_const(&self, expr: &Expr) -> Option<(IRConst, IRType)> {
+    pub(super) fn eval_const(&mut self, expr: &Expr) -> Option<(IRConst, IRType)> {
         match expr {
             Expr::Int(n, _) => Some((IRConst::Int(*n as i64), IRType::Int)),
             Expr::Float(f, _) => Some((IRConst::Float(OrderedFloat(*f)), IRType::Float)),
@@ -281,7 +281,7 @@ impl IRGen {
         }
     }
 
-    pub(super) fn eval_const_vm(&self, expr: &Expr) -> Option<(IRConst, IRType)> {
+    pub(super) fn eval_const_vm(&mut self, expr: &Expr) -> Option<(IRConst, IRType)> {
         use crate::compiler::bytecode::{Compiler, GVM};
 
         let pure_fns: HashSet<String> = self
@@ -337,7 +337,41 @@ impl IRGen {
             crate::compiler::bytecode::Value::Bool(b) => {
                 Some((IRConst::Int(if b { 1 } else { 0 }), IRType::Bool))
             }
-            _ => None,
+            crate::compiler::bytecode::Value::Array(elems) => {
+                let mut operands = Vec::with_capacity(elems.len());
+                for e in elems {
+                    operands.push(self.vm_value_to_const(&e)?);
+                }
+                Some((IRConst::Array(operands), IRType::Array))
+            }
+            crate::compiler::bytecode::Value::Void => None,
+        }
+    }
+
+    fn vm_value_to_const(&mut self, value: &crate::compiler::bytecode::Value) -> Option<Operand> {
+        match value {
+            crate::compiler::bytecode::Value::Int(i) => {
+                Some(Operand::ConstIdx(self.get_const_index(IRConst::Int(*i))))
+            }
+            crate::compiler::bytecode::Value::Float(f) => Some(Operand::ConstIdx(
+                self.get_const_index(IRConst::Float(OrderedFloat(*f))),
+            )),
+            crate::compiler::bytecode::Value::Str(s) => Some(Operand::ConstIdx(
+                self.get_const_index(IRConst::Str(s.clone())),
+            )),
+            crate::compiler::bytecode::Value::Bool(b) => Some(Operand::ConstIdx(
+                self.get_const_index(IRConst::Int(if *b { 1 } else { 0 })),
+            )),
+            crate::compiler::bytecode::Value::Array(elems) => {
+                let mut operands = Vec::with_capacity(elems.len());
+                for e in elems {
+                    operands.push(self.vm_value_to_const(e)?);
+                }
+                Some(Operand::ConstIdx(
+                    self.get_const_index(IRConst::Array(operands)),
+                ))
+            }
+            crate::compiler::bytecode::Value::Void => None,
         }
     }
 
@@ -451,8 +485,8 @@ impl IRGen {
                         .unwrap_or(true)
             }
             While(c, b, _) => self.vm_expr_safe(c, pure_fns) && self.vm_expr_safe(b, pure_fns),
-            For(_, i, b, _) => self.vm_expr_safe(i, pure_fns) && self.vm_expr_safe(b, pure_fns),
-            Range(l, r, _) => self.vm_expr_safe(l, pure_fns) && self.vm_expr_safe(r, pure_fns),
+            For(_, _, _, _) => false,
+            Range(_, _, _) => false,
             Match(s, arms, d, _) => {
                 if !self.vm_expr_safe(s, pure_fns) {
                     return false;
@@ -477,7 +511,15 @@ impl IRGen {
                 self.vm_expr_safe(v, pure_fns)
             }
             Inc(..) | Dec(..) => true,
-            IndexAssign(..) => false,
+            IndexAssign(arr_idx, value, _) => {
+                let Expr::Index(arr, idx, _) = arr_idx.as_ref() else {
+                    return false;
+                };
+                if !matches!(arr.as_ref(), Var(..)) {
+                    return false;
+                }
+                self.vm_expr_safe(idx, pure_fns) && self.vm_expr_safe(value, pure_fns)
+            }
             MemberAssign(..) => false,
             Add(l, r, _)
             | Sub(l, r, _)
@@ -505,9 +547,9 @@ impl IRGen {
             | LOr(l, r, _)
             | StrCat(l, r, _) => self.vm_expr_safe(l, pure_fns) && self.vm_expr_safe(r, pure_fns),
             DerefAssign(..) => false,
-            Index(..) => false,
-            ArrayLiteral(..) => false,
-            ArrayFill(..) => false,
+            Index(l, r, _) => self.vm_expr_safe(l, pure_fns) && self.vm_expr_safe(r, pure_fns),
+            ArrayLiteral(items, _) => items.iter().all(|it| self.vm_expr_safe(it, pure_fns)),
+            ArrayFill(_, len, _) => self.vm_expr_safe(len, pure_fns),
             StructLiteral(..) => false,
             UnionLiteral(..) => false,
             MemberAccess(..) => false,

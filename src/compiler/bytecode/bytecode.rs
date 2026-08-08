@@ -6,6 +6,7 @@ pub enum Value {
     Float(f64),
     Bool(bool),
     Str(String),
+    Array(Vec<Value>),
     Void,
 }
 
@@ -29,6 +30,13 @@ impl Hash for Value {
             Value::Str(s) => {
                 3u8.hash(state);
                 s.hash(state);
+            }
+            Value::Array(a) => {
+                5u8.hash(state);
+                a.len().hash(state);
+                for e in a {
+                    e.hash(state);
+                }
             }
             Value::Void => 4u8.hash(state),
         }
@@ -80,6 +88,10 @@ pub enum Op {
     EXIT,
     HALT,
     TAILCALL,
+    NEWARRAY,
+    ARRAYFILL,
+    ARRAYGET,
+    ARRAYSET,
 }
 impl Op {
     pub fn from_u8(op: u8) -> Option<Self> {
@@ -127,6 +139,10 @@ impl Op {
             40 => Some(Op::EXIT),
             41 => Some(Op::HALT),
             42 => Some(Op::TAILCALL),
+            43 => Some(Op::NEWARRAY),
+            44 => Some(Op::ARRAYFILL),
+            45 => Some(Op::ARRAYGET),
+            46 => Some(Op::ARRAYSET),
             _ => None,
         }
     }
@@ -177,6 +193,10 @@ impl Op {
             Op::EXIT => "EXIT".to_string(),
             Op::HALT => "HALT".to_string(),
             Op::TAILCALL => "TAIL_CALL".to_string(),
+            Op::NEWARRAY => "NEW_ARRAY".to_string(),
+            Op::ARRAYFILL => "ARRAY_FILL".to_string(),
+            Op::ARRAYGET => "ARRAY_GET".to_string(),
+            Op::ARRAYSET => "ARRAY_SET".to_string(),
         }
     }
 
@@ -226,6 +246,10 @@ impl Op {
             Op::EXIT => 0,
             Op::HALT => 0,
             Op::TAILCALL => 3,
+            Op::NEWARRAY => 1,
+            Op::ARRAYFILL => 0,
+            Op::ARRAYGET => 0,
+            Op::ARRAYSET => 1,
         }
     }
 }

@@ -26,6 +26,9 @@ pub fn write_elf(asm: &Assembler) -> Vec<u8> {
         if sym_map.contains_key(e) {
             continue;
         }
+        if asm.labels().contains_key(e) {
+            continue;
+        }
         let idx = (1 + local_syms.len() + global_syms.len()) as u32;
         sym_map.insert(e.clone(), idx);
         global_syms.push((e.clone(), 0, 0, true));

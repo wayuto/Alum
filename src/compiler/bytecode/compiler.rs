@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::compiler::{
     Span,
     bytecode::{Op, Value},
-    parser::{Expr, Program, Type},
+    parser::{Expr, Primitive, Program, Type},
 };
 
 #[derive(Debug, Clone)]
@@ -58,6 +58,11 @@ impl Bytecode {
                                 | (self.chunk.code[i + 2] as u16);
                             let argc = self.chunk.code[i + 3];
                             print!(" [addr {:04x}, {} args]", addr, argc);
+                        }
+                    }
+                    Op::NEWARRAY | Op::ARRAYSET => {
+                        if i + 1 < self.chunk.code.len() {
+                            print!(" [{}]", self.chunk.code[i + 1]);
                         }
                     }
                     _ => {
@@ -320,6 +325,38 @@ impl Compiler {
             Expr::Inc(name, _) => self.compile_inc_dec(name, true),
             Expr::Dec(name, _) => self.compile_inc_dec(name, false),
 
+            Expr::ArrayLiteral(elements, _) => {
+                for e in elements {
+                    self.compile_expr(e);
+                }
+                self.emit(Op::NEWARRAY, &[elements.len() as u32]);
+            }
+            Expr::ArrayFill(ty, len, _) => {
+                self.compile_expr(len);
+                let zero_idx = self.add_const(array_fill_zero(ty));
+                self.emit(Op::LOADCONST, &[zero_idx]);
+                self.emit(Op::ARRAYFILL, &[]);
+            }
+            Expr::Index(arr, idx, _) => {
+                self.compile_expr(arr);
+                self.compile_expr(idx);
+                self.emit(Op::ARRAYGET, &[]);
+            }
+            Expr::IndexAssign(arr_idx, value, _) => {
+                let (slot, idx) = match arr_idx.as_ref() {
+                    Expr::Index(arr, idx, _) => match arr.as_ref() {
+                        Expr::Var(name, _) => (self.mod_var(name), idx.clone()),
+                        other => {
+                            panic!("Compiler: unsupported indexed assignment target {other:?}")
+                        }
+                    },
+                    other => panic!("Compiler: unsupported indexed assignment target {other:?}"),
+                };
+                self.compile_expr(&idx);
+                self.compile_expr(value);
+                self.emit(Op::ARRAYSET, &[slot]);
+            }
+
             Expr::VarDecl(name, _, value, _) => {
                 self.compile_expr(value);
                 let slot = self.decl_var(name);
@@ -525,5 +562,15 @@ impl Compiler {
             return None;
         }
         Some((*faddr, args.len()))
+    }
+}
+
+fn array_fill_zero(ty: &Type) -> Value {
+    match ty {
+        Type::Primitive(Primitive::Float) => Value::Float(0.0),
+        Type::Primitive(Primitive::Boolean) => Value::Bool(false),
+        Type::Primitive(Primitive::String) => Value::Str(String::new()),
+        Type::Array(_) => Value::Array(Vec::new()),
+        _ => Value::Int(0),
     }
 }
