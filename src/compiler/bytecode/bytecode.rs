@@ -7,6 +7,7 @@ pub enum Value {
     Bool(bool),
     Str(String),
     Array(Vec<Value>),
+    Fn(u32, u32),
     Void,
 }
 
@@ -37,6 +38,11 @@ impl Hash for Value {
                 for e in a {
                     e.hash(state);
                 }
+            }
+            Value::Fn(addr, arity) => {
+                6u8.hash(state);
+                addr.hash(state);
+                arity.hash(state);
             }
             Value::Void => 4u8.hash(state),
         }
@@ -92,6 +98,8 @@ pub enum Op {
     ARRAYFILL,
     ARRAYGET,
     ARRAYSET,
+    MAKEFUNC,
+    CALLVALUE,
 }
 impl Op {
     pub fn from_u8(op: u8) -> Option<Self> {
@@ -143,6 +151,8 @@ impl Op {
             44 => Some(Op::ARRAYFILL),
             45 => Some(Op::ARRAYGET),
             46 => Some(Op::ARRAYSET),
+            47 => Some(Op::MAKEFUNC),
+            48 => Some(Op::CALLVALUE),
             _ => None,
         }
     }
@@ -197,6 +207,8 @@ impl Op {
             Op::ARRAYFILL => "ARRAY_FILL".to_string(),
             Op::ARRAYGET => "ARRAY_GET".to_string(),
             Op::ARRAYSET => "ARRAY_SET".to_string(),
+            Op::MAKEFUNC => "MAKE_FUNC".to_string(),
+            Op::CALLVALUE => "CALL_VALUE".to_string(),
         }
     }
 
@@ -250,6 +262,8 @@ impl Op {
             Op::ARRAYFILL => 0,
             Op::ARRAYGET => 0,
             Op::ARRAYSET => 1,
+            Op::MAKEFUNC => 3,
+            Op::CALLVALUE => 1,
         }
     }
 }

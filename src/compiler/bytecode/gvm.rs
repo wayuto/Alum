@@ -41,6 +41,30 @@ impl GVM {
         b
     }
 
+    fn enter_frame(&mut self, target: usize, args: Vec<Value>, operand_base: usize) {
+        let args_count = args.len();
+        let key = (target, args.clone());
+        if let Some(cached) = self.memo.get(&key).cloned() {
+            self.stack.push(cached);
+            return;
+        }
+
+        self.call_stack.push(CallStack {
+            return_ip: self.ip,
+            base_slot: self.curr_base_slot,
+            operand_base,
+            cache_key: Some(key),
+        });
+
+        let new_base_slot = self.slots.len();
+        for i in 0..args_count {
+            self.slots.push(args[args_count - i - 1].clone());
+        }
+        self.curr_base_slot = new_base_slot;
+        self.curr_operand_base = operand_base;
+        self.ip = target;
+    }
+
     fn pop(&mut self) -> Value {
         self.stack.pop().unwrap_or(Value::Void)
     }
@@ -348,27 +372,32 @@ impl GVM {
                     let operand_base = self.stack.len() - args_count;
                     let args: Vec<Value> = (0..args_count).map(|_| self.pop()).collect();
                     self.stack.truncate(operand_base);
-
-                    let key = (target, args.clone());
-                    if let Some(cached) = self.memo.get(&key).cloned() {
-                        self.stack.push(cached);
-                        continue;
+                    self.enter_frame(target, args, operand_base);
+                }
+                Op::CALLVALUE => {
+                    let args_count = self.read() as usize;
+                    let operand_base = self.stack.len() - (args_count + 1);
+                    let args: Vec<Value> = (0..args_count).map(|_| self.pop()).collect();
+                    match self.pop() {
+                        Value::Fn(target, arity) => {
+                            if arity as usize != args_count {
+                                panic!(
+                                    "ArgumentError: lambda expects {arity} arguments, got {args_count}"
+                                );
+                            }
+                            self.stack.truncate(operand_base);
+                            self.enter_frame(target as usize, args, operand_base);
+                        }
+                        Value::Void => {}
+                        _ => panic!("TypeError: value is not callable (CALL_VALUE operation)"),
                     }
-
-                    self.call_stack.push(CallStack {
-                        return_ip: self.ip,
-                        base_slot: self.curr_base_slot,
-                        operand_base,
-                        cache_key: Some(key),
-                    });
-
-                    let new_base_slot = self.slots.len();
-                    for i in 0..args_count {
-                        self.slots.push(args[args_count - i - 1].clone());
-                    }
-                    self.curr_base_slot = new_base_slot;
-                    self.curr_operand_base = operand_base;
-                    self.ip = target;
+                }
+                Op::MAKEFUNC => {
+                    let high = self.read() as usize;
+                    let low = self.read() as usize;
+                    let arity = self.read() as usize;
+                    self.stack
+                        .push(Value::Fn(((high << 8) | low) as u32, arity as u32));
                 }
                 Op::TAILCALL => {
                     let high = self.read() as usize;

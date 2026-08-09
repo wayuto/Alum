@@ -23,4 +23,5 @@ pub struct Parser<'a> {
     type_param_scopes: Vec<HashMap<String, usize>>,
     has_fstring: bool,
     scope_depth: usize,
+    deref_depth: usize,
 }

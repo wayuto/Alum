@@ -6,11 +6,12 @@ use crate::compiler::{
     parser::{Expr, Primitive, Program, Type},
 };
 use ordered_float::OrderedFloat;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::mem::take;
 
 impl IRGen {
     pub fn compile(&mut self, program: Program) -> Result<IRProgram, CodeGenError> {
+        super::purity::check_lambda_params(&program.body)?;
         let program = self.lambda2function(program);
         self.program_body = program.body.clone();
 
@@ -294,28 +295,38 @@ impl IRGen {
                 _ => None,
             })
             .collect();
-        if !self.vm_expr_safe(expr, &pure_fns) {
+        let mut safety = VmSafety::new(&self.program_body, &pure_fns);
+        if !safety.safe(expr) {
             return None;
         }
         if self.expr_has_var(expr) {
             return None;
         }
         for decl in self.program_body.iter() {
-            if let Expr::FuncDecl(_, attrs, _, _, _, body, _) = decl {
-                if attrs.is_pure && !attrs.is_external && !self.vm_expr_safe(body, &pure_fns) {
-                    return None;
+            if let Expr::FuncDecl(name, attrs, _, _, _, body, _) = decl {
+                if (attrs.is_pure || name.starts_with("_lambda_")) && !attrs.is_external {
+                    let mut fn_safety = VmSafety::new(&self.program_body, &pure_fns);
+                    if !fn_safety.safe(body) {
+                        return None;
+                    }
                 }
             }
         }
 
-        let mut body: Vec<Expr> = self
+        let mut selected: Vec<(String, Expr)> = self
             .program_body
             .iter()
-            .filter(|e| {
-                matches!(e, Expr::FuncDecl(_, attrs, ..) if attrs.is_pure && !attrs.is_external)
+            .filter_map(|e| match e {
+                Expr::FuncDecl(name, attrs, ..)
+                    if ((attrs.is_pure || name.starts_with("_lambda_")) && !attrs.is_external) =>
+                {
+                    Some((name.clone(), e.clone()))
+                }
+                _ => None,
             })
-            .cloned()
             .collect();
+
+        let mut body = order_vm_functions(&mut selected);
         body.push(expr.clone());
         let program = Program { body };
 
@@ -345,6 +356,7 @@ impl IRGen {
                 Some((IRConst::Array(operands), IRType::Array))
             }
             crate::compiler::bytecode::Value::Void => None,
+            crate::compiler::bytecode::Value::Fn(..) => None,
         }
     }
 
@@ -372,6 +384,7 @@ impl IRGen {
                 ))
             }
             crate::compiler::bytecode::Value::Void => None,
+            crate::compiler::bytecode::Value::Fn(..) => None,
         }
     }
 
@@ -453,110 +466,6 @@ impl IRGen {
         }
     }
 
-    fn vm_expr_safe(&self, expr: &Expr, pure_fns: &HashSet<String>) -> bool {
-        use Expr::*;
-
-        match expr {
-            Int(..) | Float(..) | Bool(..) | String(..) | Nil(_) | Var(..) | Break(_)
-            | Continue(_) | TypeDef(_) | Struct(..) | Union(..) | Enum(..) | GlobalVar(..)
-            | ExternVar(..) | FuncDecl(..) => true,
-
-            Call(callee, _, args, _) => {
-                match callee.as_ref() {
-                    Var(name, _) => {
-                        if !pure_fns.contains(name.as_str()) {
-                            return false;
-                        }
-                    }
-                    _ => return false,
-                }
-                if !self.vm_expr_safe(callee, pure_fns) {
-                    return false;
-                }
-                args.iter().all(|a| self.vm_expr_safe(a, pure_fns))
-            }
-
-            Block(stmts, _) => stmts.iter().all(|s| self.vm_expr_safe(s, pure_fns)),
-            If(c, t, e, _) => {
-                self.vm_expr_safe(c, pure_fns)
-                    && self.vm_expr_safe(t, pure_fns)
-                    && e.as_ref()
-                        .map(|x| self.vm_expr_safe(x, pure_fns))
-                        .unwrap_or(true)
-            }
-            While(c, b, _) => self.vm_expr_safe(c, pure_fns) && self.vm_expr_safe(b, pure_fns),
-            For(_, _, _, _) => false,
-            Range(_, _, _) => false,
-            Match(s, arms, d, _) => {
-                if !self.vm_expr_safe(s, pure_fns) {
-                    return false;
-                }
-                for (pat, arm) in arms {
-                    if !self.vm_expr_safe(pat, pure_fns) || !self.vm_expr_safe(arm, pure_fns) {
-                        return false;
-                    }
-                }
-                d.as_ref()
-                    .map(|x| self.vm_expr_safe(x, pure_fns))
-                    .unwrap_or(true)
-            }
-            Return(v, _) => self.vm_expr_safe(v, pure_fns),
-            Lambda(_, b, _, _) => self.vm_expr_safe(b, pure_fns),
-            VarDecl(_, _, v, _) | ConstDecl(_, _, v, _, _) | Not(v, _) | Neg(v, _) | FNeg(v, _) => {
-                self.vm_expr_safe(v, pure_fns)
-            }
-            AddressOf(..) => false,
-            Deref(..) => false,
-            VarAssign(_, v, _) | AddAssign(_, v, _) | SubAssign(_, v, _) => {
-                self.vm_expr_safe(v, pure_fns)
-            }
-            Inc(..) | Dec(..) => true,
-            IndexAssign(arr_idx, value, _) => {
-                let Expr::Index(arr, idx, _) = arr_idx.as_ref() else {
-                    return false;
-                };
-                if !matches!(arr.as_ref(), Var(..)) {
-                    return false;
-                }
-                self.vm_expr_safe(idx, pure_fns) && self.vm_expr_safe(value, pure_fns)
-            }
-            MemberAssign(..) => false,
-            Add(l, r, _)
-            | Sub(l, r, _)
-            | Mul(l, r, _)
-            | Div(l, r, _)
-            | Mod(l, r, _)
-            | FAdd(l, r, _)
-            | FSub(l, r, _)
-            | FMul(l, r, _)
-            | FDiv(l, r, _)
-            | Eq(l, r, _)
-            | Ne(l, r, _)
-            | Lt(l, r, _)
-            | Le(l, r, _)
-            | Gt(l, r, _)
-            | Ge(l, r, _)
-            | FEq(l, r, _)
-            | FNe(l, r, _)
-            | FLt(l, r, _)
-            | FLe(l, r, _)
-            | FGt(l, r, _)
-            | FGe(l, r, _)
-            | Xor(l, r, _)
-            | LAnd(l, r, _)
-            | LOr(l, r, _)
-            | StrCat(l, r, _) => self.vm_expr_safe(l, pure_fns) && self.vm_expr_safe(r, pure_fns),
-            DerefAssign(..) => false,
-            Index(l, r, _) => self.vm_expr_safe(l, pure_fns) && self.vm_expr_safe(r, pure_fns),
-            ArrayLiteral(items, _) => items.iter().all(|it| self.vm_expr_safe(it, pure_fns)),
-            ArrayFill(_, len, _) => self.vm_expr_safe(len, pure_fns),
-            StructLiteral(..) => false,
-            UnionLiteral(..) => false,
-            MemberAccess(..) => false,
-            FString(parts, _) => parts.iter().all(|p| self.vm_expr_safe(p, pure_fns)),
-        }
-    }
-
     pub(super) fn get_const_index(&mut self, constant: IRConst) -> usize {
         if let Some(&index) = self.constant_pool.get(&constant) {
             return index;
@@ -598,6 +507,421 @@ impl IRGen {
             _ => Err(CodeGenError::UnsupportedOperation {
                 message: "not a binary operation".to_string(),
             }),
+        }
+    }
+}
+
+const VM_LAMBDA_MARKER: &str = "\u{03bb}";
+
+fn order_vm_functions(selected: &mut Vec<(String, Expr)>) -> Vec<Expr> {
+    if selected.is_empty() {
+        return Vec::new();
+    }
+    let decls: HashMap<String, Expr> = selected.drain(..).collect();
+    let mut ordered: Vec<Expr> = Vec::new();
+    let mut done: HashSet<String> = HashSet::new();
+    let mut in_progress: HashSet<String> = HashSet::new();
+
+    fn emit(
+        name: &str,
+        decls: &HashMap<String, Expr>,
+        ordered: &mut Vec<Expr>,
+        done: &mut HashSet<String>,
+        in_progress: &mut HashSet<String>,
+    ) {
+        if done.contains(name) || in_progress.contains(name) {
+            return;
+        }
+        let Some(decl) = decls.get(name) else {
+            return;
+        };
+        in_progress.insert(name.to_string());
+        let mut deps: HashSet<String> = HashSet::new();
+        collect_var_refs(decl, &mut deps);
+        for dep in deps {
+            emit(&dep, decls, ordered, done, in_progress);
+        }
+        ordered.push(decl.clone());
+        in_progress.remove(name);
+        done.insert(name.to_string());
+    }
+
+    let names: Vec<String> = decls.keys().cloned().collect();
+    for name in names {
+        emit(&name, &decls, &mut ordered, &mut done, &mut in_progress);
+    }
+    ordered
+}
+
+fn collect_var_refs(expr: &Expr, out: &mut HashSet<String>) {
+    use Expr::*;
+    match expr {
+        Int(..) | Float(..) | Bool(..) | String(..) | Nil(_) | Break(_) | Continue(_)
+        | TypeDef(_) | Struct(..) | Union(..) | Enum(..) | GlobalVar(..) | ExternVar(..) => {}
+        Var(name, _) => {
+            out.insert(name.clone());
+        }
+        FuncDecl(_, _, _, _, _, body, _) => {
+            collect_var_refs(body, out);
+        }
+        Call(f, _, args, _) => {
+            collect_var_refs(f, out);
+            for a in args {
+                collect_var_refs(a, out);
+            }
+        }
+        Block(stmts, _) => {
+            for s in stmts {
+                collect_var_refs(s, out);
+            }
+        }
+        If(c, t, e, _) => {
+            collect_var_refs(c, out);
+            collect_var_refs(t, out);
+            if let Some(x) = e {
+                collect_var_refs(x, out);
+            }
+        }
+        While(c, b, _) | Range(c, b, _) => {
+            collect_var_refs(c, out);
+            collect_var_refs(b, out);
+        }
+        For(_, i, b, _) => {
+            collect_var_refs(i, out);
+            collect_var_refs(b, out);
+        }
+        Match(s, arms, d, _) => {
+            collect_var_refs(s, out);
+            for (p, a) in arms {
+                collect_var_refs(p, out);
+                collect_var_refs(a, out);
+            }
+            if let Some(x) = d {
+                collect_var_refs(x, out);
+            }
+        }
+        Return(v, _) | Not(v, _) | Neg(v, _) | FNeg(v, _) | AddressOf(v, _) | Deref(v, _) => {
+            collect_var_refs(v, out)
+        }
+        Lambda(_, b, _, _) => collect_var_refs(b, out),
+        VarDecl(_, _, v, _) | ConstDecl(_, _, v, _, _) => collect_var_refs(v, out),
+        Add(l, r, _)
+        | Sub(l, r, _)
+        | Mul(l, r, _)
+        | Div(l, r, _)
+        | Mod(l, r, _)
+        | FAdd(l, r, _)
+        | FSub(l, r, _)
+        | FMul(l, r, _)
+        | FDiv(l, r, _)
+        | Eq(l, r, _)
+        | Ne(l, r, _)
+        | Lt(l, r, _)
+        | Le(l, r, _)
+        | Gt(l, r, _)
+        | Ge(l, r, _)
+        | FEq(l, r, _)
+        | FNe(l, r, _)
+        | FLt(l, r, _)
+        | FLe(l, r, _)
+        | FGt(l, r, _)
+        | FGe(l, r, _)
+        | Xor(l, r, _)
+        | LAnd(l, r, _)
+        | LOr(l, r, _)
+        | StrCat(l, r, _)
+        | Index(l, r, _)
+        | DerefAssign(l, r, _) => {
+            collect_var_refs(l, out);
+            collect_var_refs(r, out);
+        }
+        IndexAssign(o, v, _) | MemberAssign(o, _, v, _) => {
+            collect_var_refs(o, out);
+            collect_var_refs(v, out);
+        }
+        ArrayLiteral(items, _) => {
+            for it in items {
+                collect_var_refs(it, out);
+            }
+        }
+        ArrayFill(_, len, _) => collect_var_refs(len, out),
+        StructLiteral(_, _, fields, _) | UnionLiteral(_, _, fields, _) => {
+            for (_, v) in fields {
+                collect_var_refs(v, out);
+            }
+        }
+        MemberAccess(o, _, _) => collect_var_refs(o, out),
+        Inc(..) | Dec(..) => {}
+        VarAssign(_, v, _) | AddAssign(_, v, _) | SubAssign(_, v, _) => collect_var_refs(v, out),
+        FString(parts, _) => {
+            for p in parts {
+                collect_var_refs(p, out);
+            }
+        }
+    }
+}
+
+struct VmSafety<'a> {
+    program_body: &'a [Expr],
+    pure_fns: &'a HashSet<String>,
+    lambda_memo: HashMap<String, bool>,
+    lambda_in_progress: HashSet<String>,
+    bound: Vec<HashMap<String, String>>,
+}
+
+impl<'a> VmSafety<'a> {
+    fn new(program_body: &'a [Expr], pure_fns: &'a HashSet<String>) -> Self {
+        VmSafety {
+            program_body,
+            pure_fns,
+            lambda_memo: HashMap::new(),
+            lambda_in_progress: HashSet::new(),
+            bound: vec![HashMap::new()],
+        }
+    }
+
+    fn enter_scope(&mut self) {
+        self.bound.push(HashMap::new());
+    }
+
+    fn leave_scope(&mut self) {
+        self.bound.pop();
+    }
+
+    fn lookup_bound(&self, name: &str) -> Option<&String> {
+        self.bound.iter().rev().find_map(|scope| scope.get(name))
+    }
+
+    fn unbind(&mut self, name: &str) {
+        for scope in &mut self.bound {
+            scope.remove(name);
+        }
+    }
+
+    fn bind(&mut self, name: &str, value: &Expr) {
+        match value {
+            Expr::Var(v, _) => {
+                let target = if v.starts_with("_lambda_") || self.pure_fns.contains(v) {
+                    Some(v.clone())
+                } else {
+                    self.lookup_bound(v).cloned()
+                };
+                if let Some(t) = target {
+                    if let Some(scope) = self.bound.last_mut() {
+                        scope.insert(name.to_string(), t);
+                    }
+                }
+            }
+            Expr::Lambda(_, body, _, _) => {
+                if self.safe(body) {
+                    if let Some(scope) = self.bound.last_mut() {
+                        scope.insert(name.to_string(), VM_LAMBDA_MARKER.to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn callee_pure(&mut self, name: &str) -> bool {
+        if self.pure_fns.contains(name) || name == VM_LAMBDA_MARKER {
+            return true;
+        }
+        if name.starts_with("_lambda_") {
+            return self.lambda_is_pure(name);
+        }
+        false
+    }
+
+    fn lambda_is_pure(&mut self, name: &str) -> bool {
+        if let Some(&r) = self.lambda_memo.get(name) {
+            return r;
+        }
+        if self.lambda_in_progress.contains(name) {
+            return true;
+        }
+        let Some(body) = self.find_lambda_body(name).cloned() else {
+            self.lambda_memo.insert(name.to_string(), false);
+            return false;
+        };
+        self.lambda_in_progress.insert(name.to_string());
+        let saved = std::mem::take(&mut self.bound);
+        let r = self.safe(&body);
+        self.bound = saved;
+        self.lambda_in_progress.remove(name);
+        self.lambda_memo.insert(name.to_string(), r);
+        r
+    }
+
+    fn find_lambda_body(&self, name: &str) -> Option<&Expr> {
+        self.program_body.iter().find_map(|e| match e {
+            Expr::FuncDecl(n, _, _, _, _, b, _) if n == name => Some(b.as_ref()),
+            _ => None,
+        })
+    }
+
+    fn safe(&mut self, expr: &Expr) -> bool {
+        use Expr::*;
+        match expr {
+            Int(..) | Float(..) | Bool(..) | String(..) | Nil(_) | Var(..) | Break(_)
+            | Continue(_) | TypeDef(_) | Struct(..) | Union(..) | Enum(..) | GlobalVar(..)
+            | ExternVar(..) | FuncDecl(..) => true,
+
+            Call(callee, _, args, _) => {
+                match callee.as_ref() {
+                    Var(name, _) => {
+                        let bound_target = self.lookup_bound(name).cloned();
+                        let pure = match &bound_target {
+                            Some(t) => self.callee_pure(t),
+                            None => self.callee_pure(name),
+                        };
+                        if !pure {
+                            return false;
+                        }
+                    }
+                    _ => {
+                        if !self.safe(callee) {
+                            return false;
+                        }
+                    }
+                }
+                args.iter().all(|a| self.safe(a))
+            }
+
+            Block(stmts, _) => {
+                self.enter_scope();
+                let r = stmts.iter().all(|s| self.safe(s));
+                self.leave_scope();
+                r
+            }
+            If(c, t, e, _) => {
+                if !self.safe(c) {
+                    return false;
+                }
+                self.enter_scope();
+                let r_t = self.safe(t);
+                self.leave_scope();
+                if !r_t {
+                    return false;
+                }
+                match e {
+                    Some(x) => {
+                        self.enter_scope();
+                        let r = self.safe(x);
+                        self.leave_scope();
+                        r
+                    }
+                    None => true,
+                }
+            }
+            While(c, b, _) => {
+                if !self.safe(c) {
+                    return false;
+                }
+                self.enter_scope();
+                let r = self.safe(b);
+                self.leave_scope();
+                r
+            }
+            For(..) => false,
+            Range(..) => false,
+            Match(s, arms, d, _) => {
+                if !self.safe(s) {
+                    return false;
+                }
+                for (pat, arm) in arms {
+                    if !self.safe(pat) {
+                        return false;
+                    }
+                    self.enter_scope();
+                    let r = self.safe(arm);
+                    self.leave_scope();
+                    if !r {
+                        return false;
+                    }
+                }
+                match d {
+                    Some(x) => {
+                        self.enter_scope();
+                        let r = self.safe(x);
+                        self.leave_scope();
+                        r
+                    }
+                    None => true,
+                }
+            }
+            Return(v, _) => self.safe(v),
+            Lambda(_, b, _, _) => {
+                let saved = std::mem::take(&mut self.bound);
+                self.bound = vec![HashMap::new()];
+                let r = self.safe(b);
+                self.bound = saved;
+                r
+            }
+            VarDecl(name, _, v, _) | ConstDecl(name, _, v, _, _) => {
+                let r = self.safe(v);
+                if r {
+                    self.bind(name, v);
+                }
+                r
+            }
+            Not(v, _) | Neg(v, _) | FNeg(v, _) => self.safe(v),
+            AddressOf(..) => false,
+            Deref(..) => false,
+            VarAssign(name, v, _) | AddAssign(name, v, _) | SubAssign(name, v, _) => {
+                let r = self.safe(v);
+                if r {
+                    match v.as_ref() {
+                        Var(..) | Lambda(..) => self.bind(name, v),
+                        _ => self.unbind(name),
+                    }
+                }
+                r
+            }
+            Inc(..) | Dec(..) => true,
+            IndexAssign(arr_idx, value, _) => {
+                let Expr::Index(arr, idx, _) = arr_idx.as_ref() else {
+                    return false;
+                };
+                if !matches!(arr.as_ref(), Var(..)) {
+                    return false;
+                }
+                self.safe(idx) && self.safe(value)
+            }
+            MemberAssign(..) => false,
+            Add(l, r, _)
+            | Sub(l, r, _)
+            | Mul(l, r, _)
+            | Div(l, r, _)
+            | Mod(l, r, _)
+            | FAdd(l, r, _)
+            | FSub(l, r, _)
+            | FMul(l, r, _)
+            | FDiv(l, r, _)
+            | Eq(l, r, _)
+            | Ne(l, r, _)
+            | Lt(l, r, _)
+            | Le(l, r, _)
+            | Gt(l, r, _)
+            | Ge(l, r, _)
+            | FEq(l, r, _)
+            | FNe(l, r, _)
+            | FLt(l, r, _)
+            | FLe(l, r, _)
+            | FGt(l, r, _)
+            | FGe(l, r, _)
+            | Xor(l, r, _)
+            | LAnd(l, r, _)
+            | LOr(l, r, _)
+            | StrCat(l, r, _) => self.safe(l) && self.safe(r),
+            DerefAssign(..) => false,
+            Index(l, r, _) => self.safe(l) && self.safe(r),
+            ArrayLiteral(items, _) => items.iter().all(|it| self.safe(it)),
+            ArrayFill(_, len, _) => self.safe(len),
+            StructLiteral(..) => false,
+            UnionLiteral(..) => false,
+            MemberAccess(..) => false,
+            FString(parts, _) => parts.iter().all(|p| self.safe(p)),
         }
     }
 }

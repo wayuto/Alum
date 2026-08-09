@@ -65,6 +65,18 @@ impl Bytecode {
                             print!(" [{}]", self.chunk.code[i + 1]);
                         }
                     }
+                    Op::MAKEFUNC => {
+                        if i + 3 < self.chunk.code.len() {
+                            let addr = ((self.chunk.code[i + 1] as u16) << 8)
+                                | (self.chunk.code[i + 2] as u16);
+                            print!(" [addr {:04x}, {} args]", addr, self.chunk.code[i + 3]);
+                        }
+                    }
+                    Op::CALLVALUE => {
+                        if i + 1 < self.chunk.code.len() {
+                            print!(" [{} args]", self.chunk.code[i + 1]);
+                        }
+                    }
                     _ => {
                         for j in 1..=args_count {
                             if i + j < self.chunk.code.len() {
@@ -100,6 +112,7 @@ pub struct Compiler {
     next_slot: u32,
     funcs: Vec<HashMap<String, Func>>,
     current_func: Option<(String, u32)>,
+    lambda_counter: u32,
 }
 
 impl Compiler {
@@ -111,6 +124,7 @@ impl Compiler {
             next_slot: 0,
             funcs: Vec::new(),
             current_func: None,
+            lambda_counter: 0,
         }
     }
 
@@ -216,7 +230,15 @@ impl Compiler {
                 let slot = self.load_var(name);
                 match slot {
                     Some(s) => self.emit(Op::LOADVAR, &[s]),
-                    None => panic!("Compiler: Variable {} not found", name),
+                    None => {
+                        let func = self
+                            .load_func(name)
+                            .unwrap_or_else(|| panic!("Compiler: Variable {} not found", name));
+                        self.emit(
+                            Op::MAKEFUNC,
+                            &[(func.addr >> 8) & 0xFF, func.addr & 0xFF, func.param_count],
+                        );
+                    }
                 }
             }
 
@@ -464,28 +486,85 @@ impl Compiler {
                 self.compile_func(name, params.len(), params, body);
             }
             Expr::Call(f, _, args, _) => {
-                for arg in args {
-                    self.compile_expr(arg);
-                }
-                let fname = match f.as_ref() {
-                    Expr::Var(name, _) => name.clone(),
-                    other => panic!("Compiler: unsupported callee {:?}", other),
+                let direct_func: Option<Func> = match f.as_ref() {
+                    Expr::Var(name, _) => {
+                        if self.load_var(name).is_none() {
+                            self.load_func(name)
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
                 };
-                let func = self
-                    .load_func(&fname)
-                    .unwrap_or_else(|| panic!("Compiler: Function {} not found", fname));
-                if func.param_count != args.len() as u32 {
-                    panic!(
-                        "Compiler: Function {} expects {} arguments, got {}",
-                        fname,
-                        func.param_count,
-                        args.len()
-                    );
+                match direct_func {
+                    Some(func) => {
+                        if func.param_count != args.len() as u32 {
+                            panic!(
+                                "Compiler: Function call expects {} arguments, got {}",
+                                func.param_count,
+                                args.len()
+                            );
+                        }
+                        for arg in args {
+                            self.compile_expr(arg);
+                        }
+                        self.emit(
+                            Op::CALL,
+                            &[
+                                ((func.addr >> 8) & 0xFF),
+                                func.addr & 0xFF,
+                                func.param_count,
+                            ],
+                        );
+                    }
+                    None => {
+                        self.compile_expr(f);
+                        for arg in args {
+                            self.compile_expr(arg);
+                        }
+                        self.emit(Op::CALLVALUE, &[args.len() as u32]);
+                    }
                 }
-                let target = func.addr;
+            }
+
+            Expr::Lambda(params, body, _, _) => {
+                let name = format!("_lambda_{}", self.lambda_counter);
+                self.lambda_counter += 1;
+
+                let jump_addr = self.code.len() as u32;
+                self.emit(Op::JUMP, &[0, 0]);
+                let func_addr = self.code.len() as u32;
+
+                self.funcs.last_mut().unwrap().insert(
+                    name.clone(),
+                    Func {
+                        addr: func_addr,
+                        param_count: params.len() as u32,
+                    },
+                );
+
+                self.enter_scope();
+                for (param, _) in params {
+                    self.decl_var(param);
+                }
+                self.current_func = Some((name, func_addr));
+                self.compile_expr(body);
+                self.current_func = None;
+
+                match &**body {
+                    Expr::Return(..) => {}
+                    _ => self.emit(Op::RET, &[]),
+                }
+                self.exit_scope();
+
+                self.patch_jump_addr(jump_addr + 1, self.code.len() as u32);
                 self.emit(
-                    Op::CALL,
-                    &[((target >> 8) & 0xFF), (target & 0xFF), func.param_count],
+                    Op::MAKEFUNC,
+                    &[
+                        (func_addr >> 8) & 0xFF,
+                        func_addr & 0xFF,
+                        params.len() as u32,
+                    ],
                 );
             }
 

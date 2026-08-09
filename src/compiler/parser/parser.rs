@@ -19,6 +19,7 @@ impl<'a> Parser<'a> {
             type_param_scopes: Vec::new(),
             has_fstring: false,
             scope_depth: 0,
+            deref_depth: 0,
         }
     }
 
@@ -77,6 +78,7 @@ impl<'a> Parser<'a> {
             enums: self.enums.clone(),
             type_param_scopes: self.type_param_scopes.clone(),
             has_fstring: false,
+            deref_depth: 0,
             scope_depth: self.scope_depth,
         };
         sub.expr()
@@ -721,9 +723,16 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn on_same_line(op_line: usize, left_line: usize) -> bool {
+        left_line == 0 || op_line == left_line
+    }
+
     fn logical(&mut self) -> Result<Expr, ParserError> {
         let mut left = self.bitwise()?;
-        while let Some(Ok((op, _))) = self.peek().cloned() {
+        while let Some(Ok((op, span))) = self.peek().cloned() {
+            if !Self::on_same_line(span.line, left.span().line) {
+                break;
+            }
             match op {
                 Token::AND | Token::OR => {
                     self.next()?;
@@ -743,7 +752,10 @@ impl<'a> Parser<'a> {
 
     fn bitwise(&mut self) -> Result<Expr, ParserError> {
         let mut left = self.comparison()?;
-        while let Some(Ok((op, _))) = self.peek().cloned() {
+        while let Some(Ok((op, span))) = self.peek().cloned() {
+            if !Self::on_same_line(span.line, left.span().line) {
+                break;
+            }
             match op {
                 Token::XOR => {
                     self.next()?;
@@ -837,7 +849,10 @@ impl<'a> Parser<'a> {
 
     fn comparison(&mut self) -> Result<Expr, ParserError> {
         let mut left = self.additive()?;
-        while let Some(Ok((op, _))) = self.peek().cloned() {
+        while let Some(Ok((op, span))) = self.peek().cloned() {
+            if !Self::on_same_line(span.line, left.span().line) {
+                break;
+            }
             match op {
                 Token::CEQ | Token::NE | Token::LT | Token::LE | Token::GT | Token::GE => {
                     self.next()?;
@@ -862,14 +877,19 @@ impl<'a> Parser<'a> {
     fn additive(&mut self) -> Result<Expr, ParserError> {
         let mut left = self.term()?;
 
-        if let Some(Ok((Token::DOTDOT, _))) = self.peek() {
-            self.next()?;
-            let right = self.term()?;
-            let span = left.span();
-            return Ok(Expr::Range(Box::new(left), Box::new(right), span));
+        if let Some(Ok((Token::DOTDOT, span))) = self.peek().cloned() {
+            if span.line == 0 || Self::on_same_line(span.line, left.span().line) {
+                self.next()?;
+                let right = self.term()?;
+                let span = left.span();
+                return Ok(Expr::Range(Box::new(left), Box::new(right), span));
+            }
         }
 
-        while let Some(Ok((op, _))) = self.peek().cloned() {
+        while let Some(Ok((op, span))) = self.peek().cloned() {
+            if !Self::on_same_line(span.line, left.span().line) {
+                break;
+            }
             match op {
                 Token::PLUS | Token::MINUS => {
                     self.next()?;
@@ -889,7 +909,10 @@ impl<'a> Parser<'a> {
 
     fn term(&mut self) -> Result<Expr, ParserError> {
         let mut left = self.prefix()?;
-        while let Some(Ok((op, _))) = self.peek().cloned() {
+        while let Some(Ok((op, span))) = self.peek().cloned() {
+            if !Self::on_same_line(span.line, left.span().line) {
+                break;
+            }
             match op {
                 Token::STAR | Token::SLASH | Token::PERCENT => {
                     self.next()?;
@@ -912,7 +935,9 @@ impl<'a> Parser<'a> {
         match self.peek().cloned() {
             Some(Ok((Token::STAR, span))) => {
                 self.next()?;
+                self.deref_depth += 1;
                 let operand = self.prefix()?;
+                self.deref_depth -= 1;
                 Ok(Expr::Deref(Box::new(operand), span))
             }
             Some(Ok((Token::LAND, span))) => {
@@ -1194,28 +1219,32 @@ impl<'a> Parser<'a> {
                         }
                     }
 
-                    if let Some(Ok((Token::EQ, _))) = self.peek() {
-                        self.next()?;
-                        let val = self.expr()?;
-                        return Ok(Expr::VarAssign(name, Box::new(val), span));
+                    if self.deref_depth == 0 {
+                        if let Some(Ok((Token::EQ, _))) = self.peek() {
+                            self.next()?;
+                            let val = self.expr()?;
+                            return Ok(Expr::VarAssign(name, Box::new(val), span));
+                        }
+                        if let Some(Ok((Token::PLUSEQ, _))) = self.peek() {
+                            self.next()?;
+                            let val = self.expr()?;
+                            return Ok(Expr::AddAssign(name, Box::new(val), span));
+                        }
+                        if let Some(Ok((Token::MINUSEQ, _))) = self.peek() {
+                            self.next()?;
+                            let val = self.expr()?;
+                            return Ok(Expr::SubAssign(name, Box::new(val), span));
+                        }
                     }
-                    if let Some(Ok((Token::PLUSEQ, _))) = self.peek() {
-                        self.next()?;
-                        let val = self.expr()?;
-                        return Ok(Expr::AddAssign(name, Box::new(val), span));
-                    }
-                    if let Some(Ok((Token::MINUSEQ, _))) = self.peek() {
-                        self.next()?;
-                        let val = self.expr()?;
-                        return Ok(Expr::SubAssign(name, Box::new(val), span));
-                    }
-                    if let Some(Ok((Token::PLUSPLUS, _))) = self.peek() {
-                        self.next()?;
-                        return Ok(Expr::Inc(name, span));
-                    }
-                    if let Some(Ok((Token::MINUSMINUS, _))) = self.peek() {
-                        self.next()?;
-                        return Ok(Expr::Dec(name, span));
+                    if self.deref_depth == 0 {
+                        if let Some(Ok((Token::PLUSPLUS, _))) = self.peek() {
+                            self.next()?;
+                            return Ok(Expr::Inc(name, span));
+                        }
+                        if let Some(Ok((Token::MINUSMINUS, _))) = self.peek() {
+                            self.next()?;
+                            return Ok(Expr::Dec(name, span));
+                        }
                     }
                     return Ok(Expr::Var(name, span));
                 }
