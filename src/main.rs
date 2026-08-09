@@ -91,7 +91,13 @@ fn run() -> Result<(), Box<dyn Error>> {
             eprintln!("Linking {} to {}", obj_files.join(", "), exe_path);
         }
 
-        link(obj_files, &std_lib_path, &exe_path, cli.verbose, &cli.cte_lib)?;
+        link(
+            obj_files,
+            &std_lib_path,
+            &exe_path,
+            cli.verbose,
+            &cli.cte_lib,
+        )?;
         return Ok(());
     }
 
@@ -145,7 +151,13 @@ fn run() -> Result<(), Box<dyn Error>> {
             eprintln!("Linking {} to {}", obj_files.join(", "), exe_path);
         }
 
-        link(obj_files, &std_lib_path, &exe_path, cli.verbose, &cli.cte_lib)?;
+        link(
+            obj_files,
+            &std_lib_path,
+            &exe_path,
+            cli.verbose,
+            &cli.cte_lib,
+        )?;
     }
 
     Ok(())

@@ -38,7 +38,9 @@ pub struct NativeTable {
 
 impl NativeTable {
     pub fn open(libs: &[String]) -> Result<NativeTable, String> {
-        ffi().ok_or_else(|| "libffi is not available (needed for compile-time native calls)".to_string())?;
+        ffi().ok_or_else(|| {
+            "libffi is not available (needed for compile-time native calls)".to_string()
+        })?;
         let mut table = NativeTable {
             entries: HashMap::new(),
             handles: Vec::new(),
@@ -86,7 +88,8 @@ impl Drop for NativeTable {
 
 #[derive(Clone, Copy)]
 struct Ffi {
-    prep_cif: unsafe extern "C" fn(*mut u8, c_int, u32, *const c_void, *const *const c_void) -> c_int,
+    prep_cif:
+        unsafe extern "C" fn(*mut u8, c_int, u32, *const c_void, *const *const c_void) -> c_int,
     call: unsafe extern "C" fn(*const u8, *const c_void, *mut c_void, *const *const c_void),
     t_sint32: *const c_void,
     t_double: *const c_void,
@@ -108,14 +111,12 @@ fn load_ffi() -> Option<Ffi> {
         };
         let Some(prep_cif) = f_sym_typed::<
             unsafe extern "C" fn(*mut u8, c_int, u32, *const c_void, *const *const c_void) -> c_int,
-        >(handle, "ffi_prep_cif")
-        else {
+        >(handle, "ffi_prep_cif") else {
             continue;
         };
         let Some(call) = f_sym_typed::<
             unsafe extern "C" fn(*const u8, *const c_void, *mut c_void, *const *const c_void),
-        >(handle, "ffi_call")
-        else {
+        >(handle, "ffi_call") else {
             continue;
         };
         let Some(t_sint32) = f_sym(handle, "ffi_type_sint32") else {
@@ -163,7 +164,7 @@ pub fn call_native(
     let mut strings: Vec<CString> = Vec::new();
 
     for (kind, value) in params.iter().zip(args.iter()) {
-    let slot: u64 = match kind {
+        let slot: u64 = match kind {
             NativeKind::Int => match value {
                 Value::Int(i) => *i as u64,
                 Value::Float(f) => *f as u64,
@@ -180,16 +181,16 @@ pub fn call_native(
                 Value::Int(i) => (*i as f64).to_bits(),
                 _ => return None,
             },
-NativeKind::Str => match value {
-                    Value::Str(s) => {
-                        let c = CString::new(s.clone()).ok()?;
-                        let p = c.as_ptr() as u64;
-                        strings.push(c);
-                        p
-                    }
-                    _ => return None,
-                },
-            };
+            NativeKind::Str => match value {
+                Value::Str(s) => {
+                    let c = CString::new(s.clone()).ok()?;
+                    let p = c.as_ptr() as u64;
+                    strings.push(c);
+                    p
+                }
+                _ => return None,
+            },
+        };
         let idx = storage.len();
         storage.push(slot);
         avalues.push(unsafe { storage.as_ptr().add(idx) as *const c_void });
@@ -246,21 +247,13 @@ NativeKind::Str => match value {
 fn open_lib(name: &str) -> Option<*mut c_void> {
     let n = CString::new(name).ok()?;
     let h = unsafe { dlopen(n.as_ptr(), RTLD_NOW | RTLD_LOCAL) };
-    if h.is_null() {
-        None
-    } else {
-        Some(h)
-    }
+    if h.is_null() { None } else { Some(h) }
 }
 
 fn f_sym(handle: *mut c_void, name: &str) -> Option<*mut c_void> {
     let n = CString::new(name).ok()?;
     let p = unsafe { dlsym(handle, n.as_ptr()) };
-    if p.is_null() {
-        None
-    } else {
-        Some(p)
-    }
+    if p.is_null() { None } else { Some(p) }
 }
 
 fn f_sym_typed<T: Copy>(handle: *mut c_void, name: &str) -> Option<T> {

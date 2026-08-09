@@ -413,13 +413,13 @@ impl GVM {
                             );
                         }
                     };
-let operand_base = self.stack.len() - argc;
-let mut args: Vec<Value> = (0..argc).map(|_| self.pop()).collect();
-self.stack.truncate(operand_base);
-args.reverse();
-let result = call_native(&entry, &args)
-    .unwrap_or_else(|| panic!("NativeError: call to native function failed"));
-self.stack.push(result);
+                    let operand_base = self.stack.len() - argc;
+                    let mut args: Vec<Value> = (0..argc).map(|_| self.pop()).collect();
+                    self.stack.truncate(operand_base);
+                    args.reverse();
+                    let result = call_native(&entry, &args)
+                        .unwrap_or_else(|| panic!("NativeError: call to native function failed"));
+                    self.stack.push(result);
                 }
                 Op::MAKEFUNC => {
                     let high = self.read() as usize;

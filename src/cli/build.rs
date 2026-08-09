@@ -91,7 +91,15 @@ pub fn exec_run(
     verbose: bool,
     cte_libs: Vec<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let obj_file = build(input.clone(), false, None, include_paths, false, verbose, cte_libs.clone())?;
+    let obj_file = build(
+        input.clone(),
+        false,
+        None,
+        include_paths,
+        false,
+        verbose,
+        cte_libs.clone(),
+    )?;
 
     let exe_name = if input.ends_with(".al") {
         input.replace(".al", "")
