@@ -6,6 +6,68 @@ use crate::compiler::{
 };
 use std::collections::HashMap;
 
+#[derive(Clone, Copy)]
+enum CompoundOp {
+    Add,
+    Sub,
+}
+
+fn op_line(expr: &Expr) -> usize {
+    match expr {
+        Expr::Index(base, _, _) | Expr::MemberAccess(base, _, _) | Expr::Call(base, _, _, _) => {
+            op_line(base)
+        }
+        Expr::Deref(inner, _) | Expr::AddressOf(inner, _) | Expr::Neg(inner, _) => op_line(inner),
+        _ => expr.span().line,
+    }
+}
+
+fn make_compound_assign(target: Expr, op: CompoundOp, rhs: Expr, span: Span) -> Expr {
+    let bin = |l: Expr, r: Expr| {
+        let sp = Span::new(0, 0);
+        match op {
+            CompoundOp::Add => Expr::Add(Box::new(l), Box::new(r), sp),
+            CompoundOp::Sub => Expr::Sub(Box::new(l), Box::new(r), sp),
+        }
+    };
+    match &target {
+        Expr::Index(arr, idx, _) => {
+            let t = Expr::Index(arr.clone(), idx.clone(), Span::new(0, 0));
+            let v = bin(t.clone(), rhs);
+            Expr::IndexAssign(Box::new(t), Box::new(v), span)
+        }
+        Expr::MemberAccess(obj, field, _) => {
+            let t = Expr::MemberAccess(obj.clone(), field.clone(), Span::new(0, 0));
+            let v = bin(t, rhs);
+            Expr::MemberAssign(obj.clone(), field.clone(), Box::new(v), span)
+        }
+        Expr::Deref(ptr, _) => {
+            let t = Expr::Deref(ptr.clone(), Span::new(0, 0));
+            let v = bin(t, rhs);
+            Expr::DerefAssign(ptr.clone(), Box::new(v), span)
+        }
+        _ => {
+            let t = target.clone();
+            let v = bin(t.clone(), rhs);
+            Expr::IndexAssign(Box::new(t), Box::new(v), span)
+        }
+    }
+}
+
+fn make_inc_dec(target: Expr, is_inc: bool, span: Span) -> Expr {
+    let one = Expr::Int(1, Span::new(0, 0));
+    make_compound_assign(
+        target,
+        if is_inc {
+            CompoundOp::Add
+        } else {
+            CompoundOp::Sub
+        },
+        one,
+        span,
+    )
+}
+
 impl<'a> Parser<'a> {
     pub fn new(lex: Lexer<'a>) -> Self {
         Self {
@@ -671,7 +733,7 @@ impl<'a> Parser<'a> {
                     Ok(Expr::Enum(name, members, span))
                 }
 
-                Ok((_, _)) => {
+                Ok((_, span)) => {
                     let expr = self.logical()?;
                     if let Some(Ok((Token::EQ, _))) = self.peek() {
                         self.next()?;
@@ -713,6 +775,16 @@ impl<'a> Parser<'a> {
                                 Span::new(0, 0),
                             )),
                         };
+                    }
+                    if let Some(Ok((Token::PLUSEQ, _))) = self.peek() {
+                        self.next()?;
+                        let val = self.expr()?;
+                        return Ok(make_compound_assign(expr, CompoundOp::Add, val, span));
+                    }
+                    if let Some(Ok((Token::MINUSEQ, _))) = self.peek() {
+                        self.next()?;
+                        let val = self.expr()?;
+                        return Ok(make_compound_assign(expr, CompoundOp::Sub, val, span));
                     }
                     Ok(expr)
                 }
@@ -774,7 +846,10 @@ impl<'a> Parser<'a> {
 
         loop {
             match self.peek().cloned() {
-                Some(Ok((Token::LPAREN, _))) => {
+                Some(Ok((Token::LPAREN, span))) => {
+                    if !Self::on_same_line(span.line, op_line(&callee)) {
+                        break;
+                    }
                     self.next()?;
                     let mut args = Vec::new();
                     loop {
@@ -809,7 +884,10 @@ impl<'a> Parser<'a> {
                     }
                     callee = Expr::Call(Box::new(callee), Vec::new(), args, Span::new(0, 0));
                 }
-                Some(Ok((Token::LBRACKET, _))) => {
+                Some(Ok((Token::LBRACKET, span))) => {
+                    if !Self::on_same_line(span.line, op_line(&callee)) {
+                        break;
+                    }
                     self.next()?;
                     let index = self.expr()?;
                     let (token, span) = self.next()?;
@@ -825,7 +903,10 @@ impl<'a> Parser<'a> {
                     }
                     callee = Expr::Index(Box::new(callee), Box::new(index), Span::new(0, 0));
                 }
-                Some(Ok((Token::DOT, _))) => {
+                Some(Ok((Token::DOT, span))) => {
+                    if !Self::on_same_line(span.line, op_line(&callee)) {
+                        break;
+                    }
                     self.next()?;
                     let (token, span) = self.next()?;
                     let field_name = match token {
@@ -839,6 +920,28 @@ impl<'a> Parser<'a> {
                         }
                     };
                     callee = Expr::MemberAccess(Box::new(callee), field_name, Span::new(0, 0));
+                }
+                Some(Ok((Token::PLUSPLUS, span))) => {
+                    if Self::on_same_line(span.line, op_line(&callee)) {
+                        self.next()?;
+                        callee = match callee {
+                            Expr::Var(name, _) => Expr::Inc(name, span),
+                            other => make_inc_dec(other, true, span),
+                        };
+                    } else {
+                        break;
+                    }
+                }
+                Some(Ok((Token::MINUSMINUS, span))) => {
+                    if Self::on_same_line(span.line, op_line(&callee)) {
+                        self.next()?;
+                        callee = match callee {
+                            Expr::Var(name, _) => Expr::Dec(name, span),
+                            other => make_inc_dec(other, false, span),
+                        };
+                    } else {
+                        break;
+                    }
                 }
                 _ => break,
             }
@@ -1237,13 +1340,17 @@ impl<'a> Parser<'a> {
                         }
                     }
                     if self.deref_depth == 0 {
-                        if let Some(Ok((Token::PLUSPLUS, _))) = self.peek() {
-                            self.next()?;
-                            return Ok(Expr::Inc(name, span));
+                        if let Some(Ok((Token::PLUSPLUS, op_span))) = self.peek() {
+                            if Self::on_same_line(op_span.line, span.line) {
+                                self.next()?;
+                                return Ok(Expr::Inc(name, span));
+                            }
                         }
-                        if let Some(Ok((Token::MINUSMINUS, _))) = self.peek() {
-                            self.next()?;
-                            return Ok(Expr::Dec(name, span));
+                        if let Some(Ok((Token::MINUSMINUS, op_span))) = self.peek() {
+                            if Self::on_same_line(op_span.line, span.line) {
+                                self.next()?;
+                                return Ok(Expr::Dec(name, span));
+                            }
                         }
                     }
                     return Ok(Expr::Var(name, span));
@@ -1260,35 +1367,19 @@ impl<'a> Parser<'a> {
                 }
                 Ok((Token::PLUSPLUS, span)) => {
                     self.next()?;
-                    match self.peek().cloned() {
-                        Some(Ok((Token::IDENT(name), _))) => {
-                            self.next()?;
-                            return Ok(Expr::Inc(name, span));
-                        }
-                        _ => {
-                            return Err(ParserError::UnexpectedToken {
-                                expected: None,
-                                found: self.peek().cloned().unwrap().unwrap().0,
-                                span,
-                            });
-                        }
-                    }
+                    let operand = self.prefix()?;
+                    return Ok(match operand {
+                        Expr::Var(name, _) => Expr::Inc(name, span),
+                        other => make_inc_dec(other, true, span),
+                    });
                 }
                 Ok((Token::MINUSMINUS, span)) => {
                     self.next()?;
-                    match self.peek().cloned() {
-                        Some(Ok((Token::IDENT(name), _))) => {
-                            self.next()?;
-                            return Ok(Expr::Dec(name, span));
-                        }
-                        _ => {
-                            return Err(ParserError::UnexpectedToken {
-                                expected: None,
-                                found: self.peek().cloned().unwrap().unwrap().0,
-                                span,
-                            });
-                        }
-                    }
+                    let operand = self.prefix()?;
+                    return Ok(match operand {
+                        Expr::Var(name, _) => Expr::Dec(name, span),
+                        other => make_inc_dec(other, false, span),
+                    });
                 }
                 Ok((Token::NOT, span)) => {
                     self.next()?;
