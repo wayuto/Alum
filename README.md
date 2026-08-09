@@ -30,6 +30,7 @@ The official tutorial series (中文教程) walks through the language from scra
 - **Expression-Oriented Control Flow** — `if-else` and `match` are expressions; `for` iterates arrays and ranges (`n..m`); `while` loops; implicit return of the last expression
 - **Function Annotations** — `fun(extern)` for FFI, `fun(pub)` to export symbols, `fun(pure)` to mark side-effect-free functions
 - **Compile-Time Evaluation (CTE)** — `pure` functions are evaluated at compile time by the built-in GosVM bytecode interpreter (e.g. `fib(40)` compiles to a single constant in ~10ms)
+- **Compile-Time Native Evaluation** — `fun(extern, pure)` declarations may be folded at compile time by attaching a native shared library with `--cte-lib ./libfoo.so`. The compiler `dlopen`s the library (using `libffi` via `dlsym`) for constant folding; the `.so` is also linked into the final executable (with an rpath) so any call that could not be folded is still resolved at runtime. Emitting the warning `purity of external function '<name>' cannot be verified` on every `extern pure` declaration, since an external symbol's purity cannot be statically verified. See `examples/32_native_cte/`.
 - **F-String Interpolation** — `println(f"value: {x}")` with embedded expressions
 - **C Interop (FFI)** — call C functions directly via `fun(extern)`; memory layout is C-compatible with no conversion overhead
 - **Preprocessor** — `$import`, `$define` macros, and conditional compilation via `$ifdef`/`$ifndef`/`$else`/`$endif`
@@ -220,6 +221,60 @@ fun main(): int {
 }
 ```
 
+## Compiling and Running
+
+### Single-file program
+
+```bash
+alc -r hello.al          # compile to ./hello and run
+alc -c hello.al -o hello.o
+alc hello.o /usr/local/lib/libalum.a -o hello   # manual link
+```
+
+### Native libraries (compile-time + runtime)
+
+Attach a `.so` to fold `fun(extern, pure)` calls at compile time and to resolve
+any remaining calls at runtime:
+
+```bash
+gcc -shared -fPIC -o libfoo.so foo.c
+alc -r --cte-lib ./libfoo.so main.al
+# --cte-lib may be repeated; the listed libraries are also linked into the
+# produced executable (with an rpath).
+```
+
+Each `fun(extern, pure)` declaration emits
+`warning: purity of external function '<name>' cannot be verified` — this is
+expected, since an external symbol's side effects cannot be statically proven.
+
+## Project Builds with almk
+
+For larger projects, `almk` scaffolds, builds, and runs Alum/C projects.
+A project is described by `Alumake.toml`:
+
+```toml
+[package]
+name = "native_cte"
+version = "0.1.0"
+language = "alum"
+
+[build]
+linker = "alc"
+cc = "cc"
+alc = "alc"
+
+[native]
+shared = true               # produce lib<name>_native.so
+sources = ["native/*.c"]    # C sources (supports a single `*` glob)
+```
+
+`almk run` compiles the `[native]` C sources into `target/lib<name>_native.so`,
+passes it to `alc --cte-lib` (so `fun(extern, pure)` constants are folded), and
+links the `.so` into the final executable with an rpath (when using
+`linker = "alc"`, alc handles `-dynamic-linker` and rpath automatically; with
+`cc`/`gcc` almk passes them explicitly). See
+[`examples/32_native_cte`](./examples/32_native_cte).
+
 ## CLI Usage
 
 ```
@@ -236,6 +291,7 @@ Options:
   --ast                     Output AST representation
   -I <DIR>                  Add include directory (can be used multiple times)
   --nostdlib                Do not link with standard library
+  --cte-lib <PATH>          Shared library dlopened for compile-time evaluation of `fun(extern, pure)` (can be repeated; also linked into the final executable)
   -v, --verbose             Verbose output
   -h, --help                Print help
   -V, --version             Print version

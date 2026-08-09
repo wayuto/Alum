@@ -22,7 +22,13 @@ pub fn link(
     }
 
     for lib in native_libs {
-        cmd.arg(std::path::Path::new(lib).canonicalize().unwrap_or_else(|_| std::path::PathBuf::from(lib)));
+        let abs = std::path::Path::new(lib)
+            .canonicalize()
+            .unwrap_or_else(|_| std::path::PathBuf::from(lib));
+        if let Some(parent) = abs.parent() {
+            cmd.arg("-rpath").arg(parent.to_str().unwrap().to_string());
+        }
+        cmd.arg(abs);
     }
 
     if !native_libs.is_empty() {

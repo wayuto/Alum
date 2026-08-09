@@ -258,9 +258,49 @@ void c_print_int(int value) {
 - C files in `./include` directory will also be compiled
 - Use `includes` to specify additional include paths for both C and Alum
 
-### Dependencies
+### Native Libraries (Compile-Time Evaluation)
 
-#### For `.zip` file:
+Almk can compile C helpers into a shared library that is attached to the Alum
+build via `alc --cte-lib`. This makes `fun(extern, pure)` declarations foldable
+at compile time (and is also linked rpath-resolved into the final executable so
+un-foldable calls still resolve at runtime). Each `fun(extern, pure)` emits
+`warning: purity of external function '<name>' cannot be verified`.
+
+**`Alumake.toml`:**
+```toml
+[package]
+name = "native_cte"
+version = "0.1.0"
+language = "alum"
+
+[build]
+linker = "alc"
+cc = "cc"
+alc = "alc"
+
+[native]
+shared = true               # true (default) -> .so; false -> static .a
+name = "native"             # optional; default "<package>_native"
+sources = ["native/*.c"]    # paths/globs of C sources compiled into the lib
+```
+
+**Build & run:**
+```bash
+$ almk run
+# compiles native/*.c -> target/libnative_cte_native.so
+# compiles src/main.al with --cte-lib .../libnative_cte_native.so (folds pure calls)
+# links the .so (+rpath) into target/native_cte and runs it
+```
+
+**`[native]` field reference:**
+
+| Field    | Type          | Optionality | Default          | Description                                          |
+| -------- | ------------- | ----------- | ---------------- | ---------------------------------------------------- |
+| shared   | bool          | optional    | `true`           | `true` = shared `.so`, `false` = static `.a`         |
+| name     | String        | optional    | `<package>_native` | output library name                                |
+| sources  | Vec<String>   | optional    | —                | C files/globs compiled into the native library      |
+
+### Dependencies
 ```toml
 [dependencies.dep]
 url = "https://www.website.com/dep.zip"

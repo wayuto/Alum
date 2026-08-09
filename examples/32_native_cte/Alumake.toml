@@ -1,0 +1,31 @@
+# Alum project that mixes C native helpers with compile-time evaluation.
+#
+# Build & run with:
+#     almk build    # produces target/native_cte (+ rpath to the native .so)
+#     almk run      # build, then execute target/native_cte
+#
+# The C sources under `native/` are compiled into
+# `target/libnative_cte_native.so`. Alumake passes it to `alc -c` via
+# `--cte-lib` so `fun(extern, pure)` calls are folded at compile time, and
+# also links it into the final executable (with an rpath) so any call that
+# could not be folded is still resolved at runtime.
+
+[package]
+name = "native_cte"
+version = "0.1.0"
+author = ""
+license = ""
+language = "alum"
+
+[build]
+# `alc` is the linker: it knows about Alum's object/layout and, when given
+# `--cte-lib`, both folds `fun(extern, pure)` calls at compile time and links
+# the native shared library into the final executable (adding an rpath).
+linker = "alc"
+cc = "cc"
+alc = "alc"
+
+[native]
+# Compile a shared library to feed to `--cte-lib` and to link into the exe.
+shared = true
+sources = ["native/*.c"]

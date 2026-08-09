@@ -2,11 +2,13 @@
 #include <string.h>
 #include <stdio.h>
 
-// Helper library for examples/32_native_cte.al
-//
-// Build the shared library, then run with:
-//   gcc -shared -fPIC -o libcte32.so 32_native_cte.c
-//   alc -r --cte-lib ./libcte32.so 32_native_cte.al
+/* Native helper library for the `native_cte` Alum project.
+ * These C functions are loaded by `alumake` into target/libnative_cte_native.so
+ * and used in two ways by the Alum sources:
+ *   - at compile time: `fun(extern, pure) F(...): T` constants are folded to
+ *     literals (`alc -c --cte-lib ...`);
+ *   - at runtime: any call that could not be folded (e.g. with dynamic
+ *     arguments) is linked directly against the shared library. */
 
 int32_t cte_add(int32_t a, int32_t b) { return a + b; }
 
@@ -27,7 +29,7 @@ const char *cte_upper(const char *s) {
     static char buf[128];
     size_t i = 0;
     for (; s[i] && i < sizeof(buf) - 1; i++) {
-        buf[i] = (s[i] >= 'a' && s[i] <= 'z') ? (char)(s[i] - 32) : s[i];
+        buf[i] = (s[i] >= 'a' && s[i] <= 'z') ? (char)(s[i] - 'a' + 'A') : s[i];
     }
     buf[i] = '\0';
     return buf;

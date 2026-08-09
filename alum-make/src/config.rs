@@ -6,7 +6,19 @@ use serde::{Deserialize, Serialize};
 pub struct Config {
     pub package: Package,
     pub build: Build,
+    #[serde(default)]
+    pub native: Option<Native>,
     pub dependencies: Option<HashMap<String, Dependency>>,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct Native {
+    #[serde(default)]
+    pub sources: Vec<String>,
+    #[serde(default)]
+    pub shared: bool,
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]

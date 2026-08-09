@@ -30,6 +30,7 @@ pub fn new(
             nostdlib: None,
             library_type: None,
         },
+        native: None,
         dependencies: None,
     };
     let toml_string = toml::to_string_pretty(&config)?;
