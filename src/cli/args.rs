@@ -40,4 +40,12 @@ pub struct Cli {
 
     #[arg(long, value_name = "TYPE", help = "Build library (static or shared)")]
     pub library: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "PATH",
+        action = clap::ArgAction::Append,
+        help = "Shared library to dlopen for compile-time evaluation of fun(extern, pure) functions"
+    )]
+    pub cte_lib: Vec<String>,
 }

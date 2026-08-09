@@ -5,6 +5,7 @@ pub fn link(
     std_lib_path: &str,
     exe_path: &str,
     verbose: bool,
+    native_libs: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut cmd = Command::new("rust-lld");
 
@@ -18,6 +19,24 @@ pub fn link(
 
     if !std_lib_path.is_empty() {
         cmd.arg(std_lib_path);
+    }
+
+    for lib in native_libs {
+        cmd.arg(std::path::Path::new(lib).canonicalize().unwrap_or_else(|_| std::path::PathBuf::from(lib)));
+    }
+
+    if !native_libs.is_empty() {
+        let candidates = [
+            "/lib64/ld-linux-x86-64.so.2",
+            "/lib/ld-linux-x86-64.so.2",
+            "/lib/ld-musl-x86_64.so.1",
+        ];
+        for loader in candidates.iter() {
+            if std::path::Path::new(loader).exists() {
+                cmd.arg("-dynamic-linker").arg(loader);
+                break;
+            }
+        }
     }
 
     if verbose {

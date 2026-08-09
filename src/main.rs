@@ -31,7 +31,7 @@ fn run() -> Result<(), Box<dyn Error>> {
 
     if cli.run {
         let input = cli.input.first().unwrap().clone();
-        exec_run(input, cli.include_paths, cli.verbose)?;
+        exec_run(input, cli.include_paths, cli.verbose, cli.cte_lib.clone())?;
         return Ok(());
     }
 
@@ -61,6 +61,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             cli.include_paths.clone(),
             cli.preprocess_only,
             cli.verbose,
+            cli.cte_lib.clone(),
         )?;
 
         if !obj_file.is_empty() {
@@ -90,7 +91,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             eprintln!("Linking {} to {}", obj_files.join(", "), exe_path);
         }
 
-        link(obj_files, &std_lib_path, &exe_path, cli.verbose)?;
+        link(obj_files, &std_lib_path, &exe_path, cli.verbose, &cli.cte_lib)?;
         return Ok(());
     }
 
@@ -144,7 +145,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             eprintln!("Linking {} to {}", obj_files.join(", "), exe_path);
         }
 
-        link(obj_files, &std_lib_path, &exe_path, cli.verbose)?;
+        link(obj_files, &std_lib_path, &exe_path, cli.verbose, &cli.cte_lib)?;
     }
 
     Ok(())

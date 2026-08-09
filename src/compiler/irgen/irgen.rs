@@ -10,10 +10,44 @@ use std::collections::{HashMap, HashSet};
 use std::mem::take;
 
 impl IRGen {
+    fn native_resolved(&self, name: &str) -> bool {
+        self.natives
+            .as_ref()
+            .map(|t| t.entries.contains_key(name))
+            .unwrap_or(false)
+    }
+
     pub fn compile(&mut self, program: Program) -> Result<IRProgram, CodeGenError> {
         super::purity::check_lambda_params(&program.body)?;
         let program = self.lambda2function(program);
         self.program_body = program.body.clone();
+
+        let mut warned_extern_pure: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        for expr in &self.program_body {
+            if let Expr::FuncDecl(name, attrs, _, _, _, _, _) = expr {
+                if attrs.is_external && attrs.is_pure {
+                    if !warned_extern_pure.contains(name.as_str()) {
+                        warned_extern_pure.insert(name.clone());
+                        eprintln!(
+                            "warning: purity of external function '{name}' cannot be verified"
+                        );
+                    }
+                }
+            }
+        }
+
+        if let Some(natives) = self.natives.as_mut() {
+            for expr in &self.program_body {
+                if let Expr::FuncDecl(name, attrs, _, params, ret_type, _, _) = expr {
+                    if attrs.is_external && attrs.is_pure {
+                        if let Some(sig) = native_sig(params, ret_type) {
+                            natives.resolve(name, sig);
+                        }
+                    }
+                }
+            }
+        }
 
         super::purity::check_pure_functions(&self.program_body)?;
 
@@ -289,7 +323,9 @@ impl IRGen {
             .program_body
             .iter()
             .filter_map(|e| match e {
-                Expr::FuncDecl(name, attrs, ..) if attrs.is_pure && !attrs.is_external => {
+                Expr::FuncDecl(name, attrs, ..)
+                    if attrs.is_pure && (!attrs.is_external || self.native_resolved(name)) =>
+                {
                     Some(name.clone())
                 }
                 _ => None,
@@ -304,7 +340,9 @@ impl IRGen {
         }
         for decl in self.program_body.iter() {
             if let Expr::FuncDecl(name, attrs, _, _, _, body, _) = decl {
-                if (attrs.is_pure || name.starts_with("_lambda_")) && !attrs.is_external {
+                if (attrs.is_pure || name.starts_with("_lambda_"))
+                    && (!attrs.is_external || self.native_resolved(name))
+                {
                     let mut fn_safety = VmSafety::new(&self.program_body, &pure_fns);
                     if !fn_safety.safe(body) {
                         return None;
@@ -318,7 +356,8 @@ impl IRGen {
             .iter()
             .filter_map(|e| match e {
                 Expr::FuncDecl(name, attrs, ..)
-                    if ((attrs.is_pure || name.starts_with("_lambda_")) && !attrs.is_external) =>
+                    if ((attrs.is_pure || name.starts_with("_lambda_"))
+                        && (!attrs.is_external || self.native_resolved(name))) =>
                 {
                     Some((name.clone(), e.clone()))
                 }
@@ -330,9 +369,15 @@ impl IRGen {
         body.push(expr.clone());
         let program = Program { body };
 
+        let natives = self
+            .natives
+            .as_ref()
+            .map(|t| t.entries.clone())
+            .unwrap_or_default();
+
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let bc = Compiler::new().compile(program);
-            let mut vm = GVM::new(bc);
+            let mut vm = GVM::new(bc, natives);
             vm.run();
             vm.result()
         }))
@@ -667,6 +712,31 @@ struct VmSafety<'a> {
     lambda_memo: HashMap<String, bool>,
     lambda_in_progress: HashSet<String>,
     bound: Vec<HashMap<String, String>>,
+}
+
+fn native_sig(
+    params: &[(String, Type)],
+    ret_type: &Type,
+) -> Option<crate::compiler::bytecode::NativeSig> {
+    use crate::compiler::bytecode::NativeKind;
+    let f = |ty: &Type| -> Option<NativeKind> {
+        match ty {
+            Type::Primitive(Primitive::Int) => Some(NativeKind::Int),
+            Type::Primitive(Primitive::Float) => Some(NativeKind::Float),
+            Type::Primitive(Primitive::Boolean) => Some(NativeKind::Bool),
+            Type::Primitive(Primitive::String) => Some(NativeKind::Str),
+            _ => None,
+        }
+    };
+    let mut kinds: Vec<NativeKind> = Vec::new();
+    for (_, pty) in params {
+        kinds.push(f(pty)?);
+    }
+    let ret = f(ret_type)?;
+    Some(crate::compiler::bytecode::NativeSig {
+        params: Box::leak(kinds.into_boxed_slice()),
+        ret,
+    })
 }
 
 impl<'a> VmSafety<'a> {

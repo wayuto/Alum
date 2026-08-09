@@ -12,15 +12,16 @@ use crate::compiler::{irgen::IRGen, parser::Program};
 
 pub struct CodeGen {
     ast: Program,
+    cte_libs: Vec<String>,
 }
 
 impl CodeGen {
-    pub fn new(ast: Program) -> Self {
-        Self { ast }
+    pub fn new(ast: Program, cte_libs: Vec<String>) -> Self {
+        Self { ast, cte_libs }
     }
 
     pub fn generate(self) -> Result<Vec<u8>, CodeGenError> {
-        let mut ir_gen = IRGen::new();
+        let mut ir_gen = IRGen::new(&self.cte_libs);
         let ir_program = ir_gen.compile(self.ast)?;
 
         let mut asm_gen = codegen::AsmCodeGen::new(ir_program);

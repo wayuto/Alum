@@ -13,6 +13,7 @@ pub fn build(
     include_paths: Vec<String>,
     preprocess_only: bool,
     verbose: bool,
+    cte_libs: Vec<String>,
 ) -> Result<String, CompilerError> {
     let src = fs::read_to_string(&input)?;
 
@@ -60,7 +61,7 @@ pub fn build(
     if verbose {
         eprintln!("Generating code...");
     }
-    let codegen = CodeGen::new(ast);
+    let codegen = CodeGen::new(ast, cte_libs);
     let object_code = codegen
         .generate()
         .map_err(|e| CompilerError::new(e, processed.clone(), input.clone(), source_map.clone()))?;
@@ -88,8 +89,9 @@ pub fn exec_run(
     input: String,
     include_paths: Vec<String>,
     verbose: bool,
+    cte_libs: Vec<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let obj_file = build(input.clone(), false, None, include_paths, false, verbose)?;
+    let obj_file = build(input.clone(), false, None, include_paths, false, verbose, cte_libs.clone())?;
 
     let exe_name = if input.ends_with(".al") {
         input.replace(".al", "")
@@ -111,6 +113,7 @@ pub fn exec_run(
         std_lib_path,
         exe_path.to_str().unwrap(),
         verbose,
+        &cte_libs,
     )?;
 
     let exe_file_abs = exe_path.canonicalize()?;

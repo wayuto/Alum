@@ -100,6 +100,7 @@ pub enum Op {
     ARRAYSET,
     MAKEFUNC,
     CALLVALUE,
+    CALLNATIVE,
 }
 impl Op {
     pub fn from_u8(op: u8) -> Option<Self> {
@@ -153,6 +154,7 @@ impl Op {
             46 => Some(Op::ARRAYSET),
             47 => Some(Op::MAKEFUNC),
             48 => Some(Op::CALLVALUE),
+            49 => Some(Op::CALLNATIVE),
             _ => None,
         }
     }
@@ -209,6 +211,7 @@ impl Op {
             Op::ARRAYSET => "ARRAY_SET".to_string(),
             Op::MAKEFUNC => "MAKE_FUNC".to_string(),
             Op::CALLVALUE => "CALL_VALUE".to_string(),
+            Op::CALLNATIVE => "CALL_NATIVE".to_string(),
         }
     }
 
@@ -264,6 +267,7 @@ impl Op {
             Op::ARRAYSET => 1,
             Op::MAKEFUNC => 3,
             Op::CALLVALUE => 1,
+            Op::CALLNATIVE => 3,
         }
     }
 }

@@ -16,6 +16,7 @@ pub struct Bytecode {
 pub struct Chunk {
     pub code: Vec<u8>,
     pub constants: Vec<Value>,
+    pub native_names: Vec<String>,
 }
 
 impl Bytecode {
@@ -77,6 +78,19 @@ impl Bytecode {
                             print!(" [{} args]", self.chunk.code[i + 1]);
                         }
                     }
+                    Op::CALLNATIVE => {
+                        if i + 3 < self.chunk.code.len() {
+                            let idx = ((self.chunk.code[i + 1] as u16) << 8)
+                                | self.chunk.code[i + 2] as u16;
+                            let name = self
+                                .chunk
+                                .native_names
+                                .get(idx as usize)
+                                .cloned()
+                                .unwrap_or_default();
+                            print!(" [{} ; {:?}, {} args]", idx, name, self.chunk.code[i + 3]);
+                        }
+                    }
                     _ => {
                         for j in 1..=args_count {
                             if i + j < self.chunk.code.len() {
@@ -113,6 +127,8 @@ pub struct Compiler {
     funcs: Vec<HashMap<String, Func>>,
     current_func: Option<(String, u32)>,
     lambda_counter: u32,
+    native_names: Vec<String>,
+    native_idx: HashMap<String, u16>,
 }
 
 impl Compiler {
@@ -125,6 +141,8 @@ impl Compiler {
             funcs: Vec::new(),
             current_func: None,
             lambda_counter: 0,
+            native_names: Vec::new(),
+            native_idx: HashMap::new(),
         }
     }
 
@@ -188,6 +206,16 @@ impl Compiler {
     }
 
     pub fn compile(&mut self, program: Program) -> Bytecode {
+        for expr in &program.body {
+            if let Expr::FuncDecl(name, attrs, ..) = expr {
+                if attrs.is_external {
+                    let idx = self.native_names.len();
+                    self.native_names.push(name.clone());
+                    self.native_idx.insert(name.clone(), idx as u16);
+                }
+            }
+        }
+
         self.enter_scope();
 
         for expr in program.body {
@@ -199,6 +227,7 @@ impl Compiler {
             chunk: Chunk {
                 code: self.code.clone(),
                 constants: self.constants.clone(),
+                native_names: self.native_names.clone(),
             },
             max_slot: self.next_slot,
         }
@@ -482,7 +511,10 @@ impl Compiler {
                 self.patch_jump_addr(iff + 1, break_pos);
                 self.exit_scope();
             }
-            Expr::FuncDecl(name, _, _, params, _, body, _) => {
+            Expr::FuncDecl(name, attrs, _, params, _, body, _) => {
+                if attrs.is_external {
+                    return;
+                }
                 self.compile_func(name, params.len(), params, body);
             }
             Expr::Call(f, _, args, _) => {
@@ -518,6 +550,25 @@ impl Compiler {
                         );
                     }
                     None => {
+                        if let Expr::Var(name, _) = f.as_ref() {
+                            if let Some(&idx) = self.native_idx.get(name) {
+                                if args.len() > 255 {
+                                    panic!("Compiler: too many arguments for native call");
+                                }
+                                for arg in args {
+                                    self.compile_expr(arg);
+                                }
+                                self.emit(
+                                    Op::CALLNATIVE,
+                                    &[
+                                        ((idx >> 8) & 0xFF) as u32,
+                                        (idx & 0xFF) as u32,
+                                        args.len() as u32,
+                                    ],
+                                );
+                                return;
+                            }
+                        }
                         self.compile_expr(f);
                         for arg in args {
                             self.compile_expr(arg);

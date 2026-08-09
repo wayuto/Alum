@@ -7,6 +7,7 @@ mod lambda;
 mod purity;
 
 use crate::compiler::{
+    bytecode::NativeTable,
     irgen::ir::{IRConst, IRFunction, IRGlobalVar, IRType},
     parser::{Expr, Type},
 };
@@ -28,10 +29,18 @@ pub struct IRGen {
     pub(super) lambda_counter: u32,
     pub(super) extern_vars: HashMap<String, Type>,
     pub(super) program_body: Vec<Expr>,
+    pub(super) natives: Option<NativeTable>,
 }
 
 impl IRGen {
-    pub fn new() -> Self {
+    pub fn new(cte_libs: &[String]) -> Self {
+        let natives = if cte_libs.is_empty() {
+            None
+        } else {
+            NativeTable::open(cte_libs)
+                .map_err(|e| eprintln!("warning: {e}"))
+                .ok()
+        };
         Self {
             functions: Vec::new(),
             constants: Vec::new(),
@@ -48,6 +57,7 @@ impl IRGen {
             lambda_counter: 0,
             extern_vars: HashMap::new(),
             program_body: Vec::new(),
+            natives,
         }
     }
 }

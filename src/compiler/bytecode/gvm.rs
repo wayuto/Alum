@@ -1,6 +1,6 @@
 use std::process::exit;
 
-use crate::compiler::bytecode::{Bytecode, Op, Value};
+use crate::compiler::bytecode::{Bytecode, NativeEntry, Op, Value, call_native};
 use std::collections::HashMap;
 
 struct CallStack {
@@ -18,11 +18,12 @@ pub struct GVM {
     curr_base_slot: usize,
     curr_operand_base: usize,
     bytecode: Bytecode,
+    natives: HashMap<String, NativeEntry>,
     memo: HashMap<(usize, Vec<Value>), Value>,
 }
 
 impl GVM {
-    pub fn new(bytecode: Bytecode) -> Self {
+    pub fn new(bytecode: Bytecode, natives: HashMap<String, NativeEntry>) -> Self {
         GVM {
             ip: 0,
             stack: Vec::new(),
@@ -31,6 +32,7 @@ impl GVM {
             curr_base_slot: 0,
             curr_operand_base: 0,
             bytecode,
+            natives,
             memo: HashMap::new(),
         }
     }
@@ -391,6 +393,33 @@ impl GVM {
                         Value::Void => {}
                         _ => panic!("TypeError: value is not callable (CALL_VALUE operation)"),
                     }
+                }
+                Op::CALLNATIVE => {
+                    let hi = self.read() as usize;
+                    let lo = self.read() as usize;
+                    let argc = self.read() as usize;
+                    let idx = (hi << 8) | lo;
+                    let entry = self
+                        .bytecode
+                        .chunk
+                        .native_names
+                        .get(idx)
+                        .and_then(|name| self.natives.get(name).copied());
+                    let entry = match entry {
+                        Some(e) => e,
+                        None => {
+                            panic!(
+                                "NativeError: unresolved native function (idx {idx}) in bytecode"
+                            );
+                        }
+                    };
+let operand_base = self.stack.len() - argc;
+let mut args: Vec<Value> = (0..argc).map(|_| self.pop()).collect();
+self.stack.truncate(operand_base);
+args.reverse();
+let result = call_native(&entry, &args)
+    .unwrap_or_else(|| panic!("NativeError: call to native function failed"));
+self.stack.push(result);
                 }
                 Op::MAKEFUNC => {
                     let high = self.read() as usize;
