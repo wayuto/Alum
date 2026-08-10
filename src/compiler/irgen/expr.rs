@@ -1594,6 +1594,7 @@ impl IRGen {
                             ),
                         });
                     }
+                    let mut evaluated: Vec<(Operand, IRType)> = Vec::new();
                     let mut n = 0;
                     for (arg, param) in zip(args.iter(), func.params.iter()) {
                         let operand = self.compile_expr(arg.clone(), ctx)?;
@@ -1608,21 +1609,24 @@ impl IRGen {
                                 ),
                             });
                         }
-                        match param.1 {
+                        evaluated.push((operand, param.1.clone()));
+                        n += 1;
+                    }
+                    for (n, (operand, ir_type)) in evaluated.iter().enumerate() {
+                        match ir_type {
                             IRType::Float => ctx.instructions.push(Instruction {
                                 op: Op::FArg(n),
                                 dst: None,
-                                src1: Some(operand),
+                                src1: Some(operand.clone()),
                                 src2: None,
                             }),
                             _ => ctx.instructions.push(Instruction {
                                 op: Op::Arg(n),
                                 dst: None,
-                                src1: Some(operand),
+                                src1: Some(operand.clone()),
                                 src2: None,
                             }),
                         }
-                        n += 1;
                     }
                     let res_tmp = ctx.new_tmp(func.ret_type);
                     ctx.instructions.push(Instruction {
@@ -1635,12 +1639,16 @@ impl IRGen {
                 } else {
                     let ret_ir_type = self.member_call_ret_type(&callee, ctx);
                     let callee_op = self.compile_expr(*callee, ctx)?;
-                    for (n, arg) in args.iter().enumerate() {
+                    let mut evaluated: Vec<Operand> = Vec::new();
+                    for arg in args.iter() {
                         let operand = self.compile_expr(arg.clone(), ctx)?;
+                        evaluated.push(operand);
+                    }
+                    for (n, operand) in evaluated.iter().enumerate() {
                         ctx.instructions.push(Instruction {
                             op: Op::Arg(n as usize),
                             dst: None,
-                            src1: Some(operand),
+                            src1: Some(operand.clone()),
                             src2: None,
                         });
                     }

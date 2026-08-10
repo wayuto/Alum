@@ -377,8 +377,7 @@ fn classify(
             Err("pointer store (write through pointer) in a pure function".to_string())
         }
         IndexAssign(obj, value, _) => {
-            classify(fn_name, obj, decls, globals, in_progress, memo, bound)?;
-            classify(fn_name, value, decls, globals, in_progress, memo, bound)
+            Err("array store (write through pointer) in a pure function".to_string())
         }
         MemberAccess(obj, _, _) => classify(fn_name, obj, decls, globals, in_progress, memo, bound),
         MemberAssign(obj, _, value, _) => {

@@ -1,10 +1,6 @@
 $ifndef ALUM_MATH
 $define ALUM_MATH 1
 
-// math.ah — math 的纯函数实现直接放在头文件内。
-// 使用方编译时函数体可见，可被编译期求值 / 内联，
-// 无需链接 libalum.a（函数体作为本地符号注入各编译单元）。
-
 fun(pure) abs(n: int): int {
     if n < 0 {
         return -n

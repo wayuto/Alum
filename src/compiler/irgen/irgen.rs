@@ -319,6 +319,10 @@ impl IRGen {
     pub(super) fn eval_const_vm(&mut self, expr: &Expr) -> Option<(IRConst, IRType)> {
         use crate::compiler::bytecode::{Compiler, GVM};
 
+        if self.expr_has_var(expr) {
+            return None;
+        }
+
         let pure_fns: HashSet<String> = self
             .program_body
             .iter()
@@ -949,15 +953,7 @@ impl<'a> VmSafety<'a> {
                 r
             }
             Inc(..) | Dec(..) => true,
-            IndexAssign(arr_idx, value, _) => {
-                let Expr::Index(arr, idx, _) = arr_idx.as_ref() else {
-                    return false;
-                };
-                if !matches!(arr.as_ref(), Var(..)) {
-                    return false;
-                }
-                self.safe(idx) && self.safe(value)
-            }
+            IndexAssign(..) => false,
             MemberAssign(..) => false,
             Add(l, r, _)
             | Sub(l, r, _)
