@@ -4,13 +4,14 @@ use crate::compiler::{
     parser::Type,
     parser::{Primitive, Type as HighType},
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
 pub(super) struct Symbol {
     #[allow(dead_code)]
     pub name: String,
     pub ir_type: IRType,
+    pub slot: String,
 }
 
 pub(super) type Scope = HashMap<String, Symbol>;
@@ -22,9 +23,12 @@ pub(super) struct Context {
     pub label_cnt: usize,
     pub loop_end_labels: Vec<String>,
     pub loop_inc_labels: Vec<String>,
+    pub loop_body_pending: bool,
     pub var_types: HashMap<String, crate::compiler::parser::Type>,
     pub array_lengths: HashMap<String, usize>,
     pub func_name: String,
+    pub borrowed: HashSet<String>,
+    pub(super) var_slots: HashMap<String, Vec<String>>,
 }
 
 impl Context {
@@ -36,10 +40,22 @@ impl Context {
             label_cnt: 0,
             loop_end_labels: Vec::new(),
             loop_inc_labels: Vec::new(),
+            loop_body_pending: false,
             var_types: HashMap::new(),
             array_lengths: HashMap::new(),
             func_name,
+            borrowed: HashSet::new(),
+            var_slots: HashMap::new(),
         }
+    }
+
+    pub fn slot(&self, name: &str) -> String {
+        for scope in self.scope.iter().rev() {
+            if let Some(symbol) = scope.get(name) {
+                return symbol.slot.clone();
+            }
+        }
+        name.to_string()
     }
 
     pub fn new_tmp(&mut self, tmp_type: IRType) -> Operand {
@@ -57,9 +73,17 @@ impl Context {
     }
 
     pub fn exit_scope(&mut self) -> Result<(), CodeGenError> {
-        self.scope.pop().ok_or_else(|| CodeGenError::ScopeError {
+        let scope = self.scope.pop().ok_or_else(|| CodeGenError::ScopeError {
             message: "Tried to pop the root scope.".to_string(),
         })?;
+        for name in scope.keys() {
+            if let Some(slots) = self.var_slots.get_mut(name) {
+                slots.pop();
+                if slots.is_empty() {
+                    self.var_slots.remove(name);
+                }
+            }
+        }
         Ok(())
     }
 
@@ -125,11 +149,22 @@ impl Context {
                 message: format!("variable '{}' already declared in this scope.", name),
             });
         }
+        let slot = if self.var_slots.contains_key(&name) {
+            let depth = self.var_slots.get(&name).map(|v| v.len()).unwrap_or(0);
+            format!("{}${}", name, depth)
+        } else {
+            name.clone()
+        };
+        self.var_slots
+            .entry(name.clone())
+            .or_insert_with(Vec::new)
+            .push(slot.clone());
         current_scope.insert(
             name.clone(),
             Symbol {
                 name: name.clone(),
                 ir_type,
+                slot,
             },
         );
         Ok(())

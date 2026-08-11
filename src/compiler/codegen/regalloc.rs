@@ -379,10 +379,24 @@ pub fn allocate_registers(
 
     let stack_size = ((offset + 15) & !15).max(16);
 
-    Allocation {
+    let allocation = Allocation {
         registers,
         spill_offsets,
         stack_size,
         used_callee_saved,
+    };
+    if std::env::var("ALC_DEBUG_ALLOC").is_ok() {
+        eprintln!("=== ALLOC {} ===", func.name);
+        let mut v: Vec<_> = allocation.registers.iter().collect();
+        v.sort_by_key(|(k, _)| k.clone());
+        for (k, r) in v {
+            eprintln!("{} -> {}", k, r.reg_id());
+        }
+        let mut v: Vec<_> = allocation.spill_offsets.iter().collect();
+        v.sort_by_key(|(k, _)| k.clone());
+        for (k, o) in v {
+            eprintln!("SPILL {} -> {}", k, o);
+        }
     }
+    allocation
 }

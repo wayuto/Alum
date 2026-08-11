@@ -347,21 +347,29 @@ impl AsmCodeGen {
 
     pub(super) fn alloc_arr(
         &mut self,
-        _len: usize,
+        len: usize,
         arr: Vec<IROperand>,
         reg: Reg,
     ) -> Result<(), CodeGenError> {
-        let size = (_len * 8 + 15) & !15;
-        self.push_text(Asm::Sub(Operand::Reg(Reg::Rsp), Operand::Imm(size as i64)));
-        self.push_text(Asm::Mov(Operand::Reg(Reg::R10), Operand::Reg(Reg::Rsp)));
+        let size = (len * 8 + 15) & !15;
+        self.push_text(Asm::Mov(
+            Operand::Reg(Reg::Rdi),
+            Operand::Imm((size + 8) as i64),
+        ));
+        self.push_text(Asm::Call(Operand::PLT("malloc".to_string())));
+        self.invalidate_volatile_registers();
+        self.push_text(Asm::Mov(m_base_disp(Reg::Rax, 0), Operand::Imm(len as i64)));
+        self.push_text(Asm::Push(Reg::Rax));
         for (i, op) in arr.iter().enumerate() {
             self.load(op, Reg::Rax)?;
+            self.push_text(Asm::Mov(Operand::Reg(Reg::R11), m_base_disp(Reg::Rsp, 0)));
             self.push_text(Asm::Mov(
-                m_base_disp(Reg::R10, (i * 8) as i32),
+                m_base_disp(Reg::R11, ((i + 1) * 8) as i32),
                 Operand::Reg(Reg::Rax),
             ));
         }
-        self.push_text(Asm::Mov(Operand::Reg(reg), Operand::Reg(Reg::R10)));
+        self.push_text(Asm::Mov(Operand::Reg(reg), m_base_disp(Reg::Rsp, 0)));
+        self.push_text(Asm::Add(Operand::Reg(Reg::Rsp), Operand::Imm(8)));
         self.regs.clear();
         Ok(())
     }

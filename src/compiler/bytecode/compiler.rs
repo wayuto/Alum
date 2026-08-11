@@ -129,6 +129,7 @@ pub struct Compiler {
     lambda_counter: u32,
     native_names: Vec<String>,
     native_idx: HashMap<String, u16>,
+    loop_targets: Vec<(u32, Vec<u32>)>,
 }
 
 impl Compiler {
@@ -143,6 +144,7 @@ impl Compiler {
             lambda_counter: 0,
             native_names: Vec::new(),
             native_idx: HashMap::new(),
+            loop_targets: Vec::new(),
         }
     }
 
@@ -505,11 +507,35 @@ impl Compiler {
                 self.compile_expr(cond);
                 let iff = self.code.len() as u32;
                 self.emit(Op::JUMPIFFALSE, &[0, 0]);
+                self.loop_targets.push((loop_pos, Vec::new()));
                 self.compile_expr(body);
-                self.emit(Op::JUMP, &[((loop_pos >> 8) & 0xff), loop_pos & 0xFF]);
                 let break_pos = self.code.len() as u32;
+                let (_, break_jumps) = self.loop_targets.pop().unwrap();
+                for j in break_jumps {
+                    self.patch_jump_addr(j + 1, break_pos);
+                }
+                self.emit(Op::JUMP, &[((loop_pos >> 8) & 0xff), loop_pos & 0xFF]);
                 self.patch_jump_addr(iff + 1, break_pos);
                 self.exit_scope();
+            }
+            Expr::Break(_) => {
+                if let Some((_, break_jumps)) = self.loop_targets.last_mut() {
+                    let j = self.code.len() as u32;
+                    break_jumps.push(j);
+                    self.emit(Op::JUMP, &[0, 0]);
+                } else {
+                    panic!("Compiler: break outside loop for bytecode");
+                }
+            }
+            Expr::Continue(_) => {
+                if let Some(&(continue_target, _)) = self.loop_targets.last() {
+                    self.emit(
+                        Op::JUMP,
+                        &[((continue_target >> 8) & 0xff), continue_target & 0xFF],
+                    );
+                } else {
+                    panic!("Compiler: continue outside loop for bytecode");
+                }
             }
             Expr::FuncDecl(name, attrs, _, params, _, body, _) => {
                 if attrs.is_external {

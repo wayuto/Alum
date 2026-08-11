@@ -72,7 +72,11 @@ pub extern "C" fn input(prompt: *const u8) -> *const u8 {
         (*buf)[total_read] = 0;
     }
 
-    buf as *const u8
+    let out = crate::memory::malloc(total_read + 1);
+    unsafe {
+        core::ptr::copy_nonoverlapping(buf.cast::<u8>(), out, total_read + 1);
+    }
+    out as *const u8
 }
 
 #[unsafe(no_mangle)]

@@ -11,5 +11,5 @@ ordered-float = "5.0.0"
 opt-level = 3
 lto = "fat"      
 codegen-units = 1
-panic = "abort"      
+panic = "unwind"      # keep catch_unwind working in const-fold fallback (eval_const_vm)      
 strip = "symbols"

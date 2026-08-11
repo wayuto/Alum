@@ -46,15 +46,26 @@ impl IRGen {
 
         for (i, (param, ty)) in func.params.iter().enumerate() {
             if let Operand::Var(pname) = param {
+                let slot = if ctx.var_slots.contains_key(pname) {
+                    let depth = ctx.var_slots.get(pname).map(|v| v.len()).unwrap_or(0);
+                    format!("{}${}", pname, depth)
+                } else {
+                    pname.clone()
+                };
                 if let Some(scope) = ctx.scope.last_mut() {
                     scope.insert(
                         pname.clone(),
                         Symbol {
                             name: pname.clone(),
                             ir_type: ty.clone(),
+                            slot: slot.clone(),
                         },
                     );
                 }
+                ctx.var_slots
+                    .entry(pname.clone())
+                    .or_insert_with(Vec::new)
+                    .push(slot);
                 if let Some((_, hty)) = params.get(i) {
                     ctx.var_types.insert(pname.clone(), hty.clone());
                 }
@@ -62,7 +73,14 @@ impl IRGen {
         }
 
         let last_op = self.compile_expr(body, &mut ctx)?;
+        self.emit_scope_frees(&mut ctx)?;
         ctx.exit_scope()?;
+        if std::env::var("ALC_DEBUG_IR").is_ok() {
+            eprintln!("=== IR {} ===", name);
+            for (i, inst) in ctx.instructions.iter().enumerate() {
+                eprintln!("{:3} {:?}", i, inst);
+            }
+        }
 
         let last_inst_op = ctx.instructions.last().map(|i| i.op.clone());
         let last_is_return = matches!(last_inst_op, Some(Op::Return(_)));

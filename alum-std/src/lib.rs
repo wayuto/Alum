@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 #![no_builtins]
+#![feature(naked_functions)]
 
 use core::arch::asm;
 use core::panic::PanicInfo;
@@ -47,7 +48,7 @@ pub extern "C" fn syscall(nr: usize, a1: isize, a2: isize, a3: isize) -> isize {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn exit(code: isize) {
+pub extern "C" fn exit(code: isize) -> ! {
     unsafe {
         asm!("
             mov rax, 60    
@@ -57,21 +58,34 @@ pub extern "C" fn exit(code: isize) {
         options(noreturn, nostack)
         );
     }
+    unreachable!()
 }
 
 #[unsafe(no_mangle)]
-extern "C" fn _start() -> () {
-    let argc: isize;
-    let argv: *const *const u8;
+#[unsafe(naked)]
+extern "C" fn _start() -> ! {
     unsafe {
-        asm!(
-            "mov {argc}, [rsp + 8]",
-            "lea {argv}, [rsp + 16]",
-            argc = out(reg) argc,
-            argv = out(reg) argv,
+        core::arch::naked_asm!(
+            "mov rdi, [rsp]",
+            "lea rsi, [rsp + 8]",
+            "and rsp, -16",
+            "call _start_impl",
+            "ud2",
         );
     }
+}
 
-    let ret = unsafe { main(argc, argv) };
+#[unsafe(no_mangle)]
+extern "C" fn _start_impl(argc: isize, argv: *const *const u8) -> ! {
+    let mut arr = crate::memory::malloc(8 + argc as usize * 8) as *mut u8;
+    unsafe {
+        *(arr as *mut usize) = argc as usize;
+        let mut data = arr.add(8) as *mut *const u8;
+        for i in 0..argc {
+            *data.add(i as usize) = *argv.add(i as usize);
+        }
+    }
+
+    let ret = unsafe { main(argc, arr as *const *const u8) };
     exit(ret);
 }

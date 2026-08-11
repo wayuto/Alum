@@ -393,6 +393,7 @@ impl TypeChecker {
                 .or_else(|| self.constants.get(name).cloned())
                 .or_else(|| self.extern_vars.get(name).cloned())
                 .or_else(|| self.globals.get(name).cloned())
+                .map(|t| self.resolve_type(&t))
                 .unwrap_or(Type::Primitive(Primitive::Int)),
             Expr::ConstDecl(_, ty, _, _, _) => ty.clone(),
             Expr::GlobalVar(_, _, ty, _, _) => ty.clone(),
@@ -450,7 +451,7 @@ impl TypeChecker {
                         return Type::Primitive(Primitive::Int);
                     }
                 }
-                let obj_type = self.get_expr_type(obj);
+                let obj_type = self.resolve_type(&self.get_expr_type(obj));
                 let inner_type = match obj_type {
                     Type::Pointer(inner) => *inner,
                     Type::Struct(_, _) | Type::Union(_, _) => obj_type,

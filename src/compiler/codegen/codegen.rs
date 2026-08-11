@@ -190,6 +190,7 @@ impl AsmCodeGen {
             }
         }
         self.text_asms.push(Asm::Extern("malloc".to_string()));
+        self.text_asms.push(Asm::Extern("free".to_string()));
         self.text_asms.push(Asm::Extern("strlen".to_string()));
         self.text_asms.push(Asm::Extern("memcpy".to_string()));
         self.text_asms.push(Asm::Extern("strcpy".to_string()));

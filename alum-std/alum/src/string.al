@@ -47,7 +47,7 @@ fun(pub) memset(s: string, c: int, n: int): string {
     var pv: *void = arr
     var i: int = 0
     while i < n {
-        p[i] = pv[0]
+        p[i] = pv[8]
         i = i + 1
     }
     return s

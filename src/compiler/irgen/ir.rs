@@ -90,6 +90,7 @@ pub enum Op {
     ByteAssign,
     Label(String),
     Malloc,
+    Free,
     StoreAt,
     LoadAt,
     StrCat,

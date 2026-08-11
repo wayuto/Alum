@@ -237,7 +237,7 @@ impl AsmCodeGen {
                     Op::Inc => self.push_text(Asm::Inc(Reg::Rax)),
                     Op::Dec => self.push_text(Asm::Dec(Reg::Rax)),
                     Op::SizeOf => {
-                        self.push_text(Asm::Mov(Operand::Reg(Reg::Rax), m_base_disp(Reg::Rax, -8)))
+                        self.push_text(Asm::Mov(Operand::Reg(Reg::Rax), m_base(Reg::Rax)))
                     }
                     _ => unreachable!(),
                 }
@@ -284,20 +284,19 @@ impl AsmCodeGen {
                 self.push_text(Asm::Xor(Operand::Reg(Reg::Rax), Operand::Reg(Reg::Rax)));
                 self.push_text(Asm::Label(skip_lbl));
                 self.push_text(Asm::Push(Reg::Rax));
-                self.push_text(Asm::Sub(Operand::Reg(Reg::Rsp), Operand::Imm(8)));
                 self.push_text(Asm::Lea(
                     Operand::Reg(Reg::Rdi),
                     Operand::Mem(Mem {
                         base: None,
                         index: Some(Reg::Rax),
                         scale: 8,
-                        disp: 0,
+                        disp: 8,
                         size: None,
                     }),
                 ));
                 self.push_text(Asm::Call(Operand::PLT("malloc".to_string())));
-                self.push_text(Asm::Add(Operand::Reg(Reg::Rsp), Operand::Imm(8)));
                 self.push_text(Asm::Pop(Reg::Rdx));
+                self.push_text(Asm::Mov(m_base(Reg::Rax), Operand::Reg(Reg::Rdx)));
                 self.push_text(Asm::Xor(Operand::Reg(Reg::Rcx), Operand::Reg(Reg::Rcx)));
                 self.push_text(Asm::Pop(Reg::Rsi));
                 self.push_text(Asm::Pop(Reg::Rdi));
@@ -307,7 +306,7 @@ impl AsmCodeGen {
                 self.push_text(Asm::Mov(Operand::Reg(Reg::R8), Operand::Reg(Reg::Rdi)));
                 self.push_text(Asm::Add(Operand::Reg(Reg::R8), Operand::Reg(Reg::Rcx)));
                 self.push_text(Asm::Mov(
-                    m_sib(Reg::Rax, Reg::Rcx, 8, 0),
+                    m_sib(Reg::Rax, Reg::Rcx, 8, 8),
                     Operand::Reg(Reg::R8),
                 ));
                 self.push_text(Asm::Inc(Reg::Rcx));
@@ -454,7 +453,7 @@ impl AsmCodeGen {
                 self.load(src2, Reg::Rcx)?;
                 self.push_text(Asm::Lea(
                     Operand::Reg(Reg::Rax),
-                    m_sib(Reg::R10, Reg::Rcx, 8, 0),
+                    m_sib(Reg::R10, Reg::Rcx, 8, 8),
                 ));
                 self.push_text(Asm::Mov(Operand::Reg(Reg::Rax), m_base(Reg::Rax)));
                 self.store_dst(dst, Reg::Rax)?;
@@ -471,7 +470,7 @@ impl AsmCodeGen {
                 self.load(src2, Reg::Rax)?;
                 self.push_text(Asm::Lea(
                     Operand::Reg(Reg::Rdx),
-                    m_sib(Reg::R10, Reg::Rcx, 8, 0),
+                    m_sib(Reg::R10, Reg::Rcx, 8, 8),
                 ));
                 self.push_text(Asm::Mov(m_base(Reg::Rdx), Operand::Reg(Reg::Rax)));
                 Ok(())
@@ -542,6 +541,14 @@ impl AsmCodeGen {
                 self.store_dst(dst, Reg::Rax)?;
                 self.invalidate_cached_reg(Reg::Rax);
                 self.regs.insert(Reg::Rax, Some(dst.clone()));
+                Ok(())
+            }
+            Op::Free => {
+                let src1 = code.src1.as_ref().unwrap();
+                self.load(src1, Reg::Rdi)?;
+                self.push_text(Asm::Call(Operand::PLT("free".to_string())));
+                self.invalidate_volatile_registers();
+                self.invalidate_cached_reg(Reg::Rdi);
                 Ok(())
             }
             Op::StoreAt => {

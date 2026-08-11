@@ -5,12 +5,12 @@ pub fn optimize(asms: &mut Vec<Asm>) {
     loop {
         let mut changed = false;
 
+        changed |= pass_dead_labels(asms);
         changed |= pass_redundant_jmp(asms);
         changed |= pass_mov_imm_to_mem_merge(asms);
         changed |= pass_redundant_mov(asms);
         changed |= pass_add_sub_xor_zero(asms);
         changed |= pass_push_pop(asms);
-        changed |= pass_dead_labels(asms);
         changed |= pass_mov_mov_swap(asms);
 
         if !changed {
@@ -120,13 +120,58 @@ fn pass_mov_mov_swap(asms: &mut Vec<Asm>) -> bool {
     changed
 }
 
+fn refers_to(asm: &Asm, name: &str) -> bool {
+    match asm {
+        Asm::Jmp(l) | Asm::Je(l) | Asm::Jge(l) => l == name,
+        Asm::Call(op) => matches!(op, Operand::Label(l) if l == name),
+        _ => {
+            let mut found = false;
+            let mut check = |op: &Operand| {
+                if let Operand::Label(l) = op {
+                    found |= l == name;
+                }
+                if let Operand::DataLabel(l) = op {
+                    found |= l == name;
+                }
+            };
+            match asm {
+                Asm::Mov(a, b)
+                | Asm::Add(a, b)
+                | Asm::Sub(a, b)
+                | Asm::Imul(a, b)
+                | Asm::Xor(a, b)
+                | Asm::Or(a, b)
+                | Asm::And(a, b)
+                | Asm::Cmp(a, b)
+                | Asm::Lea(a, b)
+                | Asm::Movsd(a, b)
+                | Asm::Addsd(a, b)
+                | Asm::Subsd(a, b)
+                | Asm::Mulsd(a, b)
+                | Asm::Divsd(a, b) => {
+                    check(a);
+                    check(b);
+                }
+                Asm::Xorpd(_a, b) => check(b),
+                _ => {}
+            }
+            found
+        }
+    }
+}
+
 fn pass_redundant_jmp(asms: &mut Vec<Asm>) -> bool {
     let mut changed = false;
     let mut i = 1;
     while i < asms.len() {
         if let Asm::Jmp(lbl) = &asms[i - 1] {
             if let Asm::Label(next) = &asms[i] {
-                if lbl == next {
+                if lbl == next
+                    && asms
+                        .iter()
+                        .enumerate()
+                        .any(|(j, a)| j != i - 1 && refers_to(a, lbl))
+                {
                     asms.remove(i - 1);
                     changed = true;
                     continue;
