@@ -625,6 +625,23 @@ impl IRGen {
         Ok(())
     }
 
+    pub(super) fn emit_scope_frees_from(
+        &mut self,
+        ctx: &mut Context,
+        min_depth: usize,
+    ) -> Result<(), CodeGenError> {
+        let names: std::collections::HashSet<String> = ctx
+            .scope
+            .iter()
+            .skip(min_depth)
+            .flat_map(|s| s.keys().cloned())
+            .collect();
+        for name in names {
+            self.emit_var_free(ctx, &name)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn copy_resource(
         &mut self,
         ctx: &mut Context,
@@ -1431,15 +1448,6 @@ impl IRGen {
             }
 
             Expr::Block(body, _) => {
-                let is_loop_body = ctx.loop_body_pending;
-                ctx.loop_body_pending = false;
-                let cont_label = if is_loop_body && !ctx.loop_inc_labels.is_empty() {
-                    let cont = ctx.new_label("block_cont");
-                    ctx.loop_inc_labels.push(cont.clone());
-                    Some(cont)
-                } else {
-                    None
-                };
                 ctx.enter_scope();
                 let body_len = body.len();
                 for i in 0..body_len.saturating_sub(1) {
@@ -1459,15 +1467,6 @@ impl IRGen {
                 } else {
                     ctx.new_tmp(IRType::Void)
                 };
-                if let Some(cont) = cont_label {
-                    ctx.instructions.push(Instruction {
-                        op: Op::Label(cont),
-                        dst: None,
-                        src1: None,
-                        src2: None,
-                    });
-                    ctx.loop_inc_labels.pop();
-                }
                 self.emit_scope_frees(ctx)?;
                 ctx.exit_scope()?;
                 Ok(result_operand)
@@ -1602,10 +1601,9 @@ impl IRGen {
                     src2: None,
                 });
 
+                ctx.loop_scope_depths.push(ctx.scope.len());
                 ctx.enter_scope();
-                ctx.loop_body_pending = true;
                 self.compile_expr(*body, ctx)?;
-                ctx.loop_body_pending = false;
                 self.emit_scope_frees(ctx)?;
                 ctx.exit_scope()?;
 
@@ -1632,6 +1630,7 @@ impl IRGen {
 
                 ctx.loop_end_labels.pop();
                 ctx.loop_inc_labels.pop();
+                ctx.loop_scope_depths.pop();
 
                 Ok(ctx.new_tmp(IRType::Void))
             }
@@ -1645,6 +1644,7 @@ impl IRGen {
                     let label_inc = ctx.new_label("rfor_inc");
                     ctx.loop_end_labels.push(label_end.clone());
                     ctx.loop_inc_labels.push(label_inc.clone());
+                    ctx.loop_scope_depths.push(ctx.scope.len());
                     ctx.enter_scope();
                     let idx_name = ctx.new_label("idx");
                     let idx_var = Operand::Var(idx_name.clone());
@@ -1690,9 +1690,7 @@ impl IRGen {
                         src1: Some(curr_idx),
                         src2: None,
                     });
-                    ctx.loop_body_pending = true;
                     self.compile_expr(*body, ctx)?;
-                    ctx.loop_body_pending = false;
                     ctx.instructions.push(Instruction {
                         op: Op::Label(label_inc.clone()),
                         dst: None,
@@ -1736,6 +1734,7 @@ impl IRGen {
                     ctx.exit_scope()?;
                     ctx.loop_end_labels.pop();
                     ctx.loop_inc_labels.pop();
+                    ctx.loop_scope_depths.pop();
                     return Ok(ctx.new_tmp(IRType::Void));
                 }
                 if let Some(Type::Struct(sname, ta)) = self.expr_high_type(&iter, ctx) {
@@ -1776,6 +1775,7 @@ impl IRGen {
                     ctx.loop_end_labels.push(label_end.clone());
                     ctx.loop_inc_labels.push(label_cond.clone());
 
+                    ctx.loop_scope_depths.push(ctx.scope.len());
                     ctx.enter_scope();
 
                     ctx.instructions.push(Instruction {
@@ -1843,9 +1843,7 @@ impl IRGen {
                         src2: None,
                     });
 
-                    ctx.loop_body_pending = true;
                     self.compile_expr(*body, ctx)?;
-                    ctx.loop_body_pending = false;
 
                     ctx.instructions.push(Instruction {
                         op: Op::Jump,
@@ -1864,6 +1862,7 @@ impl IRGen {
                     ctx.exit_scope()?;
                     ctx.loop_end_labels.pop();
                     ctx.loop_inc_labels.pop();
+                    ctx.loop_scope_depths.pop();
 
                     return Ok(ctx.new_tmp(IRType::Void));
                 }
@@ -1919,6 +1918,7 @@ impl IRGen {
                 ctx.loop_end_labels.push(label_end.clone());
                 ctx.loop_inc_labels.push(label_inc.clone());
 
+                ctx.loop_scope_depths.push(ctx.scope.len());
                 ctx.enter_scope();
                 let idx_name = ctx.new_label("idx");
                 let idx_var = Operand::Var(idx_name.clone());
@@ -1987,9 +1987,7 @@ impl IRGen {
                     src2: None,
                 });
 
-                ctx.loop_body_pending = true;
                 self.compile_expr(*body, ctx)?;
-                ctx.loop_body_pending = false;
 
                 ctx.instructions.push(Instruction {
                     op: Op::Label(label_inc.clone()),
@@ -2037,6 +2035,7 @@ impl IRGen {
                 ctx.exit_scope()?;
                 ctx.loop_end_labels.pop();
                 ctx.loop_inc_labels.pop();
+                ctx.loop_scope_depths.pop();
 
                 Ok(ctx.new_tmp(IRType::Void))
             }
@@ -2047,7 +2046,12 @@ impl IRGen {
                     .last()
                     .ok_or_else(|| CodeGenError::SyntaxError {
                         message: "break outside of loop".to_string(),
-                    })?;
+                    })?
+                    .clone();
+
+                if let Some(depth) = ctx.loop_scope_depths.last() {
+                    self.emit_scope_frees_from(ctx, depth + 1)?;
+                }
                 ctx.instructions.push(Instruction {
                     op: Op::Jump,
                     dst: None,
@@ -2063,7 +2067,12 @@ impl IRGen {
                     .last()
                     .ok_or_else(|| CodeGenError::SyntaxError {
                         message: "continue outside of loop".to_string(),
-                    })?;
+                    })?
+                    .clone();
+
+                if let Some(depth) = ctx.loop_scope_depths.last() {
+                    self.emit_scope_frees_from(ctx, *depth)?;
+                }
                 ctx.instructions.push(Instruction {
                     op: Op::Jump,
                     dst: None,
