@@ -114,6 +114,11 @@ impl AsmCodeGen {
         self.curr_fn = func.name.clone();
         self.ret_label = format!(".L_{}_exit", func.name);
 
+        let xmm_saved = alloc.xmm_saved;
+        for (reg, off) in &xmm_saved {
+            self.push_text(Asm::Movsd(m_rbp(*off), Operand::Reg(*reg)));
+        }
+
         let alloc_regs = self.alloc_regs.clone();
         let mut int_idx = 0;
         let mut flt_idx = 0;
@@ -185,6 +190,9 @@ impl AsmCodeGen {
         }
 
         self.push_text(Asm::Label(self.ret_label.clone()));
+        for (reg, off) in xmm_saved.iter().rev() {
+            self.push_text(Asm::Movsd(Operand::Reg(*reg), m_rbp(*off)));
+        }
         self.push_text(Asm::Mov(Operand::Reg(Reg::Rsp), Operand::Reg(Reg::Rbp)));
         let used_regs_rev: Vec<Reg> = self.used_callee_saved.iter().rev().copied().collect();
         for reg in &used_regs_rev {

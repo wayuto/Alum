@@ -245,6 +245,9 @@ impl AsmCodeGen {
     }
 
     pub(super) fn push_text(&mut self, a: Asm) {
+        if std::env::var("ALC_DEBUG_ASM").is_ok() {
+            eprintln!("  {:?}", a);
+        }
         self.text_asms.push(a);
     }
 

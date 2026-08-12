@@ -542,10 +542,10 @@ impl Assembler {
             }
             (Operand::Reg(d), Operand::Reg(s)) if d.is_xmm() && s.is_xmm() => {
                 self.emit_slice(section, &[f2]);
-                self.emit_rex(section, false, s.rex_b(), false, d.rex_b());
+                self.emit_rex(section, false, d.rex_b(), false, s.rex_b());
                 self.emit_slice(
                     section,
-                    &[0x0f, 0x10, self.modrm(3, s.reg_id() & 7, d.reg_id() & 7)],
+                    &[0x0f, 0x10, self.modrm(3, d.reg_id() & 7, s.reg_id() & 7)],
                 );
             }
             (Operand::Reg(r), Operand::DataLabel(l)) => {
@@ -579,10 +579,10 @@ impl Assembler {
             }
             (Operand::Reg(d), Operand::Reg(s)) if d.is_xmm() && s.is_xmm() => {
                 self.emit_slice(section, &[f2]);
-                self.emit_rex(section, false, s.rex_b(), false, d.rex_b());
+                self.emit_rex(section, false, d.rex_b(), false, s.rex_b());
                 self.emit_slice(
                     section,
-                    &[0x0f, opcode, self.modrm(3, s.reg_id() & 7, d.reg_id() & 7)],
+                    &[0x0f, opcode, self.modrm(3, d.reg_id() & 7, s.reg_id() & 7)],
                 );
             }
             (Operand::Reg(r), Operand::DataLabel(l)) => {
