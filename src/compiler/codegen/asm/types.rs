@@ -192,6 +192,7 @@ pub enum Asm {
     Or(Operand, Operand),
     And(Operand, Operand),
     Cmp(Operand, Operand),
+    Test(Reg),
     Push(Reg),
     Pop(Reg),
     Call(Operand),

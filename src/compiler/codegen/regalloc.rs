@@ -46,7 +46,6 @@ struct Interval {
     is_float: bool,
     start: usize,
     end: usize,
-
     range_mask: u32,
 }
 
@@ -55,9 +54,7 @@ pub struct Allocation {
     pub registers: HashMap<String, Reg>,
     pub spill_offsets: HashMap<String, usize>,
     pub stack_size: usize,
-
     pub used_callee_saved: Vec<Reg>,
-
     pub xmm_saved: Vec<(Reg, usize)>,
 }
 

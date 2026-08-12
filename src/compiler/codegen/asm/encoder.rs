@@ -240,6 +240,10 @@ impl Assembler {
             Cmp(Operand::Reg(r), op) => {
                 self.emit_binop(0x3b, 0x83, 0x07, &Operand::Reg(*r), op, section, offset)?;
             }
+            Test(reg) => {
+                self.emit_rex(section, true, false, false, reg.rex_b());
+                self.emit_slice(section, &[0x85, self.modrm(3, 0, reg.reg_id() & 7)]);
+            }
             Push(reg) => {
                 if reg.rex_b() {
                     self.emit_slice(section, &[0x41]);
