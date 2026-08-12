@@ -1,5 +1,3 @@
-use std::process::exit;
-
 use crate::compiler::bytecode::{Bytecode, NativeEntry, Op, Value, call_native};
 use std::collections::HashMap;
 
@@ -78,7 +76,7 @@ impl GVM {
     pub fn run(&mut self) {
         loop {
             let code = self.read();
-            let op = Op::from_u8(code).expect("Bytecode: unknown opcode");
+            let op = Op::try_from(code).expect("Bytecode: unknown opcode");
             match op {
                 Op::LOADCONST => {
                     let idx = self.read() as usize;
@@ -258,22 +256,6 @@ impl GVM {
                     self.stack
                         .push(Value::Bool(num_cmp(&left, &right, |a, b| a <= b)));
                 }
-                Op::AND => {
-                    let right = self.pop();
-                    let left = self.pop();
-                    self.stack.push(match (left, right) {
-                        (Value::Bool(l), Value::Bool(r)) => Value::Bool(l && r),
-                        _ => panic!("TypeError: Wrong types for AND operation"),
-                    });
-                }
-                Op::OR => {
-                    let right = self.pop();
-                    let left = self.pop();
-                    self.stack.push(match (left, right) {
-                        (Value::Bool(l), Value::Bool(r)) => Value::Bool(l || r),
-                        _ => panic!("TypeError: Wrong types for OR operation"),
-                    });
-                }
                 Op::POP => {
                     if self.stack.len() > self.curr_operand_base {
                         self.stack.pop();
@@ -295,7 +277,6 @@ impl GVM {
                         _ => panic!("TypeError: Wrong type for F_NEG operation"),
                     });
                 }
-                Op::POS => {}
                 Op::INC => {
                     let v = self.pop();
                     self.stack.push(match v {
@@ -446,6 +427,10 @@ impl GVM {
                         self.slots[index] = args[args_count - i - 1].clone();
                     }
                     self.slots.truncate(self.curr_base_slot + args_count);
+
+                    if let Some(frame) = self.call_stack.last_mut() {
+                        frame.cache_key = None;
+                    }
                     self.ip = target;
                 }
                 Op::RET => {
@@ -522,10 +507,6 @@ impl GVM {
                         _ => panic!("TypeError: Wrong types for ARRAY_SET operation"),
                     }
                 }
-                Op::EXIT => match self.pop() {
-                    Value::Int(s) => exit(s as i32),
-                    _ => exit(0),
-                },
                 Op::HALT => return,
             }
         }

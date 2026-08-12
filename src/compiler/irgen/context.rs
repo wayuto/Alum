@@ -8,8 +8,6 @@ use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
 pub(super) struct Symbol {
-    #[allow(dead_code)]
-    pub name: String,
     pub ir_type: IRType,
     pub slot: String,
 }
@@ -99,7 +97,7 @@ impl Context {
         })
     }
 
-    pub fn type2ir_type(typ: &Type) -> IRType {
+    pub fn type_to_ir_type(typ: &Type) -> IRType {
         match typ {
             HighType::Primitive(p) => match p {
                 Primitive::Int => IRType::Int,
@@ -159,14 +157,7 @@ impl Context {
             .entry(name.clone())
             .or_insert_with(Vec::new)
             .push(slot.clone());
-        current_scope.insert(
-            name.clone(),
-            Symbol {
-                name: name.clone(),
-                ir_type,
-                slot,
-            },
-        );
+        current_scope.insert(name.clone(), Symbol { ir_type, slot });
         Ok(())
     }
 

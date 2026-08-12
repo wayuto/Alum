@@ -3,15 +3,7 @@ use std::collections::{HashMap, HashSet};
 use super::asm::Reg;
 use crate::compiler::irgen::ir::{IRFunction, IRType, Op, Operand};
 
-fn key(op: &Operand) -> String {
-    match op {
-        Operand::Var(name) => name.clone(),
-        Operand::Temp(id, _) => format!("_tmp_{}", id),
-        _ => panic!("unsupported operand for allocation: {:?}", op),
-    }
-}
-
-fn is_float_op(op: &Operand, _params: &[(Operand, IRType)]) -> bool {
+fn is_float_op(op: &Operand) -> bool {
     matches!(op, Operand::Temp(_, ty) if *ty == IRType::Float)
 }
 
@@ -89,7 +81,7 @@ fn collect_array_element_temps(
         if let crate::compiler::irgen::ir::IRConst::Array(elems) = &constants[*idx] {
             for elem in elems {
                 if let Operand::Temp(_, _) = elem {
-                    out.insert(key(elem));
+                    out.insert(elem.key());
                 }
             }
         }
@@ -115,12 +107,12 @@ fn compute_liveness(
     for (i, inst) in instructions.iter().enumerate() {
         if let Some(ref dst) = inst.dst {
             if matches!(dst, Operand::Temp(_, _)) {
-                def[i].insert(key(dst));
+                def[i].insert(dst.key());
             }
         }
         for src in [inst.src1.as_ref(), inst.src2.as_ref()].iter().flatten() {
             if matches!(src, Operand::Temp(_, _)) {
-                use_[i].insert(key(src));
+                use_[i].insert(src.key());
             }
             collect_array_element_temps(src, constants, &mut use_[i]);
         }
@@ -158,7 +150,7 @@ fn compute_liveness(
             .flatten()
         {
             if matches!(op, Operand::Temp(_, _)) {
-                let k = key(op);
+                let k = op.key();
                 first_def_or_use.entry(k).or_insert(i);
             }
             let mut array_temps = HashSet::new();
@@ -181,7 +173,7 @@ fn compute_liveness(
             .flatten()
         {
             if matches!(op, Operand::Temp(_, _)) {
-                let k = key(op);
+                let k = op.key();
                 last_live
                     .entry(k)
                     .and_modify(|e| *e = (*e).max(i))
@@ -213,13 +205,13 @@ fn compute_intervals(
 
     for (op, _) in params {
         if matches!(op, Operand::Temp(_, _)) {
-            let k = key(op);
+            let k = op.key();
             if seen.insert(k.clone()) {
                 let start = first_def_or_use.get(&k).copied().unwrap_or(0);
                 let end = last_live.get(&k).copied().unwrap_or(start);
                 intervals.push(Interval {
                     vreg: k,
-                    is_float: is_float_op(op, params),
+                    is_float: is_float_op(op),
                     start,
                     end,
                 });
@@ -233,13 +225,13 @@ fn compute_intervals(
             .flatten()
         {
             if matches!(op, Operand::Temp(_, _)) {
-                let k = key(op);
+                let k = op.key();
                 if seen.insert(k.clone()) {
                     let start = first_def_or_use.get(&k).copied().unwrap_or(0);
                     let end = last_live.get(&k).copied().unwrap_or(start);
                     intervals.push(Interval {
                         vreg: k,
-                        is_float: is_float_op(op, params),
+                        is_float: is_float_op(op),
                         start,
                         end,
                     });
@@ -347,7 +339,7 @@ pub fn allocate_registers(
         .filter(|inst| matches!(inst.op, Op::Lea))
         .filter_map(|inst| inst.src1.as_ref())
         .filter(|op| matches!(op, Operand::Temp(_, _)))
-        .map(key)
+        .map(Operand::key)
         .collect();
 
     for vreg in &must_spill {
@@ -388,12 +380,12 @@ pub fn allocate_registers(
     if std::env::var("ALC_DEBUG_ALLOC").is_ok() {
         eprintln!("=== ALLOC {} ===", func.name);
         let mut v: Vec<_> = allocation.registers.iter().collect();
-        v.sort_by_key(|(k, _)| k.clone());
+        v.sort_by_key(|(k, _)| (*k).clone());
         for (k, r) in v {
             eprintln!("{} -> {}", k, r.reg_id());
         }
         let mut v: Vec<_> = allocation.spill_offsets.iter().collect();
-        v.sort_by_key(|(k, _)| k.clone());
+        v.sort_by_key(|(k, _)| (*k).clone());
         for (k, o) in v {
             eprintln!("SPILL {} -> {}", k, o);
         }

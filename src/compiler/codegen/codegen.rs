@@ -53,7 +53,6 @@ pub(super) fn m_rbp(off: usize) -> Operand {
         index: None,
         scale: 0,
         disp: -(off as i32),
-        size: None,
     })
 }
 
@@ -63,7 +62,6 @@ pub(super) fn m_rbp_q(off: usize) -> Operand {
         index: None,
         scale: 0,
         disp: -(off as i32),
-        size: Some(Size::QWord),
     })
 }
 
@@ -73,7 +71,6 @@ pub(super) fn m_base(base: Reg) -> Operand {
         index: None,
         scale: 0,
         disp: 0,
-        size: None,
     })
 }
 
@@ -83,7 +80,6 @@ pub(super) fn m_base_disp(base: Reg, disp: i32) -> Operand {
         index: None,
         scale: 0,
         disp,
-        size: None,
     })
 }
 
@@ -93,7 +89,6 @@ pub(super) fn m_sib(base: Reg, index: Reg, scale: u8, disp: i32) -> Operand {
         index: Some(index),
         scale,
         disp,
-        size: None,
     })
 }
 
@@ -114,7 +109,7 @@ pub struct AsmCodeGen {
     pub(super) arg_reg: Vec<String>,
     pub(super) flt_arg_reg: Vec<String>,
     pub(super) ret_label: String,
-    pub(super) regs: HashMap<Reg, Option<IROperand>>,
+    pub(super) regs: HashMap<Reg, IROperand>,
     pub(super) curr_fn: String,
     pub(super) curr_flt_reg: usize,
     pub(super) internals: HashSet<String>,
@@ -192,7 +187,6 @@ impl AsmCodeGen {
         self.text_asms.push(Asm::Extern("malloc".to_string()));
         self.text_asms.push(Asm::Extern("free".to_string()));
         self.text_asms.push(Asm::Extern("strlen".to_string()));
-        self.text_asms.push(Asm::Extern("memcpy".to_string()));
         self.text_asms.push(Asm::Extern("strcpy".to_string()));
         for var in &self.program.extern_vars {
             self.text_asms.push(Asm::Extern(var.clone()));

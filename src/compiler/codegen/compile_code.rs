@@ -107,7 +107,7 @@ impl AsmCodeGen {
                 if matches!(code.op, Op::Div) {
                     self.regs.remove(&Reg::Rbx);
                 }
-                self.regs.insert(Reg::Rax, Some(dst.clone()));
+                self.regs.insert(Reg::Rax, dst.clone());
                 Ok(())
             }
             Op::Mod => {
@@ -122,7 +122,7 @@ impl AsmCodeGen {
                 self.invalidate_cached_reg(Reg::Rax);
                 self.invalidate_cached_reg(Reg::Rdx);
                 self.invalidate_cached_reg(Reg::Rbx);
-                self.regs.insert(Reg::Rdx, Some(dst.clone()));
+                self.regs.insert(Reg::Rdx, dst.clone());
                 Ok(())
             }
             Op::FAdd | Op::FSub | Op::FMul | Op::FDiv => {
@@ -154,7 +154,7 @@ impl AsmCodeGen {
                 };
                 self.push_text(asm_op(Operand::Reg(Reg::Xmm0), src2_op));
                 self.store_dst_xmm(dst, Reg::Xmm0)?;
-                self.regs.insert(Reg::Xmm0, Some(dst.clone()));
+                self.regs.insert(Reg::Xmm0, dst.clone());
                 Ok(())
             }
             Op::Eq | Op::Ne | Op::Gt | Op::Ge | Op::Lt | Op::Le => {
@@ -177,7 +177,7 @@ impl AsmCodeGen {
                 self.push_text(Asm::Movzx(Reg::Rax, Operand::Reg(Reg::Rax)));
                 self.store_dst(dst, Reg::Rax)?;
                 self.invalidate_cached_reg(Reg::Rax);
-                self.regs.insert(Reg::Rax, Some(dst.clone()));
+                self.regs.insert(Reg::Rax, dst.clone());
                 Ok(())
             }
             Op::FEq | Op::FNe | Op::FGt | Op::FGe | Op::FLt | Op::FLe => {
@@ -200,7 +200,7 @@ impl AsmCodeGen {
                 self.push_text(Asm::Movzx(Reg::Rax, Operand::Reg(Reg::Rax)));
                 self.store_dst(dst, Reg::Rax)?;
                 self.invalidate_cached_reg(Reg::Rax);
-                self.regs.insert(Reg::Rax, Some(dst.clone()));
+                self.regs.insert(Reg::Rax, dst.clone());
                 Ok(())
             }
             Op::StrEq | Op::StrNe | Op::StrLt | Op::StrLe | Op::StrGt | Op::StrGe => {
@@ -225,7 +225,7 @@ impl AsmCodeGen {
                 self.push_text(Asm::Movzx(Reg::Rax, Operand::Reg(Reg::Rax)));
                 self.store_dst(dst, Reg::Rax)?;
                 self.invalidate_volatile_registers();
-                self.regs.insert(Reg::Rax, Some(dst.clone()));
+                self.regs.insert(Reg::Rax, dst.clone());
                 Ok(())
             }
             Op::Neg | Op::Inc | Op::Dec | Op::SizeOf => {
@@ -243,7 +243,7 @@ impl AsmCodeGen {
                 }
                 self.store_dst(dst, Reg::Rax)?;
                 self.invalidate_cached_reg(Reg::Rax);
-                self.regs.insert(Reg::Rax, Some(dst.clone()));
+                self.regs.insert(Reg::Rax, dst.clone());
                 Ok(())
             }
             Op::Not => {
@@ -253,7 +253,7 @@ impl AsmCodeGen {
                 self.push_text(Asm::Xor(Operand::Reg(Reg::Rax), Operand::Imm(1)));
                 self.store_dst(dst, Reg::Rax)?;
                 self.invalidate_cached_reg(Reg::Rax);
-                self.regs.insert(Reg::Rax, Some(dst.clone()));
+                self.regs.insert(Reg::Rax, dst.clone());
                 Ok(())
             }
             Op::FNeg => {
@@ -263,7 +263,7 @@ impl AsmCodeGen {
                 self.push_text(Asm::Xorpd(Reg::Xmm0, rel("neg_mask".to_string())));
                 self.store_dst_xmm(dst, Reg::Xmm0)?;
                 self.invalidate_cached_reg(Reg::Xmm0);
-                self.regs.insert(Reg::Xmm0, Some(dst.clone()));
+                self.regs.insert(Reg::Xmm0, dst.clone());
                 Ok(())
             }
             Op::Range => {
@@ -291,7 +291,6 @@ impl AsmCodeGen {
                         index: Some(Reg::Rax),
                         scale: 8,
                         disp: 8,
-                        size: None,
                     }),
                 ));
                 self.push_text(Asm::Call(Operand::PLT("malloc".to_string())));
@@ -314,7 +313,7 @@ impl AsmCodeGen {
                 self.push_text(Asm::Label(end_lbl));
                 self.store_dst(dst, Reg::Rax)?;
                 self.invalidate_cached_reg(Reg::Rax);
-                self.regs.insert(Reg::Rax, Some(dst.clone()));
+                self.regs.insert(Reg::Rax, dst.clone());
                 Ok(())
             }
             Op::Arg(n) => {
@@ -397,16 +396,11 @@ impl AsmCodeGen {
                 };
                 if is_float {
                     self.store_dst_xmm(dst, Reg::Xmm0)?;
-                    self.regs.insert(Reg::Xmm0, Some(dst.clone()));
+                    self.regs.insert(Reg::Xmm0, dst.clone());
                 } else {
                     self.store_dst(dst, Reg::Rax)?;
-                    self.regs.insert(Reg::Rax, Some(dst.clone()));
+                    self.regs.insert(Reg::Rax, dst.clone());
                 }
-                Ok(())
-            }
-            Op::Label(lbl) => {
-                self.push_text(Asm::Label(lbl));
-                self.regs.clear();
                 Ok(())
             }
             Op::Jump => {
@@ -458,7 +452,7 @@ impl AsmCodeGen {
                 self.push_text(Asm::Mov(Operand::Reg(Reg::Rax), m_base(Reg::Rax)));
                 self.store_dst(dst, Reg::Rax)?;
                 self.invalidate_cached_reg(Reg::Rax);
-                self.regs.insert(Reg::Rax, Some(dst.clone()));
+                self.regs.insert(Reg::Rax, dst.clone());
                 Ok(())
             }
             Op::ArrayAssign => {
@@ -490,7 +484,7 @@ impl AsmCodeGen {
                 self.push_text(Asm::Movb(m_base_disp(Reg::Rax, 1), Reg::Rdi));
                 self.store_dst(dst, Reg::Rax)?;
                 self.invalidate_volatile_registers();
-                self.regs.insert(Reg::Rax, Some(dst.clone()));
+                self.regs.insert(Reg::Rax, dst.clone());
                 Ok(())
             }
             Op::ByteAccess => {
@@ -506,7 +500,7 @@ impl AsmCodeGen {
                 self.push_text(Asm::Movzx(Reg::Rax, m_base(Reg::Rax)));
                 self.store_dst(dst, Reg::Rax)?;
                 self.invalidate_cached_reg(Reg::Rax);
-                self.regs.insert(Reg::Rax, Some(dst.clone()));
+                self.regs.insert(Reg::Rax, dst.clone());
                 Ok(())
             }
             Op::ByteAssign => {
@@ -530,7 +524,7 @@ impl AsmCodeGen {
                 self.push_text(Asm::Lea(Operand::Reg(Reg::Rax), m_rbp(offset)));
                 self.store_dst(dst, Reg::Rax)?;
                 self.invalidate_volatile_registers();
-                self.regs.insert(Reg::Rax, Some(dst.clone()));
+                self.regs.insert(Reg::Rax, dst.clone());
                 Ok(())
             }
             Op::Malloc => {
@@ -540,7 +534,7 @@ impl AsmCodeGen {
                 self.push_text(Asm::Call(Operand::PLT("malloc".to_string())));
                 self.store_dst(dst, Reg::Rax)?;
                 self.invalidate_cached_reg(Reg::Rax);
-                self.regs.insert(Reg::Rax, Some(dst.clone()));
+                self.regs.insert(Reg::Rax, dst.clone());
                 Ok(())
             }
             Op::Free => {
@@ -604,7 +598,7 @@ impl AsmCodeGen {
                 self.push_text(Asm::Mov(Operand::Reg(Reg::Rax), src_op));
                 self.store_dst(dst, Reg::Rax)?;
                 self.regs.clear();
-                self.regs.insert(Reg::Rax, Some(dst.clone()));
+                self.regs.insert(Reg::Rax, dst.clone());
                 Ok(())
             }
             Op::StrCat => {
@@ -625,7 +619,6 @@ impl AsmCodeGen {
                         index: Some(Reg::Rax),
                         scale: 1,
                         disp: 1,
-                        size: None,
                     }),
                 ));
                 self.push_text(Asm::Call(Operand::PLT("malloc".to_string())));
@@ -642,23 +635,16 @@ impl AsmCodeGen {
                         index: Some(Reg::Rax),
                         scale: 1,
                         disp: 0,
-                        size: None,
                     }),
                 ));
                 self.push_text(Asm::Mov(Operand::Reg(Reg::Rsi), m_rbp(off_tmp2)));
                 self.push_text(Asm::Call(Operand::PLT("strcpy".to_string())));
                 self.store_dst(dst, Reg::R15)?;
                 self.invalidate_volatile_registers();
-                self.regs.insert(Reg::R15, Some(dst.clone()));
+                self.regs.insert(Reg::R15, dst.clone());
                 Ok(())
             }
-            Op::Return(reg) => {
-                if let Some(ref val) = code.src1 {
-                    self.load(val, parse_reg(&reg))?;
-                }
-                self.push_text(Asm::Jmp(self.ret_label.clone()));
-                Ok(())
-            }
+            Op::Return(_) | Op::Label(_) => unreachable!("handled by compile_fn"),
         }
     }
 }

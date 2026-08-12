@@ -28,6 +28,16 @@ pub enum Operand {
     Global(String),
 }
 
+impl Operand {
+    pub fn key(&self) -> String {
+        match self {
+            Operand::Var(name) => name.clone(),
+            Operand::Temp(id, _) => format!("_tmp_{}", id),
+            _ => panic!("unsupported operand key: {:?}", self),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Op {
     Add,
@@ -114,8 +124,6 @@ pub struct IRFunction {
     pub ret_type: IRType,
     pub is_pub: bool,
     pub is_external: bool,
-    #[allow(dead_code)]
-    pub is_pure: bool,
 }
 
 #[derive(Debug, Clone)]

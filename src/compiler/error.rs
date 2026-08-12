@@ -21,12 +21,7 @@ enum CompilerErrorKind {
 }
 
 impl CompilerError {
-    pub fn new<E: Into<CompilerError>>(
-        e: E,
-        _source: String,
-        _file_path: String,
-        source_map: SourceMap,
-    ) -> Self {
+    pub fn new<E: Into<CompilerError>>(e: E, source_map: SourceMap) -> Self {
         let mut ce = e.into();
         ce.source_map = source_map;
         ce

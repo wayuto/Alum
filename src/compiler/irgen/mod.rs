@@ -1,10 +1,18 @@
+mod array;
+mod call;
+mod const_eval;
 mod context;
+mod control;
 mod expr;
 mod func;
+mod globals;
 pub mod ir;
 mod irgen;
 mod lambda;
+mod match_expr;
 mod purity;
+mod type_info;
+mod vm_safety;
 
 use crate::compiler::{
     bytecode::NativeTable,
@@ -25,7 +33,6 @@ pub struct IRGen {
     pub(super) enums: HashMap<String, Vec<(String, isize)>>,
     pub(super) generic_funcs: HashMap<String, (Vec<String>, Vec<(String, Type)>, Type, Box<Expr>)>,
     pub(super) func_high_returns: HashMap<String, Type>,
-    pub(super) mono_in_progress: Vec<String>,
     pub(super) lambda_counter: u32,
     pub(super) extern_vars: HashMap<String, Type>,
     pub(super) program_body: Vec<Expr>,
@@ -53,7 +60,6 @@ impl IRGen {
             enums: HashMap::new(),
             generic_funcs: HashMap::new(),
             func_high_returns: HashMap::new(),
-            mono_in_progress: Vec::new(),
             lambda_counter: 0,
             extern_vars: HashMap::new(),
             program_body: Vec::new(),

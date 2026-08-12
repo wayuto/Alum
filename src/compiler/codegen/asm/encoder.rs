@@ -203,8 +203,8 @@ impl Assembler {
                 }
             }
             Movsd(dst, src) => self.emit_movsd(dst, src, section, offset)?,
-            Add(dst, src) => self.emit_binop(0x03, 0x01, 0x83, 0x00, dst, src, section, offset)?,
-            Sub(dst, src) => self.emit_binop(0x2b, 0x29, 0x83, 0x05, dst, src, section, offset)?,
+            Add(dst, src) => self.emit_binop(0x03, 0x83, 0x00, dst, src, section, offset)?,
+            Sub(dst, src) => self.emit_binop(0x2b, 0x83, 0x05, dst, src, section, offset)?,
             Imul(Operand::Reg(r), op) => {
                 self.emit_binop_imul(*r, op, section, offset)?;
             }
@@ -230,24 +230,15 @@ impl Assembler {
                 self.emit_rex(section, true, false, false, reg.rex_b());
                 self.emit_slice(section, &[0xff, self.modrm(3, 1, reg.reg_id() & 7)]);
             }
-            Xor(dst, src) => self.emit_binop(0x33, 0x31, 0x83, 0x06, dst, src, section, offset)?,
-            Or(dst, src) => self.emit_binop(0x0b, 0x09, 0x83, 0x01, dst, src, section, offset)?,
-            And(dst, src) => self.emit_binop(0x23, 0x21, 0x83, 0x04, dst, src, section, offset)?,
+            Xor(dst, src) => self.emit_binop(0x33, 0x83, 0x06, dst, src, section, offset)?,
+            Or(dst, src) => self.emit_binop(0x0b, 0x83, 0x01, dst, src, section, offset)?,
+            And(dst, src) => self.emit_binop(0x23, 0x83, 0x04, dst, src, section, offset)?,
             Cmp(Operand::Reg(r), Operand::Imm(0)) => {
                 self.emit_rex(section, true, false, false, r.rex_b());
                 self.emit_slice(section, &[0x83, self.modrm(3, 7, r.reg_id() & 7), 0x00]);
             }
             Cmp(Operand::Reg(r), op) => {
-                self.emit_binop(
-                    0x3b,
-                    0x39,
-                    0x83,
-                    0x07,
-                    &Operand::Reg(*r),
-                    op,
-                    section,
-                    offset,
-                )?;
+                self.emit_binop(0x3b, 0x83, 0x07, &Operand::Reg(*r), op, section, offset)?;
             }
             Push(reg) => {
                 if reg.rex_b() {
@@ -445,7 +436,6 @@ impl Assembler {
     fn emit_binop(
         &mut self,
         op_rm: u8,
-        _op_reg: u8,
         op_imm8: u8,
         op_imm_ext: u8,
         dst: &Operand,

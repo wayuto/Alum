@@ -23,7 +23,7 @@ pub fn build(
     let mut preprocessor = Preprocessor::new(&src, input.clone(), include_paths);
     let (processed, source_map) = preprocessor
         .preprocess()
-        .map_err(|e| CompilerError::new(e, src.clone(), input.clone(), SourceMap::new()))?;
+        .map_err(|e| CompilerError::new(e, SourceMap::new()))?;
 
     if preprocess_only {
         println!("{}", processed);
@@ -37,7 +37,7 @@ pub fn build(
     let mut parser = Parser::new(lexer);
     let mut ast = parser
         .parse()
-        .map_err(|e| CompilerError::new(e, processed.clone(), input.clone(), source_map.clone()))?;
+        .map_err(|e| CompilerError::new(e, source_map.clone()))?;
 
     if verbose {
         eprintln!("Type checking...");
@@ -45,7 +45,7 @@ pub fn build(
     let checker = TypeChecker::new();
     checker
         .check(&mut ast)
-        .map_err(|e| CompilerError::new(e, processed.clone(), input.clone(), source_map.clone()))?;
+        .map_err(|e| CompilerError::new(e, source_map.clone()))?;
 
     if print_ast {
         println!("{}", ast);
@@ -64,7 +64,7 @@ pub fn build(
     let codegen = CodeGen::new(ast, cte_libs);
     let object_code = codegen
         .generate()
-        .map_err(|e| CompilerError::new(e, processed.clone(), input.clone(), source_map.clone()))?;
+        .map_err(|e| CompilerError::new(e, source_map.clone()))?;
 
     let output_file = if let Some(obj_file) = object {
         obj_file
@@ -101,38 +101,50 @@ pub fn exec_run(
         cte_libs.clone(),
     )?;
 
-    let exe_name = if input.ends_with(".al") {
-        input.replace(".al", "")
-    } else {
-        input.clone()
-    };
-    let exe_name = std::path::Path::new(&exe_name)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("a.out");
-    let exe_file = format!("/tmp/{}", exe_name);
-
+    let exe_file = default_exe_path(&input);
     let exe_path = std::path::Path::new(&exe_file);
 
     let std_lib_path = DEFAULT_STD_LIB_PATH;
 
     super::link::link(
-        vec![obj_file],
+        vec![obj_file.clone()],
         std_lib_path,
         exe_path.to_str().unwrap(),
         verbose,
         &cte_libs,
     )?;
 
-    let exe_file_abs = exe_path.canonicalize()?;
-
     if verbose {
-        eprintln!("Running: {}", exe_file_abs.display());
+        eprintln!("Running: {}", exe_path.display());
     }
 
-    std::process::Command::new(&exe_file_abs).status()?;
+    let status = std::process::Command::new(&exe_path).status()?;
 
-    std::fs::remove_file(&exe_file_abs)?;
+    let _ = std::fs::remove_file(&obj_file);
+    let _ = std::fs::remove_file(&exe_path);
+
+    if !status.success() {
+        return Err(format!(
+            "program exited with status: {}",
+            status
+                .code()
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "signal".to_string())
+        )
+        .into());
+    }
 
     Ok(())
+}
+
+fn default_exe_path(input: &str) -> String {
+    let name = std::path::Path::new(input)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(input);
+    let stem = std::path::Path::new(name)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("a.out");
+    format!("/tmp/{}", stem)
 }

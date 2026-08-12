@@ -6,9 +6,41 @@ use crate::compiler::{
     parser::{Expr, Primitive, Type},
 };
 use ordered_float::OrderedFloat;
-use std::iter::zip;
 
 impl IRGen {
+    fn get_binop_parts(expr: Expr) -> Result<(Op, Box<Expr>, Box<Expr>), CodeGenError> {
+        match expr {
+            Expr::Add(l, r, _) => Ok((Op::Add, l, r)),
+            Expr::Sub(l, r, _) => Ok((Op::Sub, l, r)),
+            Expr::Mul(l, r, _) => Ok((Op::Mul, l, r)),
+            Expr::Div(l, r, _) => Ok((Op::Div, l, r)),
+            Expr::Mod(l, r, _) => Ok((Op::Mod, l, r)),
+            Expr::FAdd(l, r, _) => Ok((Op::FAdd, l, r)),
+            Expr::FSub(l, r, _) => Ok((Op::FSub, l, r)),
+            Expr::FMul(l, r, _) => Ok((Op::FMul, l, r)),
+            Expr::FDiv(l, r, _) => Ok((Op::FDiv, l, r)),
+            Expr::Eq(l, r, _) => Ok((Op::Eq, l, r)),
+            Expr::Ne(l, r, _) => Ok((Op::Ne, l, r)),
+            Expr::Lt(l, r, _) => Ok((Op::Lt, l, r)),
+            Expr::Le(l, r, _) => Ok((Op::Le, l, r)),
+            Expr::Gt(l, r, _) => Ok((Op::Gt, l, r)),
+            Expr::Ge(l, r, _) => Ok((Op::Ge, l, r)),
+            Expr::FEq(l, r, _) => Ok((Op::FEq, l, r)),
+            Expr::FNe(l, r, _) => Ok((Op::FNe, l, r)),
+            Expr::FLt(l, r, _) => Ok((Op::FLt, l, r)),
+            Expr::FLe(l, r, _) => Ok((Op::FLe, l, r)),
+            Expr::FGt(l, r, _) => Ok((Op::FGt, l, r)),
+            Expr::FGe(l, r, _) => Ok((Op::FGe, l, r)),
+            Expr::Xor(l, r, _) => Ok((Op::Xor, l, r)),
+            Expr::LAnd(l, r, _) => Ok((Op::LAnd, l, r)),
+            Expr::LOr(l, r, _) => Ok((Op::LOr, l, r)),
+            Expr::StrCat(l, r, _) => Ok((Op::StrCat, l, r)),
+            _ => Err(CodeGenError::UnsupportedOperation {
+                message: "not a binary operation".to_string(),
+            }),
+        }
+    }
+
     pub(super) fn compile_struct_literal(
         &mut self,
         struct_name: &str,
@@ -172,7 +204,7 @@ impl IRGen {
         }
     }
 
-    fn struct_field_fn_ret(
+    pub(super) fn struct_field_fn_ret(
         &self,
         struct_name: &str,
         type_args: &[Type],
@@ -190,7 +222,7 @@ impl IRGen {
         None
     }
 
-    fn load_function_field(
+    pub(super) fn load_function_field(
         &mut self,
         obj_op: Operand,
         obj_type: &Type,
@@ -288,7 +320,7 @@ impl IRGen {
 
     fn glob_ir_type(&self, name: &str) -> Option<IRType> {
         if let Some(t) = self.extern_vars.get(name) {
-            Some(Context::type2ir_type(t))
+            Some(Context::type_to_ir_type(t))
         } else {
             self.global_storage.get(name).map(|(t, _, _)| t.clone())
         }
@@ -334,7 +366,7 @@ impl IRGen {
         }
     }
 
-    fn is_fresh_expr(&self, e: &Expr) -> bool {
+    pub(super) fn is_fresh_expr(&self, e: &Expr) -> bool {
         matches!(
             e,
             Expr::StructLiteral(..)
@@ -348,7 +380,7 @@ impl IRGen {
         )
     }
 
-    fn resource_copy_info(&self, e: &Expr, ctx: &Context) -> Option<Type> {
+    pub(super) fn resource_copy_info(&self, e: &Expr, ctx: &Context) -> Option<Type> {
         let ty = self.expr_high_type(e, ctx)?;
         if self.is_resource_type(&ty) && !self.is_fresh_expr(e) {
             Some(ty)
@@ -414,7 +446,7 @@ impl IRGen {
         ptr_tmp
     }
 
-    fn emit_free_ptr(&mut self, ctx: &mut Context, ptr: Operand) {
+    pub(super) fn emit_free_ptr(&mut self, ctx: &mut Context, ptr: Operand) {
         ctx.instructions.push(Instruction {
             op: Op::Free,
             dst: None,
@@ -535,7 +567,7 @@ impl IRGen {
         Ok(())
     }
 
-    fn emit_free(
+    pub(super) fn emit_free(
         &mut self,
         ctx: &mut Context,
         ptr: Operand,
@@ -562,7 +594,7 @@ impl IRGen {
                 if self.is_resource_type(elem) {
                     let len = self.emit_array_len(ctx, ptr.clone());
                     let elem_ty = *elem.clone();
-                    let elem_ir = Context::type2ir_type(&elem_ty);
+                    let elem_ir = Context::type_to_ir_type(&elem_ty);
                     Self::emit_array_elem_loop(
                         self,
                         ctx,
@@ -711,7 +743,7 @@ impl IRGen {
                     src1: Some(Operand::ConstIdx(zero_idx)),
                     src2: Some(len.clone()),
                 });
-                let elem_ir = Context::type2ir_type(&elem_ty);
+                let elem_ir = Context::type_to_ir_type(&elem_ty);
                 let deep_elem = self.is_resource_type(&elem_ty);
                 let dst_c = dst.clone();
                 Self::emit_array_elem_loop(self, ctx, src, len, elem_ir, |ir, c, idx, e| {
@@ -822,7 +854,7 @@ impl IRGen {
                 if let Some(copy_ty) = copy_info {
                     value = self.copy_resource(ctx, value, &copy_ty)?;
                 }
-                let var_ir_type = Context::type2ir_type(&resolved_typ);
+                let var_ir_type = Context::type_to_ir_type(&resolved_typ);
 
                 if matches!(var_ir_type, IRType::Array) {
                     if let Some(len) = self.const_array_len(&value, ctx) {
@@ -866,7 +898,7 @@ impl IRGen {
                     }
                     _ => self.compile_expr(*value, ctx)?,
                 };
-                let var_ir_type = Context::type2ir_type(&resolved_typ);
+                let var_ir_type = Context::type_to_ir_type(&resolved_typ);
 
                 if matches!(var_ir_type, IRType::Array) {
                     if let Some(len) = self.const_array_len(&value, ctx) {
@@ -1498,965 +1530,38 @@ impl IRGen {
             }
 
             Expr::If(condition, then_branch, else_branch, _) => {
-                let label_else = ctx.new_label("else");
-                let label_end = ctx.new_label("endif");
-
-                let cond = self.compile_expr(*condition, ctx)?;
-
-                ctx.instructions.push(Instruction {
-                    op: Op::JumpIfFalse,
-                    dst: None,
-                    src1: Some(cond),
-                    src2: Some(Operand::Label(label_else.clone())),
-                });
-
-                let res_tmp = ctx.new_tmp(IRType::Void);
-
-                ctx.enter_scope();
-                let then_info = self.resource_copy_info(&then_branch, ctx);
-                let then_op = self.compile_expr(*then_branch, ctx)?;
-                let then_op = match then_info {
-                    Some(ty) => self.copy_resource(ctx, then_op, &ty)?,
-                    None => then_op,
-                };
-                ctx.instructions.push(Instruction {
-                    op: Op::Move,
-                    dst: Some(res_tmp.clone()),
-                    src1: Some(then_op),
-                    src2: None,
-                });
-                self.emit_scope_frees(ctx)?;
-                ctx.exit_scope()?;
-
-                ctx.instructions.push(Instruction {
-                    op: Op::Jump,
-                    dst: None,
-                    src1: Some(Operand::Label(label_end.clone())),
-                    src2: None,
-                });
-
-                ctx.instructions.push(Instruction {
-                    op: Op::Label(label_else),
-                    dst: None,
-                    src1: None,
-                    src2: None,
-                });
-
-                if let Some(else_expr) = else_branch {
-                    ctx.enter_scope();
-                    let else_info = self.resource_copy_info(&else_expr, ctx);
-                    let else_op = self.compile_expr(*else_expr, ctx)?;
-                    let else_op = match else_info {
-                        Some(ty) => self.copy_resource(ctx, else_op, &ty)?,
-                        None => else_op,
-                    };
-                    ctx.instructions.push(Instruction {
-                        op: Op::Move,
-                        dst: Some(res_tmp.clone()),
-                        src1: Some(else_op),
-                        src2: None,
-                    });
-                    self.emit_scope_frees(ctx)?;
-                    ctx.exit_scope()?;
-                }
-
-                ctx.instructions.push(Instruction {
-                    op: Op::Label(label_end),
-                    dst: None,
-                    src1: None,
-                    src2: None,
-                });
-
-                Ok(res_tmp)
+                self.compile_if(condition, then_branch, else_branch, ctx)
             }
 
-            Expr::While(condition, body, _) => {
-                let label_start = ctx.new_label("while_start");
-                let label_body = ctx.new_label("while_body");
-                let label_cont = ctx.new_label("while_cont");
-                let label_end = ctx.new_label("while_end");
+            Expr::While(condition, body, _) => self.compile_while(condition, body, ctx),
 
-                ctx.loop_end_labels.push(label_end.clone());
-                ctx.loop_inc_labels.push(label_cont.clone());
+            Expr::For(var, iter, body, _) => self.compile_for(var, iter, body, ctx),
 
-                ctx.instructions.push(Instruction {
-                    op: Op::Label(label_start.clone()),
-                    dst: None,
-                    src1: None,
-                    src2: None,
-                });
+            Expr::Break(_) => self.compile_break(ctx),
 
-                let cond = self.compile_expr(*condition, ctx)?;
-                ctx.instructions.push(Instruction {
-                    op: Op::JumpIfFalse,
-                    dst: None,
-                    src1: Some(cond),
-                    src2: Some(Operand::Label(label_end.clone())),
-                });
-
-                ctx.instructions.push(Instruction {
-                    op: Op::Label(label_body.clone()),
-                    dst: None,
-                    src1: None,
-                    src2: None,
-                });
-
-                ctx.loop_scope_depths.push(ctx.scope.len());
-                ctx.enter_scope();
-                self.compile_expr(*body, ctx)?;
-                self.emit_scope_frees(ctx)?;
-                ctx.exit_scope()?;
-
-                ctx.instructions.push(Instruction {
-                    op: Op::Label(label_cont.clone()),
-                    dst: None,
-                    src1: None,
-                    src2: None,
-                });
-
-                ctx.instructions.push(Instruction {
-                    op: Op::Jump,
-                    dst: None,
-                    src1: Some(Operand::Label(label_start)),
-                    src2: None,
-                });
-
-                ctx.instructions.push(Instruction {
-                    op: Op::Label(label_end.clone()),
-                    dst: None,
-                    src1: None,
-                    src2: None,
-                });
-
-                ctx.loop_end_labels.pop();
-                ctx.loop_inc_labels.pop();
-                ctx.loop_scope_depths.pop();
-
-                Ok(ctx.new_tmp(IRType::Void))
-            }
-
-            Expr::For(var, iter, body, _) => {
-                if let Expr::Range(start, end, _) = *iter {
-                    let start_op = self.compile_expr(*start, ctx)?;
-                    let end_op = self.compile_expr(*end, ctx)?;
-                    let label_cond = ctx.new_label("rfor_cond");
-                    let label_end = ctx.new_label("rfor_end");
-                    let label_inc = ctx.new_label("rfor_inc");
-                    ctx.loop_end_labels.push(label_end.clone());
-                    ctx.loop_inc_labels.push(label_inc.clone());
-                    ctx.loop_scope_depths.push(ctx.scope.len());
-                    ctx.enter_scope();
-                    let idx_name = ctx.new_label("idx");
-                    let idx_var = Operand::Var(idx_name.clone());
-                    ctx.declare_var(idx_name.clone(), IRType::Int)?;
-                    ctx.instructions.push(Instruction {
-                        op: Op::Store,
-                        dst: Some(idx_var.clone()),
-                        src1: Some(start_op),
-                        src2: None,
-                    });
-                    ctx.instructions.push(Instruction {
-                        op: Op::Label(label_cond.clone()),
-                        dst: None,
-                        src1: None,
-                        src2: None,
-                    });
-                    let curr_idx = ctx.new_tmp(IRType::Int);
-                    ctx.instructions.push(Instruction {
-                        op: Op::Load,
-                        dst: Some(curr_idx.clone()),
-                        src1: Some(idx_var.clone()),
-                        src2: None,
-                    });
-                    let cond_tmp = ctx.new_tmp(IRType::Bool);
-                    ctx.instructions.push(Instruction {
-                        op: Op::Lt,
-                        dst: Some(cond_tmp.clone()),
-                        src1: Some(curr_idx.clone()),
-                        src2: Some(end_op),
-                    });
-                    ctx.instructions.push(Instruction {
-                        op: Op::JumpIfFalse,
-                        dst: None,
-                        src1: Some(cond_tmp),
-                        src2: Some(Operand::Label(label_end.clone())),
-                    });
-                    ctx.declare_var(var.clone(), IRType::Int)?;
-                    ctx.var_types
-                        .insert(var.clone(), Type::Primitive(Primitive::Int));
-                    ctx.instructions.push(Instruction {
-                        op: Op::Store,
-                        dst: Some(Operand::Var(ctx.slot(&var))),
-                        src1: Some(curr_idx),
-                        src2: None,
-                    });
-                    self.compile_expr(*body, ctx)?;
-                    ctx.instructions.push(Instruction {
-                        op: Op::Label(label_inc.clone()),
-                        dst: None,
-                        src1: None,
-                        src2: None,
-                    });
-                    let one_idx = self.get_const_index(IRConst::Int(1));
-                    let curr_idx2 = ctx.new_tmp(IRType::Int);
-                    ctx.instructions.push(Instruction {
-                        op: Op::Load,
-                        dst: Some(curr_idx2.clone()),
-                        src1: Some(idx_var.clone()),
-                        src2: None,
-                    });
-                    let next_idx = ctx.new_tmp(IRType::Int);
-                    ctx.instructions.push(Instruction {
-                        op: Op::Add,
-                        dst: Some(next_idx.clone()),
-                        src1: Some(curr_idx2),
-                        src2: Some(Operand::ConstIdx(one_idx)),
-                    });
-                    ctx.instructions.push(Instruction {
-                        op: Op::Store,
-                        dst: Some(idx_var),
-                        src1: Some(next_idx),
-                        src2: None,
-                    });
-                    ctx.instructions.push(Instruction {
-                        op: Op::Jump,
-                        dst: None,
-                        src1: Some(Operand::Label(label_cond)),
-                        src2: None,
-                    });
-                    ctx.instructions.push(Instruction {
-                        op: Op::Label(label_end),
-                        dst: None,
-                        src1: None,
-                        src2: None,
-                    });
-                    self.emit_scope_frees(ctx)?;
-                    ctx.exit_scope()?;
-                    ctx.loop_end_labels.pop();
-                    ctx.loop_inc_labels.pop();
-                    ctx.loop_scope_depths.pop();
-                    return Ok(ctx.new_tmp(IRType::Void));
-                }
-                if let Some(Type::Struct(sname, ta)) = self.expr_high_type(&iter, ctx) {
-                    let maybe_ty =
-                        self.struct_field_fn_ret(&sname, &ta, "next")
-                            .ok_or_else(|| CodeGenError::TypeError {
-                                message: format!("type '{}' has no 'next' method", sname),
-                            })?;
-                    let elem_ir = match &maybe_ty {
-                        Type::Struct(mname, margs) if mname == "Maybe" => margs
-                            .first()
-                            .map(Context::type2ir_type)
-                            .unwrap_or(IRType::Int),
-                        _ => {
-                            return Err(CodeGenError::TypeError {
-                                message: format!(
-                                    "'next' of '{}' must return Maybe<T>, got {}",
-                                    sname, maybe_ty
-                                ),
-                            });
-                        }
-                    };
-                    let elem_hty = match &maybe_ty {
-                        Type::Struct(mname, margs) if mname == "Maybe" => margs.first().cloned(),
-                        _ => None,
-                    };
-                    let s_op = self.compile_expr(*iter, ctx)?;
-                    let fn_ptr = self.load_function_field(
-                        s_op.clone(),
-                        &Type::Struct(sname, ta),
-                        "next",
-                        ctx,
-                    )?;
-
-                    let label_cond = ctx.new_label("nfor_cond");
-                    let label_end = ctx.new_label("nfor_end");
-
-                    ctx.loop_end_labels.push(label_end.clone());
-                    ctx.loop_inc_labels.push(label_cond.clone());
-
-                    ctx.loop_scope_depths.push(ctx.scope.len());
-                    ctx.enter_scope();
-
-                    ctx.instructions.push(Instruction {
-                        op: Op::Label(label_cond.clone()),
-                        dst: None,
-                        src1: None,
-                        src2: None,
-                    });
-
-                    ctx.instructions.push(Instruction {
-                        op: Op::Arg(0),
-                        dst: None,
-                        src1: Some(s_op),
-                        src2: None,
-                    });
-                    let maybe_tmp = ctx.new_tmp(IRType::Int);
-                    ctx.instructions.push(Instruction {
-                        op: Op::Call,
-                        dst: Some(maybe_tmp.clone()),
-                        src1: Some(fn_ptr),
-                        src2: None,
-                    });
-
-                    let zero_idx = self.get_const_index(IRConst::Int(0));
-                    let tag_tmp = ctx.new_tmp(IRType::Int);
-                    ctx.instructions.push(Instruction {
-                        op: Op::LoadAt,
-                        dst: Some(tag_tmp.clone()),
-                        src1: Some(maybe_tmp.clone()),
-                        src2: Some(Operand::ConstIdx(zero_idx)),
-                    });
-
-                    let cond_tmp = ctx.new_tmp(IRType::Bool);
-                    ctx.instructions.push(Instruction {
-                        op: Op::Ne,
-                        dst: Some(cond_tmp.clone()),
-                        src1: Some(tag_tmp),
-                        src2: Some(Operand::ConstIdx(zero_idx)),
-                    });
-                    ctx.instructions.push(Instruction {
-                        op: Op::JumpIfFalse,
-                        dst: None,
-                        src1: Some(cond_tmp),
-                        src2: Some(Operand::Label(label_end.clone())),
-                    });
-
-                    let eight_idx = self.get_const_index(IRConst::Int(8));
-                    let val_tmp = ctx.new_tmp(elem_ir.clone());
-                    ctx.instructions.push(Instruction {
-                        op: Op::LoadAt,
-                        dst: Some(val_tmp.clone()),
-                        src1: Some(maybe_tmp),
-                        src2: Some(Operand::ConstIdx(eight_idx)),
-                    });
-
-                    ctx.declare_var(var.clone(), elem_ir.clone())?;
-                    ctx.borrowed.insert(var.clone());
-                    if let Some(elem_hty) = elem_hty {
-                        ctx.var_types.insert(var.clone(), elem_hty);
-                    }
-                    ctx.instructions.push(Instruction {
-                        op: Op::Store,
-                        dst: Some(Operand::Var(ctx.slot(&var))),
-                        src1: Some(val_tmp),
-                        src2: None,
-                    });
-
-                    self.compile_expr(*body, ctx)?;
-
-                    ctx.instructions.push(Instruction {
-                        op: Op::Jump,
-                        dst: None,
-                        src1: Some(Operand::Label(label_cond)),
-                        src2: None,
-                    });
-                    ctx.instructions.push(Instruction {
-                        op: Op::Label(label_end),
-                        dst: None,
-                        src1: None,
-                        src2: None,
-                    });
-
-                    self.emit_scope_frees(ctx)?;
-                    ctx.exit_scope()?;
-                    ctx.loop_end_labels.pop();
-                    ctx.loop_inc_labels.pop();
-                    ctx.loop_scope_depths.pop();
-
-                    return Ok(ctx.new_tmp(IRType::Void));
-                }
-                let is_string = matches!(
-                    self.expr_high_type(&iter, ctx),
-                    Some(Type::Primitive(Primitive::String))
-                );
-                let (elem_hty, _) = self.index_info(&iter, ctx);
-                let elem_ir_type = elem_hty
-                    .as_ref()
-                    .map_or(IRType::Int, |t| Context::type2ir_type(t));
-                let known_len = match &*iter {
-                    Expr::ArrayLiteral(elements, _) => Some(elements.len()),
-                    Expr::Var(name, _) => ctx.array_lengths.get(name).copied(),
-                    _ => None,
-                };
-                let array_operand = self.compile_expr(*iter, ctx)?;
-
-                let array_len_operand = if is_string {
-                    let zero_idx = self.get_const_index(IRConst::Int(0));
-                    ctx.instructions.push(Instruction {
-                        op: Op::Arg(0),
-                        dst: None,
-                        src1: Some(array_operand.clone()),
-                        src2: Some(Operand::ConstIdx(zero_idx)),
-                    });
-                    let len_tmp = ctx.new_tmp(IRType::Int);
-                    ctx.instructions.push(Instruction {
-                        op: Op::Call,
-                        dst: Some(len_tmp.clone()),
-                        src1: Some(Operand::Function("strlen".to_string())),
-                        src2: None,
-                    });
-                    len_tmp
-                } else if let Some(len) = known_len {
-                    let idx = self.get_const_index(IRConst::Int(len as i64));
-                    Operand::ConstIdx(idx)
-                } else {
-                    let len_tmp = ctx.new_tmp(IRType::Int);
-                    ctx.instructions.push(Instruction {
-                        op: Op::SizeOf,
-                        dst: Some(len_tmp.clone()),
-                        src1: Some(array_operand.clone()),
-                        src2: None,
-                    });
-                    len_tmp
-                };
-
-                let label_cond = ctx.new_label("for_cond");
-                let label_end = ctx.new_label("for_end");
-                let label_inc = ctx.new_label("for_inc");
-
-                ctx.loop_end_labels.push(label_end.clone());
-                ctx.loop_inc_labels.push(label_inc.clone());
-
-                ctx.loop_scope_depths.push(ctx.scope.len());
-                ctx.enter_scope();
-                let idx_name = ctx.new_label("idx");
-                let idx_var = Operand::Var(idx_name.clone());
-                ctx.declare_var(idx_name.clone(), IRType::Int)?;
-
-                let zero_idx = self.get_const_index(IRConst::Int(0));
-                ctx.instructions.push(Instruction {
-                    op: Op::Store,
-                    dst: Some(idx_var.clone()),
-                    src1: Some(Operand::ConstIdx(zero_idx)),
-                    src2: None,
-                });
-
-                ctx.instructions.push(Instruction {
-                    op: Op::Label(label_cond.clone()),
-                    dst: None,
-                    src1: None,
-                    src2: None,
-                });
-
-                let curr_idx = ctx.new_tmp(IRType::Int);
-                ctx.instructions.push(Instruction {
-                    op: Op::Load,
-                    dst: Some(curr_idx.clone()),
-                    src1: Some(idx_var.clone()),
-                    src2: None,
-                });
-
-                let cond_tmp = ctx.new_tmp(IRType::Bool);
-                ctx.instructions.push(Instruction {
-                    op: Op::Lt,
-                    dst: Some(cond_tmp.clone()),
-                    src1: Some(curr_idx.clone()),
-                    src2: Some(array_len_operand),
-                });
-
-                ctx.instructions.push(Instruction {
-                    op: Op::JumpIfFalse,
-                    dst: None,
-                    src1: Some(cond_tmp),
-                    src2: Some(Operand::Label(label_end.clone())),
-                });
-
-                ctx.declare_var(var.clone(), elem_ir_type.clone())?;
-                ctx.borrowed.insert(var.clone());
-                if let Some(et) = elem_hty {
-                    ctx.var_types.insert(var.clone(), et);
-                }
-                let element_tmp = ctx.new_tmp(elem_ir_type);
-
-                ctx.instructions.push(Instruction {
-                    op: if is_string {
-                        Op::StrByte
-                    } else {
-                        Op::ArrayAccess
-                    },
-                    dst: Some(element_tmp.clone()),
-                    src1: Some(array_operand),
-                    src2: Some(curr_idx.clone()),
-                });
-
-                ctx.instructions.push(Instruction {
-                    op: Op::Store,
-                    dst: Some(Operand::Var(ctx.slot(&var))),
-                    src1: Some(element_tmp),
-                    src2: None,
-                });
-
-                self.compile_expr(*body, ctx)?;
-
-                ctx.instructions.push(Instruction {
-                    op: Op::Label(label_inc.clone()),
-                    dst: None,
-                    src1: None,
-                    src2: None,
-                });
-
-                let one_idx = self.get_const_index(IRConst::Int(1));
-                let curr_idx2 = ctx.new_tmp(IRType::Int);
-                ctx.instructions.push(Instruction {
-                    op: Op::Load,
-                    dst: Some(curr_idx2.clone()),
-                    src1: Some(idx_var.clone()),
-                    src2: None,
-                });
-                let next_idx = ctx.new_tmp(IRType::Int);
-                ctx.instructions.push(Instruction {
-                    op: Op::Add,
-                    dst: Some(next_idx.clone()),
-                    src1: Some(curr_idx2),
-                    src2: Some(Operand::ConstIdx(one_idx)),
-                });
-                ctx.instructions.push(Instruction {
-                    op: Op::Store,
-                    dst: Some(idx_var),
-                    src1: Some(next_idx),
-                    src2: None,
-                });
-                ctx.instructions.push(Instruction {
-                    op: Op::Jump,
-                    dst: None,
-                    src1: Some(Operand::Label(label_cond)),
-                    src2: None,
-                });
-
-                ctx.instructions.push(Instruction {
-                    op: Op::Label(label_end),
-                    dst: None,
-                    src1: None,
-                    src2: None,
-                });
-
-                self.emit_scope_frees(ctx)?;
-                ctx.exit_scope()?;
-                ctx.loop_end_labels.pop();
-                ctx.loop_inc_labels.pop();
-                ctx.loop_scope_depths.pop();
-
-                Ok(ctx.new_tmp(IRType::Void))
-            }
-
-            Expr::Break(_) => {
-                let end = ctx
-                    .loop_end_labels
-                    .last()
-                    .ok_or_else(|| CodeGenError::SyntaxError {
-                        message: "break outside of loop".to_string(),
-                    })?
-                    .clone();
-
-                if let Some(depth) = ctx.loop_scope_depths.last() {
-                    self.emit_scope_frees_from(ctx, depth + 1)?;
-                }
-                ctx.instructions.push(Instruction {
-                    op: Op::Jump,
-                    dst: None,
-                    src1: Some(Operand::Label(end.clone())),
-                    src2: None,
-                });
-                Ok(ctx.new_tmp(IRType::Void))
-            }
-
-            Expr::Continue(_) => {
-                let inc = ctx
-                    .loop_inc_labels
-                    .last()
-                    .ok_or_else(|| CodeGenError::SyntaxError {
-                        message: "continue outside of loop".to_string(),
-                    })?
-                    .clone();
-
-                if let Some(depth) = ctx.loop_scope_depths.last() {
-                    self.emit_scope_frees_from(ctx, *depth)?;
-                }
-                ctx.instructions.push(Instruction {
-                    op: Op::Jump,
-                    dst: None,
-                    src1: Some(Operand::Label(inc.clone())),
-                    src2: None,
-                });
-                Ok(ctx.new_tmp(IRType::Void))
-            }
+            Expr::Continue(_) => self.compile_continue(ctx),
 
             Expr::FuncDecl(_, _, _, _, _, _, _) => Err(CodeGenError::SyntaxError {
                 message: "cannot declare a function in a function".to_string(),
             }),
 
             Expr::Call(callee, type_args, args, _) => {
-                let func_name = match &*callee {
-                    Expr::Var(name, _) => {
-                        if self.find_func(name).is_ok() {
-                            Some(name.clone())
-                        } else if self.generic_funcs.contains_key(name) {
-                            Some(self.monomorphize(name, &type_args)?)
-                        } else {
-                            None
-                        }
-                    }
-                    _ => None,
-                };
-
-                if let Some(ref name) = func_name {
-                    let func = self.find_func(name)?;
-                    if args.len() != func.params.len() {
-                        return Err(CodeGenError::TypeError {
-                            message: format!(
-                                "expected {} arguments, got {}",
-                                func.params.len(),
-                                args.len()
-                            ),
-                        });
-                    }
-                    let mut evaluated: Vec<(Operand, IRType)> = Vec::new();
-                    let mut n = 0;
-                    for (arg, param) in zip(args.iter(), func.params.iter()) {
-                        let operand = self.compile_expr(arg.clone(), ctx)?;
-                        let operand_type = ctx.get_operand_type(&operand, &self.constants)?;
-                        let type_matches = operand_type == param.1
-                            || (operand_type == IRType::Array && param.1 == IRType::Int);
-                        if !type_matches {
-                            return Err(CodeGenError::TypeError {
-                                message: format!(
-                                    "unexpected type {:?}, expected {:?} (arg {} of '{}')",
-                                    operand_type, param.1, n, name
-                                ),
-                            });
-                        }
-                        let operand = match self.expr_high_type(arg, ctx) {
-                            Some(hty)
-                                if self.is_resource_type(&hty) && !self.is_fresh_expr(arg) =>
-                            {
-                                self.copy_resource(ctx, operand, &hty)?
-                            }
-                            _ => operand,
-                        };
-                        evaluated.push((operand, param.1.clone()));
-                        n += 1;
-                    }
-                    for (n, (operand, ir_type)) in evaluated.iter().enumerate() {
-                        match ir_type {
-                            IRType::Float => ctx.instructions.push(Instruction {
-                                op: Op::FArg(n),
-                                dst: None,
-                                src1: Some(operand.clone()),
-                                src2: None,
-                            }),
-                            _ => ctx.instructions.push(Instruction {
-                                op: Op::Arg(n),
-                                dst: None,
-                                src1: Some(operand.clone()),
-                                src2: None,
-                            }),
-                        }
-                    }
-                    let res_tmp = ctx.new_tmp(func.ret_type);
-                    ctx.instructions.push(Instruction {
-                        op: Op::Call,
-                        dst: Some(res_tmp.clone()),
-                        src1: Some(Operand::Function(name.clone())),
-                        src2: None,
-                    });
-                    Ok(res_tmp)
-                } else {
-                    let ret_ir_type = self.member_call_ret_type(&callee, ctx);
-                    let callee_op = self.compile_expr(*callee, ctx)?;
-                    let mut evaluated: Vec<Operand> = Vec::new();
-                    for arg in args.iter() {
-                        let operand = self.compile_expr(arg.clone(), ctx)?;
-                        let operand = match self.resource_copy_info(arg, ctx) {
-                            Some(ty) => self.copy_resource(ctx, operand, &ty)?,
-                            None => operand,
-                        };
-                        evaluated.push(operand);
-                    }
-                    for (n, operand) in evaluated.iter().enumerate() {
-                        ctx.instructions.push(Instruction {
-                            op: Op::Arg(n as usize),
-                            dst: None,
-                            src1: Some(operand.clone()),
-                            src2: None,
-                        });
-                    }
-                    let res_tmp = ctx.new_tmp(ret_ir_type);
-                    ctx.instructions.push(Instruction {
-                        op: Op::Call,
-                        dst: Some(res_tmp.clone()),
-                        src1: Some(callee_op),
-                        src2: None,
-                    });
-                    Ok(res_tmp)
-                }
+                self.compile_call(callee, type_args, args, ctx)
             }
 
-            Expr::Index(arr, idx, _) => {
-                if let Some(Type::Struct(sname, ta)) = self.expr_high_type(&arr, ctx) {
-                    let ret_ty = self
-                        .struct_field_fn_ret(&sname, &ta, "nth")
-                        .ok_or_else(|| CodeGenError::TypeError {
-                            message: format!("type '{}' has no 'nth' method", sname),
-                        })?;
-                    let ret_ir = Context::type2ir_type(&ret_ty);
-                    let s_op = self.compile_expr(*arr, ctx)?;
-                    let i_op = self.compile_expr(*idx, ctx)?;
-                    let fn_ptr = self.load_function_field(
-                        s_op.clone(),
-                        &Type::Struct(sname, ta),
-                        "nth",
-                        ctx,
-                    )?;
-                    ctx.instructions.push(Instruction {
-                        op: Op::Arg(0),
-                        dst: None,
-                        src1: Some(s_op),
-                        src2: None,
-                    });
-                    ctx.instructions.push(Instruction {
-                        op: Op::Arg(1),
-                        dst: None,
-                        src1: Some(i_op),
-                        src2: None,
-                    });
-                    let res_tmp = ctx.new_tmp(ret_ir);
-                    ctx.instructions.push(Instruction {
-                        op: Op::Call,
-                        dst: Some(res_tmp.clone()),
-                        src1: Some(fn_ptr),
-                        src2: None,
-                    });
-                    return Ok(res_tmp);
-                }
-                let (elem_type, byte) = self.index_info(&arr, ctx);
-                let is_string_index =
-                    byte && matches!(elem_type, Some(Type::Primitive(Primitive::String)));
-                let elem_ir_type = if is_string_index {
-                    IRType::String
-                } else {
-                    elem_type.map_or(IRType::Int, |t| Context::type2ir_type(&t))
-                };
-                let arr_op = self.compile_expr(*arr, ctx)?;
-                let offset = self.compile_expr(*idx, ctx)?;
-                let res_tmp = ctx.new_tmp(elem_ir_type);
-                ctx.instructions.push(Instruction {
-                    op: if is_string_index {
-                        Op::StrByte
-                    } else if byte {
-                        Op::ByteAccess
-                    } else {
-                        Op::ArrayAccess
-                    },
-                    dst: Some(res_tmp.clone()),
-                    src1: Some(arr_op),
-                    src2: Some(offset),
-                });
-                Ok(res_tmp)
-            }
+            Expr::Index(arr, idx, _) => self.compile_index(arr, idx, ctx),
 
-            Expr::IndexAssign(arr_idx, value, _) => {
-                let (arr, idx) = match *arr_idx {
-                    Expr::Index(arr, idx, _) => (arr, idx),
-                    expr => {
-                        return Err(CodeGenError::TypeError {
-                            message: format!("expected index expression, got {:?}", expr),
-                        });
-                    }
-                };
-                if let Some(Type::Struct(sname, ta)) = self.expr_high_type(&arr, ctx) {
-                    self.struct_field_fn_ret(&sname, &ta, "set_nth")
-                        .ok_or_else(|| CodeGenError::TypeError {
-                            message: format!("type '{}' has no 'set_nth' method", sname),
-                        })?;
-                    let s_op = self.compile_expr(*arr, ctx)?;
-                    let i_op = self.compile_expr(*idx, ctx)?;
-                    let v_copy_info = self.resource_copy_info(&value, ctx);
-                    let v_op = self.compile_expr(*value, ctx)?;
-                    let v_op = match v_copy_info {
-                        Some(ty) => self.copy_resource(ctx, v_op, &ty)?,
-                        None => v_op,
-                    };
-                    let fn_ptr = self.load_function_field(
-                        s_op.clone(),
-                        &Type::Struct(sname, ta),
-                        "set_nth",
-                        ctx,
-                    )?;
-                    ctx.instructions.push(Instruction {
-                        op: Op::Arg(0),
-                        dst: None,
-                        src1: Some(s_op),
-                        src2: None,
-                    });
-                    ctx.instructions.push(Instruction {
-                        op: Op::Arg(1),
-                        dst: None,
-                        src1: Some(i_op),
-                        src2: None,
-                    });
-                    ctx.instructions.push(Instruction {
-                        op: Op::Arg(2),
-                        dst: None,
-                        src1: Some(v_op),
-                        src2: None,
-                    });
-                    let res_tmp = ctx.new_tmp(IRType::Void);
-                    ctx.instructions.push(Instruction {
-                        op: Op::Call,
-                        dst: Some(res_tmp.clone()),
-                        src1: Some(fn_ptr),
-                        src2: None,
-                    });
-                    return Ok(res_tmp);
-                }
-                let (elem_type, byte) = self.index_info(&arr, ctx);
-                let arr_op = self.compile_expr(*arr, ctx)?;
-                let offset = self.compile_expr(*idx, ctx)?;
-                let value_copy_info = self.resource_copy_info(&value, ctx);
-                let val = self.compile_expr(*value, ctx)?;
-                let val = if let Some(et) = elem_type {
-                    if self.is_resource_type(&et) {
-                        let val = match value_copy_info {
-                            Some(ty) => self.copy_resource(ctx, val, &ty)?,
-                            None => val,
-                        };
-                        let old_tmp = ctx.new_tmp(IRType::Int);
-                        ctx.instructions.push(Instruction {
-                            op: Op::ArrayAccess,
-                            dst: Some(old_tmp.clone()),
-                            src1: Some(arr_op.clone()),
-                            src2: Some(offset.clone()),
-                        });
-                        self.emit_free(ctx, old_tmp, &et)?;
-                        val
-                    } else {
-                        val
-                    }
-                } else {
-                    val
-                };
-                let res_tmp = ctx.new_tmp(IRType::Void);
-                ctx.instructions.push(Instruction {
-                    op: if byte {
-                        Op::ByteAssign
-                    } else {
-                        Op::ArrayAssign
-                    },
-                    dst: Some(arr_op),
-                    src1: Some(offset),
-                    src2: Some(val),
-                });
-                Ok(res_tmp)
-            }
+            Expr::IndexAssign(arr_idx, value, _) => self.compile_index_assign(arr_idx, value, ctx),
 
-            Expr::ArrayLiteral(elements, _) => {
-                let mut compiled = Vec::new();
-                for e in elements.iter() {
-                    compiled.push(self.compile_expr(e.clone(), ctx)?);
-                }
+            Expr::ArrayLiteral(elements, _) => self.compile_array_literal(elements, ctx),
 
-                let ir_const = IRConst::Array(compiled.clone());
-                let ir_type = IRType::Array;
+            Expr::ArrayFill(typ, len, _) => self.compile_array_fill(typ, len, ctx),
 
-                let res_tmp = ctx.new_tmp(ir_type.clone());
-                let const_idx = self.get_const_index(ir_const);
-                match ir_type {
-                    IRType::Float => ctx.instructions.push(Instruction {
-                        op: Op::FMove,
-                        dst: Some(res_tmp.clone()),
-                        src1: Some(Operand::ConstIdx(const_idx)),
-                        src2: None,
-                    }),
-                    _ => ctx.instructions.push(Instruction {
-                        op: Op::Move,
-                        dst: Some(res_tmp.clone()),
-                        src1: Some(Operand::ConstIdx(const_idx)),
-                        src2: None,
-                    }),
-                }
-                Ok(res_tmp)
-            }
-
-            Expr::ArrayFill(typ, len, _) => {
-                let len_op = self.compile_expr(*len, ctx)?;
-                let elem_size = match &typ {
-                    Type::Primitive(crate::compiler::parser::Primitive::Boolean) => 1i64,
-                    _ => 8i64,
-                };
-                let ptr_tmp = ctx.new_tmp(IRType::Int);
-                if let Operand::ConstIdx(n) = &len_op {
-                    let n_val = if let IRConst::Int(v) = &self.constants[*n] {
-                        *v
-                    } else {
-                        elem_size
-                    };
-                    let total_size = n_val * elem_size + 8;
-                    let total_size_idx = self.get_const_index(IRConst::Int(total_size));
-                    let len_idx = self.get_const_index(IRConst::Int(n_val));
-                    ctx.instructions.push(Instruction {
-                        op: Op::Malloc,
-                        dst: Some(ptr_tmp.clone()),
-                        src1: Some(Operand::ConstIdx(total_size_idx)),
-                        src2: None,
-                    });
-                    let zero_idx = self.get_const_index(IRConst::Int(0));
-                    ctx.instructions.push(Instruction {
-                        op: Op::StoreAt,
-                        dst: Some(ptr_tmp.clone()),
-                        src1: Some(Operand::ConstIdx(zero_idx)),
-                        src2: Some(Operand::ConstIdx(len_idx)),
-                    });
-                } else {
-                    let esize_idx = self.get_const_index(IRConst::Int(elem_size));
-                    let byte_len_tmp = ctx.new_tmp(IRType::Int);
-                    ctx.instructions.push(Instruction {
-                        op: Op::Mul,
-                        dst: Some(byte_len_tmp.clone()),
-                        src1: Some(len_op.clone()),
-                        src2: Some(Operand::ConstIdx(esize_idx)),
-                    });
-                    let eight_idx = self.get_const_index(IRConst::Int(8));
-                    let total_tmp = ctx.new_tmp(IRType::Int);
-                    ctx.instructions.push(Instruction {
-                        op: Op::Add,
-                        dst: Some(total_tmp.clone()),
-                        src1: Some(byte_len_tmp),
-                        src2: Some(Operand::ConstIdx(eight_idx)),
-                    });
-                    ctx.instructions.push(Instruction {
-                        op: Op::Malloc,
-                        dst: Some(ptr_tmp.clone()),
-                        src1: Some(total_tmp),
-                        src2: None,
-                    });
-                    let zero_idx = self.get_const_index(IRConst::Int(0));
-                    ctx.instructions.push(Instruction {
-                        op: Op::StoreAt,
-                        dst: Some(ptr_tmp.clone()),
-                        src1: Some(Operand::ConstIdx(zero_idx)),
-                        src2: Some(len_op),
-                    });
-                }
-                Ok(ptr_tmp)
-            }
-
-            Expr::Range(start, end, _) => {
-                let start_op = self.compile_expr(*start, ctx)?;
-                let end_op = self.compile_expr(*end, ctx)?;
-                let res_tmp = ctx.new_tmp(IRType::Array);
-                ctx.instructions.push(Instruction {
-                    op: Op::Range,
-                    dst: Some(res_tmp.clone()),
-                    src1: Some(start_op),
-                    src2: Some(end_op),
-                });
-                Ok(res_tmp)
-            }
+            Expr::Range(start, end, _) => self.compile_range(start, end, ctx),
 
             Expr::ExternVar(name, _, _) => {
                 if let Some(ty) = self.extern_vars.get(&name).cloned() {
-                    let ir_ty = Context::type2ir_type(&ty);
+                    let ir_ty = Context::type_to_ir_type(&ty);
                     Ok(ctx.new_tmp(ir_ty))
                 } else {
                     Err(CodeGenError::UndefinedVariable {
@@ -2497,7 +1602,7 @@ impl IRGen {
                 }
                 let (obj_addr, obj_type) = self.member_addr(&obj, ctx)?;
                 let (offset, field_type) = self.member_offset_and_type(&obj_type, &field_name)?;
-                let field_ir_type = Context::type2ir_type(&field_type);
+                let field_ir_type = Context::type_to_ir_type(&field_type);
                 let addr = if offset == 0 {
                     obj_addr
                 } else {
@@ -2626,415 +1731,11 @@ impl IRGen {
             | Expr::Lambda(_, _, _, _) => Ok(ctx.new_tmp(IRType::Void)),
 
             Expr::Match(target, branches, default, _) => {
-                let target = self.compile_expr(*target, ctx)?;
-                let end_label = ctx.new_label("end_match");
-                let mut case_labels: Vec<String> = Vec::new();
-                let mut case_cnt = 0usize;
-                let res_tmp = ctx.new_tmp(IRType::Void);
-
-                for _ in branches.clone() {
-                    case_labels.push(format!("case{}", case_cnt));
-                    case_cnt += 1;
-                }
-
-                case_cnt = 0;
-                for (case, _) in branches.clone() {
-                    let cond = ctx.new_tmp(IRType::Bool);
-                    let case = self.compile_expr(case, ctx)?;
-                    ctx.instructions.push(Instruction {
-                        op: Op::Eq,
-                        dst: Some(cond.clone()),
-                        src1: Some(target.clone()),
-                        src2: Some(case),
-                    });
-                    ctx.instructions.push(Instruction {
-                        op: Op::JumpIfTrue,
-                        dst: None,
-                        src1: Some(cond),
-                        src2: Some(Operand::Label(
-                            case_labels.iter().nth(case_cnt).unwrap().clone(),
-                        )),
-                    });
-                    case_cnt += 1;
-                }
-
-                if let Some(d) = default {
-                    ctx.enter_scope();
-                    let d_info = self.resource_copy_info(&d, ctx);
-                    let ret = self.compile_expr(*d, ctx)?;
-                    let ret = match d_info {
-                        Some(ty) => self.copy_resource(ctx, ret, &ty)?,
-                        None => ret,
-                    };
-                    ctx.instructions.push(Instruction {
-                        op: Op::Move,
-                        dst: Some(res_tmp.clone()),
-                        src1: Some(ret),
-                        src2: None,
-                    });
-                    self.emit_scope_frees(ctx)?;
-                    ctx.exit_scope()?;
-                }
-
-                ctx.instructions.push(Instruction {
-                    op: Op::Jump,
-                    dst: None,
-                    src1: Some(Operand::Label(end_label.clone())),
-                    src2: None,
-                });
-
-                case_cnt = 0;
-                for (_, ret) in branches.clone() {
-                    ctx.instructions.push(Instruction {
-                        op: Op::Label(case_labels.iter().nth(case_cnt).unwrap().clone()),
-                        dst: None,
-                        src1: None,
-                        src2: None,
-                    });
-                    ctx.enter_scope();
-                    let ret_info = self.resource_copy_info(&ret, ctx);
-                    let ret = self.compile_expr(ret, ctx)?;
-                    let ret = match ret_info {
-                        Some(ty) => self.copy_resource(ctx, ret, &ty)?,
-                        None => ret,
-                    };
-                    ctx.instructions.push(Instruction {
-                        op: Op::Move,
-                        dst: Some(res_tmp.clone()),
-                        src1: Some(ret),
-                        src2: None,
-                    });
-                    self.emit_scope_frees(ctx)?;
-                    ctx.exit_scope()?;
-                    ctx.instructions.push(Instruction {
-                        op: Op::Jump,
-                        dst: None,
-                        src1: Some(Operand::Label(end_label.clone())),
-                        src2: None,
-                    });
-                    case_cnt += 1;
-                }
-                ctx.instructions.push(Instruction {
-                    op: Op::Label(end_label),
-                    dst: None,
-                    src1: None,
-                    src2: None,
-                });
-                Ok(res_tmp)
+                self.compile_match(target, branches, default, ctx)
             }
             Expr::FString(_, _) => {
                 unreachable!("f-string should have been desugared in checker")
             }
         }
-    }
-
-    fn member_call_ret_type(&self, callee: &Expr, ctx: &Context) -> IRType {
-        if let Expr::MemberAccess(obj, field_name, _) = callee {
-            if let Some(obj_ty) = self.expr_high_type(obj, ctx) {
-                if let Some(ftype) = self.member_field_type(&obj_ty, field_name) {
-                    if let Type::Function(_, ret) = ftype {
-                        return Context::type2ir_type(&ret);
-                    }
-                }
-            }
-        }
-        IRType::Int
-    }
-
-    fn ptr_scale(ty: &Type) -> usize {
-        match ty {
-            Type::Primitive(Primitive::Void) => 1,
-            _ => 8,
-        }
-    }
-
-    fn expr_high_type(&self, e: &Expr, ctx: &Context) -> Option<Type> {
-        match e {
-            Expr::Int(_, _) => Some(Type::Primitive(Primitive::Int)),
-            Expr::Float(_, _) => Some(Type::Primitive(Primitive::Float)),
-            Expr::Bool(_, _) => Some(Type::Primitive(Primitive::Boolean)),
-            Expr::String(_, _) => Some(Type::Primitive(Primitive::String)),
-            Expr::Nil(_) => Some(Type::Primitive(Primitive::Void)),
-            Expr::Var(name, _) => ctx
-                .get_var_high_type(name.as_str())
-                .cloned()
-                .or_else(|| self.extern_vars.get(name).cloned()),
-            Expr::AddressOf(inner, _) => match inner.as_ref() {
-                Expr::Var(n, _) => ctx
-                    .get_var_high_type(n.as_str())
-                    .cloned()
-                    .map(|t| Type::Pointer(Box::new(t))),
-                _ => self
-                    .expr_high_type(inner, ctx)
-                    .map(|t| Type::Pointer(Box::new(t))),
-            },
-            Expr::Deref(inner, _) => match inner.as_ref() {
-                Expr::Var(n, _) => match ctx.get_var_high_type(n.as_str()) {
-                    Some(Type::Pointer(t)) => Some(*t.clone()),
-                    _ => None,
-                },
-                _ => match &self.expr_high_type(inner, ctx) {
-                    Some(Type::Pointer(t)) => Some(*t.clone()),
-                    _ => None,
-                },
-            },
-            Expr::Index(arr, _, _) => match self.expr_high_type(arr, ctx) {
-                Some(Type::Array(elem)) => Some(*elem),
-                Some(Type::Pointer(elem)) => Some(*elem),
-                Some(Type::Struct(sname, ta)) => self.struct_field_fn_ret(&sname, &ta, "nth"),
-                _ => self.index_info(arr, ctx).0,
-            },
-            Expr::MemberAccess(obj, field_name, _) => {
-                let obj_ty = self.expr_high_type(obj, ctx)?;
-                self.member_field_type(&obj_ty, field_name)
-            }
-            Expr::Call(callee, type_args, _, _) => self.call_ret_high_type(callee, type_args, ctx),
-            Expr::StructLiteral(name, type_args, _, _) => {
-                Some(Type::Struct(name.clone(), type_args.clone()))
-            }
-            Expr::UnionLiteral(name, type_args, _, _) => {
-                Some(Type::Union(name.clone(), type_args.clone()))
-            }
-            Expr::ArrayLiteral(items, _) => items
-                .first()
-                .and_then(|i| self.expr_high_type(i, ctx))
-                .map(|t| Type::Array(Box::new(t))),
-            Expr::ArrayFill(ty, _, _) => Some(Type::Array(Box::new(ty.clone()))),
-            Expr::StrCat(_, _, _) => Some(Type::Primitive(Primitive::String)),
-            Expr::Add(_, _, _)
-            | Expr::Sub(_, _, _)
-            | Expr::Mul(_, _, _)
-            | Expr::Div(_, _, _)
-            | Expr::Mod(_, _, _) => {
-                let (l, r) = match e {
-                    Expr::Add(l, r, _)
-                    | Expr::Sub(l, r, _)
-                    | Expr::Mul(l, r, _)
-                    | Expr::Div(l, r, _)
-                    | Expr::Mod(l, r, _) => (l, r),
-                    _ => unreachable!(),
-                };
-                let l_float = matches!(
-                    self.expr_high_type(l, ctx),
-                    Some(Type::Primitive(Primitive::Float))
-                );
-                let r_float = matches!(
-                    self.expr_high_type(r, ctx),
-                    Some(Type::Primitive(Primitive::Float))
-                );
-                if l_float || r_float {
-                    Some(Type::Primitive(Primitive::Float))
-                } else {
-                    Some(Type::Primitive(Primitive::Int))
-                }
-            }
-            Expr::FAdd(_, _, _)
-            | Expr::FSub(_, _, _)
-            | Expr::FMul(_, _, _)
-            | Expr::FDiv(_, _, _) => Some(Type::Primitive(Primitive::Float)),
-            Expr::Neg(inner, _) => self.expr_high_type(inner, ctx),
-            Expr::FNeg(_, _) => Some(Type::Primitive(Primitive::Float)),
-            Expr::Not(_, _)
-            | Expr::Eq(_, _, _)
-            | Expr::Ne(_, _, _)
-            | Expr::Lt(_, _, _)
-            | Expr::Le(_, _, _)
-            | Expr::Gt(_, _, _)
-            | Expr::Ge(_, _, _)
-            | Expr::FEq(_, _, _)
-            | Expr::FNe(_, _, _)
-            | Expr::FLt(_, _, _)
-            | Expr::FLe(_, _, _)
-            | Expr::FGt(_, _, _)
-            | Expr::FGe(_, _, _) => Some(Type::Primitive(Primitive::Boolean)),
-            Expr::Xor(_, _, _)
-            | Expr::LAnd(_, _, _)
-            | Expr::LOr(_, _, _)
-            | Expr::Inc(_, _)
-            | Expr::Dec(_, _) => Some(Type::Primitive(Primitive::Int)),
-            Expr::VarDecl(_, _, value, _) | Expr::VarAssign(_, value, _) => {
-                self.expr_high_type(value, ctx)
-            }
-            Expr::If(_, then_branch, else_branch, _) => {
-                self.expr_high_type(then_branch, ctx).or_else(|| {
-                    else_branch
-                        .as_ref()
-                        .and_then(|e| self.expr_high_type(e, ctx))
-                })
-            }
-            Expr::Match(_, branches, default, _) => branches
-                .iter()
-                .find_map(|(_, ret)| self.expr_high_type(ret, ctx))
-                .or_else(|| default.as_ref().and_then(|e| self.expr_high_type(e, ctx))),
-            Expr::Lambda(params, _, ret_type, _) => {
-                let param_types = params.iter().map(|(_, t)| t.clone()).collect();
-                Some(Type::Function(param_types, Box::new(ret_type.clone())))
-            }
-            Expr::Return(value, _) => self.expr_high_type(value, ctx),
-            Expr::ExternVar(_, ty, _) => Some(ty.clone()),
-            Expr::GlobalVar(_, _, ty, value, _) => value
-                .as_ref()
-                .and_then(|v| self.expr_high_type(v, ctx))
-                .or_else(|| {
-                    if matches!(ty, Type::Unknown) {
-                        None
-                    } else {
-                        Some(ty.clone())
-                    }
-                }),
-            Expr::IndexAssign(arr, value, _) => self
-                .expr_high_type(value, ctx)
-                .or_else(|| self.index_info(arr, ctx).0),
-            Expr::MemberAssign(obj, field_name, value, _) => {
-                self.expr_high_type(value, ctx).or_else(|| {
-                    let obj_ty = self.expr_high_type(obj, ctx)?;
-                    self.member_field_type(&obj_ty, field_name)
-                })
-            }
-            _ => None,
-        }
-    }
-
-    fn member_field_type(&self, obj_type: &Type, field: &str) -> Option<Type> {
-        let (sname, type_args) = match obj_type {
-            Type::Struct(sname, args) => (sname, args),
-            Type::Union(sname, args) => (sname, args),
-            Type::Pointer(inner) => match inner.as_ref() {
-                Type::Struct(sname, args) => (sname, args),
-                Type::Union(sname, args) => (sname, args),
-                _ => return None,
-            },
-            _ => return None,
-        };
-        let fields = match self.structs.get(sname).or_else(|| self.unions.get(sname)) {
-            Some((_, fields)) => fields,
-            None => return None,
-        };
-        fields
-            .iter()
-            .find(|(fname, _)| fname == field)
-            .map(|(_, ftype)| ftype.substitute(type_args))
-    }
-
-    fn call_ret_high_type(&self, callee: &Expr, type_args: &[Type], ctx: &Context) -> Option<Type> {
-        match callee {
-            Expr::Var(fname, _) => {
-                if let Some((_, _, ret, _)) = self.generic_funcs.get(fname) {
-                    Some(ret.substitute(type_args))
-                } else {
-                    self.func_high_returns.get(fname).cloned()
-                }
-            }
-            Expr::MemberAccess(obj, field_name, _) => {
-                let obj_ty = self.expr_high_type(obj, ctx)?;
-                self.member_field_type(&obj_ty, field_name)
-            }
-            _ => None,
-        }
-    }
-
-    fn index_info(&self, arr: &Expr, ctx: &Context) -> (Option<Type>, bool) {
-        if let Some(ty) = self.expr_high_type(arr, ctx) {
-            match ty {
-                Type::Array(elem) => return (Some(*elem), false),
-                Type::Primitive(Primitive::String) => {
-                    return (Some(Type::Primitive(Primitive::String)), true);
-                }
-                Type::Pointer(inner) => {
-                    let pointee = *inner;
-                    return (Some(pointee.clone()), Self::ptr_scale(&pointee) == 1);
-                }
-                _ => {}
-            }
-        }
-
-        let (sname, type_args, field_name) = match arr {
-            Expr::Var(name, _) => match ctx.get_var_high_type(name) {
-                Some(Type::Array(elem)) => return (Some(elem.as_ref().clone()), false),
-                Some(Type::Primitive(Primitive::String)) => {
-                    return (Some(Type::Primitive(Primitive::String)), true);
-                }
-                Some(Type::Pointer(inner)) => {
-                    return (Some(*inner.clone()), Self::ptr_scale(inner) == 1);
-                }
-                Some(Type::Struct(sname, ta)) => (sname.clone(), ta.clone(), None),
-                Some(Type::Union(sname, ta)) => (sname.clone(), ta.clone(), None),
-                #[allow(warnings)]
-                Some(Type::Pointer(box_ty)) => match box_ty.as_ref() {
-                    Type::Struct(sname, ta) => (sname.clone(), ta.clone(), None),
-                    Type::Union(sname, ta) => (sname.clone(), ta.clone(), None),
-                    _ => return (None, false),
-                },
-                _ => return (None, false),
-            },
-            Expr::MemberAccess(obj, field_name, _) => match &**obj {
-                Expr::Var(name, _) => match ctx.get_var_high_type(name) {
-                    Some(Type::Struct(sname, type_args)) => {
-                        (sname.clone(), type_args.clone(), Some(field_name.clone()))
-                    }
-                    Some(Type::Union(sname, type_args)) => {
-                        (sname.clone(), type_args.clone(), Some(field_name.clone()))
-                    }
-                    Some(Type::Pointer(box_ty)) => match box_ty.as_ref() {
-                        Type::Struct(sname, type_args) => {
-                            (sname.clone(), type_args.clone(), Some(field_name.clone()))
-                        }
-                        Type::Union(sname, type_args) => {
-                            (sname.clone(), type_args.clone(), Some(field_name.clone()))
-                        }
-                        _ => return (None, false),
-                    },
-                    _ => return (None, false),
-                },
-                _ => return (None, false),
-            },
-            _ => return (None, false),
-        };
-
-        if let Some((_, fields)) = self.structs.get(&sname) {
-            for (fname, ftype) in fields {
-                if Some(fname.as_str()) == field_name.as_deref() {
-                    let byte = match ftype {
-                        Type::Primitive(Primitive::String) => true,
-                        Type::Array(_elem) => false,
-                        Type::Pointer(inner) => Self::ptr_scale(&inner) == 1,
-                        _ => false,
-                    };
-                    let elem = match ftype {
-                        Type::Pointer(inner) => *inner.clone(),
-                        Type::Array(elem) => {
-                            let concrete = elem.substitute(&type_args);
-                            concrete
-                        }
-                        Type::Primitive(Primitive::String) => Type::Primitive(Primitive::String),
-                        _ => Type::Primitive(Primitive::Int),
-                    };
-                    return (Some(elem), byte);
-                }
-            }
-        }
-        if let Some((_, fields)) = self.unions.get(&sname) {
-            for (fname, ftype) in fields {
-                if Some(fname.as_str()) == field_name.as_deref() {
-                    let byte = match ftype {
-                        Type::Primitive(Primitive::String) => true,
-                        Type::Array(_elem) => false,
-                        Type::Pointer(inner) => Self::ptr_scale(&inner) == 1,
-                        _ => false,
-                    };
-                    let elem = match ftype {
-                        Type::Pointer(inner) => *inner.clone(),
-                        Type::Array(elem) => {
-                            let concrete = elem.substitute(&type_args);
-                            concrete
-                        }
-                        Type::Primitive(Primitive::String) => Type::Primitive(Primitive::String),
-                        _ => Type::Primitive(Primitive::Int),
-                    };
-                    return (Some(elem), byte);
-                }
-            }
-        }
-        (None, false)
     }
 }

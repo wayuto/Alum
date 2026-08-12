@@ -17,9 +17,9 @@ impl IRGen {
     ) -> Result<(), CodeGenError> {
         let ir_params: Vec<(Operand, IRType)> = params
             .iter()
-            .map(|(name, typ)| (Operand::Var(name.clone()), Context::type2ir_type(typ)))
+            .map(|(name, typ)| (Operand::Var(name.clone()), Context::type_to_ir_type(typ)))
             .collect();
-        let ir_ret_type = Context::type2ir_type(&ret_type);
+        let ir_ret_type = Context::type_to_ir_type(&ret_type);
         let is_pub = attrs.is_pub || name == "main";
         self.functions.push(IRFunction {
             name,
@@ -28,7 +28,6 @@ impl IRGen {
             instructions: Vec::new(),
             is_pub,
             is_external: attrs.is_external,
-            is_pure: attrs.is_pure,
         });
         Ok(())
     }
@@ -56,7 +55,6 @@ impl IRGen {
                     scope.insert(
                         pname.clone(),
                         Symbol {
-                            name: pname.clone(),
                             ir_type: ty.clone(),
                             slot: slot.clone(),
                         },
@@ -184,7 +182,6 @@ impl IRGen {
             }
         }
 
-        self.mono_in_progress.push(mangled.clone());
         self.func_decl(
             mangled.clone(),
             FuncAttrs::default(),
@@ -192,7 +189,6 @@ impl IRGen {
             concrete_ret,
         )?;
         self.compile_fn(mangled.clone(), concrete_params, concrete_body)?;
-        self.mono_in_progress.pop();
 
         Ok(mangled)
     }

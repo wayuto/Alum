@@ -21,29 +21,38 @@ fn main() {
     }
 }
 
+fn is_object_file(path: &str) -> bool {
+    path.ends_with(".o") || path.ends_with(".obj") || path.ends_with(".a")
+}
+
+fn default_exe_path(input: &str) -> String {
+    let name = input.strip_suffix(".al").unwrap_or(input);
+    name.to_string()
+}
+
 fn run() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
 
-    if cli.input.is_empty() {
-        eprintln!("Error: No input files specified");
-        exit(1);
-    }
+    let Some(first_input) = cli.input.first() else {
+        return Err("No input files specified".into());
+    };
 
     if cli.run {
-        let input = cli.input.first().unwrap().clone();
-        exec_run(input, cli.include_paths, cli.verbose, cli.cte_lib.clone())?;
-        return Ok(());
+        return exec_run(
+            first_input.clone(),
+            cli.include_paths,
+            cli.verbose,
+            cli.cte_lib.clone(),
+        );
     }
 
-    let mut obj_files = Vec::new();
+    let all_obj_files = cli.input.iter().all(|input| is_object_file(input));
 
-    let all_obj_files = cli
-        .input
-        .iter()
-        .all(|input| input.ends_with(".o") || input.ends_with(".obj") || input.ends_with(".a"));
+    let mut obj_files = Vec::new();
+    let mut generated_objs = Vec::new();
 
     for input in &cli.input {
-        if input.ends_with(".o") || input.ends_with(".obj") || input.ends_with(".a") {
+        if is_object_file(input) {
             obj_files.push(input.clone());
             continue;
         }
@@ -65,99 +74,59 @@ fn run() -> Result<(), Box<dyn Error>> {
         )?;
 
         if !obj_file.is_empty() {
-            obj_files.push(obj_file);
+            obj_files.push(obj_file.clone());
+            generated_objs.push(obj_file);
         }
     }
 
-    if all_obj_files && !cli.compile_only && !cli.ast && !cli.preprocess_only {
-        let exe_path = if let Some(output) = cli.output {
-            output
-        } else {
-            "a.out".to_string()
-        };
+    if let Some(lib_type) = cli.library.as_deref() {
+        let output_path = cli
+            .output
+            .clone()
+            .unwrap_or_else(|| format!("lib{}.a", default_exe_path(first_input)));
 
-        let std_lib_path = if cli.nostdlib {
-            String::new()
-        } else {
-            let has_stdlib = obj_files.iter().any(|f| f.contains("libalum.a"));
-            if has_stdlib {
-                String::new()
-            } else {
-                DEFAULT_STD_LIB_PATH.to_string()
-            }
-        };
-
-        if cli.verbose {
-            eprintln!("Linking {} to {}", obj_files.join(", "), exe_path);
-        }
-
-        link(
-            obj_files,
-            &std_lib_path,
-            &exe_path,
-            cli.verbose,
-            &cli.cte_lib,
-        )?;
-        return Ok(());
-    }
-
-    if cli.library.is_some() {
-        let lib_type = cli.library.as_ref().unwrap().to_lowercase();
-        let output_path = if let Some(output) = cli.output {
-            output
-        } else {
-            let first_input = cli.input.first().unwrap();
-            let name = if first_input.ends_with(".al") {
-                first_input.replace(".al", "")
-            } else {
-                first_input.clone()
-            };
-            format!("lib{}.a", name)
-        };
-
-        match lib_type.as_str() {
-            "static" | "a" => {
-                create_static_library(obj_files, &output_path, cli.verbose)?;
-            }
-            "shared" | "so" => {
-                create_shared_library(obj_files, &output_path, cli.verbose)?;
-            }
-            _ => {
-                return Err(format!("Unknown library type: {}", lib_type).into());
-            }
+        match lib_type.to_lowercase().as_str() {
+            "static" | "a" => create_static_library(obj_files, &output_path, cli.verbose)?,
+            "shared" | "so" => create_shared_library(obj_files, &output_path, cli.verbose)?,
+            _ => return Err(format!("Unknown library type: {}", lib_type).into()),
         }
         return Ok(());
     }
 
-    if !cli.compile_only && !cli.ast && !cli.preprocess_only {
-        let exe_path = if let Some(output) = cli.output {
-            output
-        } else {
-            let first_input = cli.input.first().unwrap();
-            if first_input.ends_with(".al") {
-                first_input.replace(".al", "")
-            } else {
-                first_input.clone()
-            }
-        };
+    if cli.compile_only || cli.ast || cli.preprocess_only {
+        return Ok(());
+    }
 
-        let std_lib_path = if cli.nostdlib {
-            String::new()
-        } else {
-            DEFAULT_STD_LIB_PATH.to_string()
-        };
+    let exe_path = cli
+        .output
+        .clone()
+        .unwrap_or_else(|| default_exe_path(first_input));
 
+    let std_lib_path = if cli.nostdlib {
+        String::new()
+    } else if all_obj_files && obj_files.iter().any(|f| f.contains("libalum.a")) {
+        String::new()
+    } else {
+        DEFAULT_STD_LIB_PATH.to_string()
+    };
+
+    if cli.verbose {
+        eprintln!("Linking {} to {}", obj_files.join(", "), exe_path);
+    }
+
+    link(
+        obj_files,
+        &std_lib_path,
+        &exe_path,
+        cli.verbose,
+        &cli.cte_lib,
+    )?;
+
+    for obj_file in generated_objs {
         if cli.verbose {
-            eprintln!("Linking {} to {}", obj_files.join(", "), exe_path);
+            eprintln!("Removing object file: {}", obj_file);
         }
-
-        link(
-            obj_files,
-            &std_lib_path,
-            &exe_path,
-            cli.verbose,
-            &cli.cte_lib,
-        )?;
+        let _ = std::fs::remove_file(&obj_file);
     }
 
     Ok(())

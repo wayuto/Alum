@@ -6,14 +6,6 @@ use crate::compiler::{
     irgen::ir::{IRFunction, IRType, Op, Operand as IROperand},
 };
 
-fn key(op: &IROperand) -> String {
-    match op {
-        IROperand::Var(name) => name.clone(),
-        IROperand::Temp(id, _) => format!("_tmp_{}", id),
-        _ => panic!("unsupported operand key: {:?}", op),
-    }
-}
-
 impl AsmCodeGen {
     pub(super) fn compile_fn(&mut self, func: IRFunction) -> Result<(), CodeGenError> {
         if func.is_external {
@@ -126,7 +118,7 @@ impl AsmCodeGen {
         let mut int_idx = 0;
         let mut flt_idx = 0;
         for (param, ty) in &func.params {
-            let k = key(param);
+            let k = param.key();
             if let Some(alloc_reg) = alloc_regs.get(&k) {
                 if matches!(ty, IRType::Float) {
                     if flt_idx < 8 {
@@ -137,7 +129,7 @@ impl AsmCodeGen {
                                 Operand::Reg(arg_reg),
                             ));
                         }
-                        self.regs.insert(*alloc_reg, Some(param.clone()));
+                        self.regs.insert(*alloc_reg, param.clone());
                         flt_idx += 1;
                     }
                 } else {
@@ -149,7 +141,7 @@ impl AsmCodeGen {
                                 Operand::Reg(arg_reg),
                             ));
                         }
-                        self.regs.insert(*alloc_reg, Some(param.clone()));
+                        self.regs.insert(*alloc_reg, param.clone());
                         int_idx += 1;
                     }
                 }
@@ -159,14 +151,14 @@ impl AsmCodeGen {
                     if flt_idx < 8 {
                         let arg_reg = parse_reg(&format!("xmm{}", flt_idx));
                         self.push_text(Asm::Movsd(m_rbp(off), Operand::Reg(arg_reg)));
-                        self.regs.insert(arg_reg, Some(param.clone()));
+                        self.regs.insert(arg_reg, param.clone());
                         flt_idx += 1;
                     }
                 } else {
                     if int_idx < 6 {
                         let arg_reg = parse_reg(&self.arg_reg[int_idx]);
                         self.push_text(Asm::Mov(m_rbp(off), Operand::Reg(arg_reg)));
-                        self.regs.insert(arg_reg, Some(param.clone()));
+                        self.regs.insert(arg_reg, param.clone());
                         int_idx += 1;
                     }
                 }

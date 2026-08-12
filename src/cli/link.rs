@@ -63,15 +63,6 @@ pub fn link(
         return Err("Linking failed".into());
     }
 
-    for obj_file in obj_files {
-        if obj_file.ends_with(".o") || obj_file.ends_with(".obj") {
-            if verbose {
-                eprintln!("Removing object file: {}", obj_file);
-            }
-            let _ = std::fs::remove_file(&obj_file);
-        }
-    }
-
     Ok(())
 }
 

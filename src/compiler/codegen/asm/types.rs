@@ -143,18 +143,12 @@ impl Reg {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Size {
-    QWord,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Mem {
     pub base: Option<Reg>,
     pub index: Option<Reg>,
     pub scale: u8,
     pub disp: i32,
-    pub size: Option<Size>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
