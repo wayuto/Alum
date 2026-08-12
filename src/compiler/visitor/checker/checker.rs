@@ -3,7 +3,7 @@ use crate::compiler::{
     parser::{Expr, Primitive, Program, Type},
     visitor::TypeChecker,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 impl TypeChecker {
     pub(super) fn new_type_var(&mut self) -> Type {
@@ -225,6 +225,130 @@ impl TypeChecker {
             Err(names)
         } else {
             Ok(found.first().map(|(_, v)| *v))
+        }
+    }
+
+    fn enum_member_of(&self, expr: &Expr) -> Option<(String, isize)> {
+        match expr {
+            Expr::Var(name, _) => match self.resolve_enum_member(name) {
+                Ok(Some(value)) => {
+                    let owners: Vec<String> = self
+                        .enums
+                        .iter()
+                        .filter(|(_, members)| members.iter().any(|(m, _)| m == name))
+                        .map(|(e, _)| e.clone())
+                        .collect();
+                    if owners.len() == 1 {
+                        Some((owners[0].clone(), value))
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            },
+            Expr::MemberAccess(obj, field, _) => {
+                if let Expr::Var(enum_name, _) = obj.as_ref() {
+                    if let Some(members) = self.enums.get(enum_name) {
+                        for (m, v) in members {
+                            if m == field {
+                                return Some((enum_name.clone(), *v));
+                            }
+                        }
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    pub(super) fn check_match_exhaustiveness(
+        &self,
+        target_ty: &Type,
+        branches: &[(Expr, Expr)],
+        has_default: bool,
+        span: crate::compiler::Span,
+    ) -> Result<(), CheckerError> {
+        if has_default {
+            return Ok(());
+        }
+        match self.resolve_type(target_ty) {
+            Type::Primitive(Primitive::Boolean) => {
+                let mut covered: HashSet<bool> = HashSet::new();
+                for (case, _) in branches {
+                    if let Expr::Bool(b, _) = case {
+                        covered.insert(*b);
+                    } else {
+                        return Ok(());
+                    }
+                }
+                let missing: Vec<String> = [true, false]
+                    .iter()
+                    .filter(|b| !covered.contains(b))
+                    .map(|b| b.to_string())
+                    .collect();
+                if missing.is_empty() {
+                    Ok(())
+                } else {
+                    Err(CheckerError::NonExhaustiveMatch {
+                        missing: missing.join(", "),
+                        span,
+                    })
+                }
+            }
+            Type::Primitive(Primitive::Int) => {
+                let mut enum_name: Option<String> = None;
+                let mut covered: HashSet<isize> = HashSet::new();
+                for (case, _) in branches {
+                    match self.enum_member_of(case) {
+                        Some((en, value)) => {
+                            if let Some(cur) = &enum_name {
+                                if *cur != en {
+                                    return Err(CheckerError::NonExhaustiveMatch {
+                                        missing: "an else (default) branch".to_string(),
+                                        span,
+                                    });
+                                }
+                            } else {
+                                enum_name = Some(en.clone());
+                            }
+                            covered.insert(value);
+                        }
+                        None => {
+                            return Err(CheckerError::NonExhaustiveMatch {
+                                missing: "an else (default) branch".to_string(),
+                                span,
+                            });
+                        }
+                    }
+                }
+                match enum_name {
+                    Some(en) => {
+                        let members = &self.enums[&en];
+                        let missing: Vec<String> = members
+                            .iter()
+                            .filter(|(_, v)| !covered.contains(v))
+                            .map(|(n, _)| n.clone())
+                            .collect();
+                        if missing.is_empty() {
+                            Ok(())
+                        } else {
+                            Err(CheckerError::NonExhaustiveMatch {
+                                missing: format!("{} from enum '{}'", missing.join(", "), en),
+                                span,
+                            })
+                        }
+                    }
+                    None => Err(CheckerError::NonExhaustiveMatch {
+                        missing: "an else (default) branch".to_string(),
+                        span,
+                    }),
+                }
+            }
+            _ => Err(CheckerError::NonExhaustiveMatch {
+                missing: "an else (default) branch".to_string(),
+                span,
+            }),
         }
     }
 

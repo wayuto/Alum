@@ -1015,6 +1015,8 @@ impl TypeChecker {
             Expr::TypeDef(_) => Ok(Type::Primitive(Primitive::Void)),
             Expr::Match(target, branches, default, _) => {
                 let target_type = self.check_expr(target)?;
+                let has_default = default.is_some();
+                self.check_match_exhaustiveness(&target_type, branches, has_default, span)?;
                 let mut case_types: Vec<Type> = Vec::new();
                 let mut ret_types: Vec<Type> = Vec::new();
                 for (case_type, ret_type) in branches {

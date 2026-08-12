@@ -41,6 +41,10 @@ pub enum CheckerError {
         type_name: String,
         span: Span,
     },
+    NonExhaustiveMatch {
+        missing: String,
+        span: Span,
+    },
 }
 
 impl fmt::Display for CheckerError {
@@ -107,6 +111,9 @@ impl fmt::Display for CheckerError {
             CheckerError::InvalidOperation { op, type_name, .. } => {
                 write!(f, "Invalid operation '{}' on type {}", op, type_name)
             }
+            CheckerError::NonExhaustiveMatch { missing, .. } => {
+                write!(f, "Match is not exhaustive: missing {}", missing)
+            }
         }
     }
 }
@@ -121,7 +128,8 @@ impl CheckerError {
             | CheckerError::UndefinedEnumMember { span, .. }
             | CheckerError::AmbiguousEnumMember { span, .. }
             | CheckerError::ArgCountMismatch { span, .. }
-            | CheckerError::InvalidOperation { span, .. } => *span,
+            | CheckerError::InvalidOperation { span, .. }
+            | CheckerError::NonExhaustiveMatch { span, .. } => *span,
             CheckerError::UndefinedVariable(_, s)
             | CheckerError::UndefinedFunction(_, s)
             | CheckerError::UndefinedStruct(_, s)
