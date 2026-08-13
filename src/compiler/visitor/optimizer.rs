@@ -156,6 +156,7 @@ impl Optimizer {
                 self.prune_locals(p, used, pure_fns);
                 self.prune_locals(v, used, pure_fns);
             }
+            Expr::Cast(inner, _, _) => self.prune_locals(inner, used, pure_fns),
             Expr::ArrayLiteral(es, _) => {
                 for e in es {
                     self.prune_locals(e, used, pure_fns);
@@ -333,7 +334,8 @@ impl Optimizer {
             | Expr::Deref(e, _)
             | Expr::Not(e, _)
             | Expr::Neg(e, _)
-            | Expr::FNeg(e, _) => self.for_each_name(e, f),
+            | Expr::FNeg(e, _)
+            | Expr::Cast(e, _, _) => self.for_each_name(e, f),
             Expr::DerefAssign(p, v, _) => {
                 self.for_each_name(p, f);
                 self.for_each_name(v, f);
@@ -400,7 +402,8 @@ impl Optimizer {
             | Expr::Deref(e, _)
             | Expr::Not(e, _)
             | Expr::Neg(e, _)
-            | Expr::FNeg(e, _) => self.discardable(e, pure_fns),
+            | Expr::FNeg(e, _)
+            | Expr::Cast(e, _, _) => self.discardable(e, pure_fns),
             Expr::Range(s, e, _) => self.discardable(s, pure_fns) && self.discardable(e, pure_fns),
             Expr::FString(segs, _) => segs.iter().all(|s| self.discardable(s, pure_fns)),
             Expr::Add(l, r, _)
@@ -490,6 +493,7 @@ impl Optimizer {
             }
             Expr::AddressOf(expr, _) => self.optimize_expr(expr),
             Expr::Deref(expr, _) => self.optimize_expr(expr),
+            Expr::Cast(expr, _, _) => self.optimize_expr(expr),
             Expr::DerefAssign(ptr, val, _) => {
                 self.optimize_expr(ptr);
                 self.optimize_expr(val);
@@ -776,6 +780,7 @@ impl Optimizer {
             }
             Expr::AddressOf(expr, _) => self.dce(expr, pure_fns),
             Expr::Deref(expr, _) => self.dce(expr, pure_fns),
+            Expr::Cast(expr, _, _) => self.dce(expr, pure_fns),
             Expr::DerefAssign(ptr, val, _) => {
                 self.dce(ptr, pure_fns);
                 self.dce(val, pure_fns);
@@ -862,6 +867,7 @@ impl Optimizer {
             Expr::MemberAccess(obj, _, _) => self.is_pure(obj, pure_fns),
             Expr::AddressOf(expr, _) => self.is_pure(expr, pure_fns),
             Expr::Deref(expr, _) => self.is_pure(expr, pure_fns),
+            Expr::Cast(expr, _, _) => self.is_pure(expr, pure_fns),
             Expr::DerefAssign(ptr, val, _) => {
                 self.is_pure(ptr, pure_fns) && self.is_pure(val, pure_fns)
             }

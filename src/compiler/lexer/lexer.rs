@@ -295,6 +295,10 @@ impl<'a> Lexer<'a> {
                 self.bump();
                 Token::SEMICOLON
             }
+            '@' => {
+                self.bump();
+                Token::AT
+            }
             '\\' => {
                 self.bump();
                 Token::LAMBDA

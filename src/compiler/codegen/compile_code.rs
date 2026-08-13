@@ -644,6 +644,28 @@ impl AsmCodeGen {
                 self.regs.insert(Reg::R15, dst.clone());
                 Ok(())
             }
+            Op::IntToFloat => {
+                let dst = code.dst.as_ref().unwrap();
+                let src = code.src1.as_ref().unwrap();
+                self.load(src, Reg::Rax)?;
+                self.push_text(Asm::Cvtsi2sd(Reg::Xmm0, Operand::Reg(Reg::Rax)));
+                self.store_dst_xmm(dst, Reg::Xmm0)?;
+                self.invalidate_cached_reg(Reg::Rax);
+                self.invalidate_cached_reg(Reg::Xmm0);
+                self.regs.insert(Reg::Xmm0, dst.clone());
+                Ok(())
+            }
+            Op::FloatToInt => {
+                let dst = code.dst.as_ref().unwrap();
+                let src = code.src1.as_ref().unwrap();
+                self.load(src, Reg::Xmm0)?;
+                self.push_text(Asm::Cvttsd2si(Reg::Rax, Operand::Reg(Reg::Xmm0)));
+                self.store_dst(dst, Reg::Rax)?;
+                self.invalidate_cached_reg(Reg::Rax);
+                self.invalidate_cached_reg(Reg::Xmm0);
+                self.regs.insert(Reg::Rax, dst.clone());
+                Ok(())
+            }
             Op::Return(_) | Op::Label(_) => unreachable!("handled by compile_fn"),
         }
     }

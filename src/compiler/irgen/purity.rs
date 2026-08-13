@@ -436,6 +436,7 @@ fn classify(
             }
             Ok(())
         }
+        Cast(inner, _, _) => classify(fn_name, inner, decls, globals, in_progress, memo, bound),
     }
 }
 

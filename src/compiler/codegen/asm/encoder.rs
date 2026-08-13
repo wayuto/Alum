@@ -341,6 +341,48 @@ impl Assembler {
                     _ => return Err(format!("unsupported xorpd src: {:?}", src)),
                 }
             }
+            Cvtsi2sd(dst, src) => {
+                let f2 = 0xf2u8;
+                match src {
+                    Operand::Reg(s) => {
+                        self.emit_slice(section, &[f2]);
+                        self.emit_rex(section, true, dst.rex_b(), false, s.rex_b());
+                        self.emit_slice(
+                            section,
+                            &[0x0f, 0x2a, self.modrm(3, dst.reg_id() & 7, s.reg_id() & 7)],
+                        );
+                    }
+                    Operand::Mem(m) => {
+                        let (rex_x, rex_b) = mem_rex_bits(m);
+                        self.emit_slice(section, &[f2]);
+                        self.emit_rex(section, true, dst.rex_b(), rex_x, rex_b);
+                        self.emit_slice(section, &[0x0f, 0x2a]);
+                        self.emit_modrm_sib(section, dst.reg_id() & 7, m, offset)?;
+                    }
+                    _ => return Err(format!("unsupported cvtsi2sd src: {:?}", src)),
+                }
+            }
+            Cvttsd2si(dst, src) => {
+                let f2 = 0xf2u8;
+                match src {
+                    Operand::Reg(s) if s.is_xmm() => {
+                        self.emit_slice(section, &[f2]);
+                        self.emit_rex(section, true, dst.rex_b(), false, s.rex_b());
+                        self.emit_slice(
+                            section,
+                            &[0x0f, 0x2c, self.modrm(3, dst.reg_id() & 7, s.reg_id() & 7)],
+                        );
+                    }
+                    Operand::Mem(m) => {
+                        let (rex_x, rex_b) = mem_rex_bits(m);
+                        self.emit_slice(section, &[f2]);
+                        self.emit_rex(section, true, dst.rex_b(), rex_x, rex_b);
+                        self.emit_slice(section, &[0x0f, 0x2c]);
+                        self.emit_modrm_sib(section, dst.reg_id() & 7, m, offset)?;
+                    }
+                    _ => return Err(format!("unsupported cvttsd2si src: {:?}", src)),
+                }
+            }
             Lea(Operand::Reg(r), src) => match src {
                 Operand::Mem(m) => {
                     let (rex_x, rex_b) = mem_rex_bits(m);

@@ -219,4 +219,6 @@ pub enum Asm {
     Divsd(Operand, Operand),
     Ucomisd(Reg, Reg),
     Xorpd(Reg, Operand),
+    Cvtsi2sd(Reg, Operand),
+    Cvttsd2si(Reg, Operand),
 }

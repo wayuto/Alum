@@ -1736,6 +1736,41 @@ impl IRGen {
             Expr::FString(_, _) => {
                 unreachable!("f-string should have been desugared in checker")
             }
+            Expr::Cast(inner, target_ty, _) => {
+                let src_ty = self.expr_high_type(&inner, ctx);
+                let src = self.compile_expr(*inner, ctx)?;
+                match &target_ty {
+                    Type::Primitive(Primitive::Float) => {
+                        if matches!(src_ty, Some(Type::Primitive(Primitive::Float))) {
+                            return Ok(src);
+                        }
+                        let res_tmp = ctx.new_tmp(IRType::Float);
+                        ctx.instructions.push(Instruction {
+                            op: Op::IntToFloat,
+                            dst: Some(res_tmp.clone()),
+                            src1: Some(src),
+                            src2: None,
+                        });
+                        Ok(res_tmp)
+                    }
+                    Type::Primitive(Primitive::Int) => {
+                        if matches!(src_ty, Some(Type::Primitive(Primitive::Int))) {
+                            return Ok(src);
+                        }
+                        let res_tmp = ctx.new_tmp(IRType::Int);
+                        ctx.instructions.push(Instruction {
+                            op: Op::FloatToInt,
+                            dst: Some(res_tmp.clone()),
+                            src1: Some(src),
+                            src2: None,
+                        });
+                        Ok(res_tmp)
+                    }
+                    _ => Err(CodeGenError::UnsupportedOperation {
+                        message: format!("cast to {:?} is not supported", target_ty),
+                    }),
+                }
+            }
         }
     }
 }

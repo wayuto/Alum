@@ -921,6 +921,14 @@ impl<'a> Parser<'a> {
                     };
                     callee = Expr::MemberAccess(Box::new(callee), field_name, Span::new(0, 0));
                 }
+                Some(Ok((Token::AT, span))) => {
+                    if !Self::on_same_line(span.line, op_line(&callee)) {
+                        break;
+                    }
+                    self.next()?;
+                    let target_type = self.parse_type()?;
+                    callee = Expr::Cast(Box::new(callee), target_type, Span::new(0, 0));
+                }
                 Some(Ok((Token::PLUSPLUS, span))) => {
                     if Self::on_same_line(span.line, op_line(&callee)) {
                         self.next()?;

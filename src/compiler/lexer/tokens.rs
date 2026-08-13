@@ -64,6 +64,7 @@ pub enum Token {
     ENUM,
     TYPE(String),
     IDENT(String),
+    AT,
     LAMBDA,
     EOF,
 }

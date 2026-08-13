@@ -265,6 +265,18 @@ impl Compiler {
                 self.compile_expr(e);
                 self.emit(Op::FNEG, &[]);
             }
+            Expr::Cast(inner, target_ty, _) => {
+                self.compile_expr(inner);
+                match target_ty {
+                    crate::compiler::parser::Type::Primitive(
+                        crate::compiler::parser::Primitive::Float,
+                    ) => self.emit(Op::I2F, &[]),
+                    crate::compiler::parser::Type::Primitive(
+                        crate::compiler::parser::Primitive::Int,
+                    ) => self.emit(Op::F2I, &[]),
+                    _ => {}
+                }
+            }
             Expr::Xor(l, r, _) => {
                 self.compile_expr(l);
                 self.compile_expr(r);
@@ -555,6 +567,107 @@ impl Compiler {
                 );
             }
 
+            Expr::Range(start, end, _) => {
+                self.compile_expr(start);
+                let start_slot = self.decl_var("_range_start");
+                self.emit(Op::STOREVAR, &[start_slot]);
+                self.emit(Op::POP, &[]);
+
+                self.compile_expr(end);
+                let end_slot = self.decl_var("_range_end");
+                self.emit(Op::STOREVAR, &[end_slot]);
+                self.emit(Op::POP, &[]);
+
+                self.emit(Op::LOADVAR, &[end_slot]);
+                self.emit(Op::LOADVAR, &[start_slot]);
+                self.emit(Op::SUB, &[]);
+                let zero_const = self.add_const(Value::Int(0));
+                self.emit(Op::LOADCONST, &[zero_const]);
+                self.emit(Op::LT, &[]);
+                let skip_zero = self.code.len() as u32;
+                self.emit(Op::JUMPIFFALSE, &[0, 0]);
+                self.emit(Op::POP, &[]);
+                self.emit(Op::LOADCONST, &[zero_const]);
+                self.patch_jump_addr(skip_zero + 1, self.code.len() as u32);
+
+                self.emit(Op::NEWARRAY, &[1]);
+
+                let arr_slot = self.decl_var("_range_arr");
+                self.emit(Op::STOREVAR, &[arr_slot]);
+                self.emit(Op::POP, &[]);
+
+                let idx_slot = self.decl_var("_range_idx");
+                self.emit(Op::LOADCONST, &[zero_const]);
+                self.emit(Op::STOREVAR, &[idx_slot]);
+                self.emit(Op::POP, &[]);
+
+                let loop_pos = self.code.len() as u32;
+                self.emit(Op::LOADVAR, &[idx_slot]);
+                self.emit(Op::LOADVAR, &[end_slot]);
+                self.emit(Op::LOADVAR, &[start_slot]);
+                self.emit(Op::SUB, &[]);
+                self.emit(Op::LT, &[]);
+                let exit_loop = self.code.len() as u32;
+                self.emit(Op::JUMPIFFALSE, &[0, 0]);
+
+                self.emit(Op::LOADVAR, &[arr_slot]);
+                self.emit(Op::LOADVAR, &[idx_slot]);
+                self.emit(Op::LOADVAR, &[start_slot]);
+                self.emit(Op::LOADVAR, &[idx_slot]);
+                self.emit(Op::ADD, &[]);
+                self.emit(Op::ARRAYSET, &[arr_slot]);
+
+                self.emit(Op::LOADVAR, &[idx_slot]);
+                self.emit(Op::INC, &[]);
+                self.emit(Op::STOREVAR, &[idx_slot]);
+                self.emit(Op::POP, &[]);
+
+                self.emit(Op::JUMP, &[((loop_pos >> 8) & 0xff), loop_pos & 0xFF]);
+                self.patch_jump_addr(exit_loop + 1, self.code.len() as u32);
+
+                self.emit(Op::LOADVAR, &[arr_slot]);
+            }
+            Expr::For(var, iterable, body, _) => {
+                self.enter_scope();
+                if let Expr::Range(start, end, _) = iterable.as_ref() {
+                    self.compile_expr(end);
+                    let end_slot = self.decl_var("_for_end");
+                    self.emit(Op::STOREVAR, &[end_slot]);
+                    self.emit(Op::POP, &[]);
+
+                    self.compile_expr(start);
+                    let var_slot = self.decl_var(var);
+                    self.emit(Op::STOREVAR, &[var_slot]);
+                    self.emit(Op::POP, &[]);
+
+                    let loop_pos = self.code.len() as u32;
+                    self.loop_targets.push((loop_pos, Vec::new()));
+                    self.emit(Op::LOADVAR, &[var_slot]);
+                    self.emit(Op::LOADVAR, &[end_slot]);
+                    self.emit(Op::LT, &[]);
+                    let exit_loop = self.code.len() as u32;
+                    self.emit(Op::JUMPIFFALSE, &[0, 0]);
+
+                    self.compile_expr(body);
+                    self.emit(Op::POP, &[]);
+
+                    self.emit(Op::LOADVAR, &[var_slot]);
+                    self.emit(Op::INC, &[]);
+                    self.emit(Op::STOREVAR, &[var_slot]);
+                    self.emit(Op::POP, &[]);
+
+                    self.emit(Op::JUMP, &[((loop_pos >> 8) & 0xff), loop_pos & 0xFF]);
+                    let break_pos = self.code.len() as u32;
+                    let (_, break_jumps) = self.loop_targets.pop().unwrap();
+                    for j in break_jumps {
+                        self.patch_jump_addr(j + 1, break_pos);
+                    }
+                    self.patch_jump_addr(exit_loop + 1, break_pos);
+                } else {
+                    panic!("Compiler: for-in array not supported in bytecode (use range)");
+                }
+                self.exit_scope();
+            }
             _ => {
                 panic!("Compiler: unsupported expression for bytecode: {expr:?}");
             }

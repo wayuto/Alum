@@ -165,8 +165,17 @@ impl<'a> VmSafety<'a> {
                 self.leave_scope();
                 r
             }
-            For(..) => false,
-            Range(..) => false,
+            For(var, iterable, body, _) => {
+                if !self.safe(iterable) {
+                    return false;
+                }
+                self.enter_scope();
+                self.unbind(var);
+                let r = self.safe(body);
+                self.leave_scope();
+                r
+            }
+            Range(start, end, _) => self.safe(start) && self.safe(end),
             Match(s, arms, d, _) => {
                 if !self.safe(s) {
                     return false;
@@ -256,6 +265,7 @@ impl<'a> VmSafety<'a> {
             UnionLiteral(..) => false,
             MemberAccess(..) => false,
             FString(parts, _) => parts.iter().all(|p| self.safe(p)),
+            Cast(inner, _, _) => self.safe(inner),
         }
     }
 }

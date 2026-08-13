@@ -277,6 +277,24 @@ impl GVM {
                         _ => panic!("TypeError: Wrong type for F_NEG operation"),
                     });
                 }
+                Op::I2F => {
+                    let v = self.pop();
+                    self.stack.push(match v {
+                        Value::Int(v) => Value::Float(v as f64),
+                        Value::Float(v) => Value::Float(v),
+                        Value::Void => Value::Void,
+                        _ => panic!("TypeError: Wrong type for I2F operation"),
+                    });
+                }
+                Op::F2I => {
+                    let v = self.pop();
+                    self.stack.push(match v {
+                        Value::Float(v) => Value::Int(v as i64),
+                        Value::Int(v) => Value::Int(v),
+                        Value::Void => Value::Void,
+                        _ => panic!("TypeError: Wrong type for F2I operation"),
+                    });
+                }
                 Op::INC => {
                     let v = self.pop();
                     self.stack.push(match v {

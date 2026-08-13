@@ -182,6 +182,7 @@ fn op_clobbers(op: &Op) -> u32 {
         Op::Lea => R_RAX | R_R10,
         Op::Malloc | Op::Free => ALL_VOLATILE,
         Op::StoreAt | Op::LoadAt => R_RAX | R_R10 | R_R11,
+        Op::IntToFloat | Op::FloatToInt => R_RAX | R_R10,
         Op::Return(_) | Op::Label(_) => 0,
     }
 }

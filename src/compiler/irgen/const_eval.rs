@@ -272,6 +272,7 @@ impl IRGen {
             Inc(..) | Dec(..) => false,
             VarAssign(_, v, _) | AddAssign(_, v, _) | SubAssign(_, v, _) => self.expr_has_var(v),
             FString(parts, _) => parts.iter().any(|p| self.expr_has_var(p)),
+            Cast(inner, _, _) => self.expr_has_var(inner),
         }
     }
 }
@@ -421,6 +422,7 @@ fn collect_var_refs(expr: &Expr, out: &mut HashSet<String>) {
                 collect_var_refs(p, out);
             }
         }
+        Cast(inner, _, _) => collect_var_refs(inner, out),
     }
 }
 

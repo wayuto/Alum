@@ -150,6 +150,7 @@ impl IRGen {
             }
             Expr::Return(value, _) => self.expr_high_type(value, ctx),
             Expr::ExternVar(_, ty, _) => Some(ty.clone()),
+            Expr::Cast(_, ty, _) => Some(ty.clone()),
             Expr::GlobalVar(_, _, ty, value, _) => value
                 .as_ref()
                 .and_then(|v| self.expr_high_type(v, ctx))

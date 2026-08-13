@@ -106,6 +106,8 @@ pub enum Op {
     StrCat,
     StrByte,
     Lea,
+    IntToFloat,
+    FloatToInt,
 }
 
 #[derive(Debug, Clone)]

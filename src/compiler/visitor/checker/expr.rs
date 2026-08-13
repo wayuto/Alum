@@ -1451,6 +1451,23 @@ impl TypeChecker {
                     }),
                 }
             }
+            Expr::Cast(inner, target_ty, _) => {
+                let src_type = self.check_expr(inner)?;
+                let resolved_target = self.resolve_type(target_ty);
+                match (&src_type, &resolved_target) {
+                    (Type::Primitive(Primitive::Int), Type::Primitive(Primitive::Float))
+                    | (Type::Primitive(Primitive::Float), Type::Primitive(Primitive::Int))
+                    | (Type::Primitive(Primitive::Int), Type::Primitive(Primitive::Int))
+                    | (Type::Primitive(Primitive::Float), Type::Primitive(Primitive::Float)) => {
+                        Ok(resolved_target)
+                    }
+                    _ => Err(CheckerError::InvalidOperation {
+                        op: "cast".to_string(),
+                        type_name: format!("{:?} to {:?}", src_type, resolved_target),
+                        span: span,
+                    }),
+                }
+            }
         }
     }
 

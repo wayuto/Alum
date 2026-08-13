@@ -467,6 +467,7 @@ impl TypeChecker {
                 self.resolve_call_type_args(ptr);
                 self.resolve_call_type_args(val);
             }
+            Expr::Cast(inner, _, _) => self.resolve_call_type_args(inner),
             Expr::Add(l, r, _)
             | Expr::Sub(l, r, _)
             | Expr::Mul(l, r, _)
@@ -625,6 +626,7 @@ impl TypeChecker {
                 }
             }
             Expr::DerefAssign(_, _, _) => Type::Primitive(Primitive::Void),
+            Expr::Cast(_, ty, _) => ty.clone(),
             _ => Type::Primitive(Primitive::Int),
         }
     }
