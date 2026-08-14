@@ -8,17 +8,17 @@ The official tutorial series (中文教程) walks through the language from scra
 
 **Read the tutorial: [Alum 系列教程](https://cr0.dpdns.org)**
 
-| | |
-|---|---|
-| [01-介绍](https://cr0.dpdns.org/2026/02/26/01-Introduction/) | [10-数组](https://cr0.dpdns.org/2026/03/01/10-Array/) |
-| [02-环境搭建](https://cr0.dpdns.org/2026/02/27/02-Installation/) | [11-指针](https://cr0.dpdns.org/2026/03/01/11-Pointer/) |
-| [03-数据类型](https://cr0.dpdns.org/2026/02/27/03-Types/) | [12-结构体](https://cr0.dpdns.org/2026/03/02/12-Struct/) |
-| [04-变量](https://cr0.dpdns.org/2026/02/27/04-Variable/) | [13-泛型](https://cr0.dpdns.org/2026/03/02/13-Generic/) |
-| [05-代码块](https://cr0.dpdns.org/2026/02/28/05-Block/) | [14-共用体](https://cr0.dpdns.org/2026/08/02/14-Union/) |
-| [06-流程控制](https://cr0.dpdns.org/2026/02/28/06-ProcessControl/) | [15-枚举](https://cr0.dpdns.org/2026/08/02/15-Enum/) |
-| [07-函数](https://cr0.dpdns.org/2026/02/28/07-Function/) | [16-Result与Maybe类型](https://cr0.dpdns.org/2026/08/02/16-Result-Maybe/) |
-| [08-函数式编程](https://cr0.dpdns.org/2026/02/28/08-FP/) | [17-函数注解](https://cr0.dpdns.org/2026/08/06/17-Function-Annotations/) |
-| [09-外部函数接口](https://cr0.dpdns.org/2026/02/28/09-FFI/) | [18-编译时求值](https://cr0.dpdns.org/2026/08/08/18-CTE/) |
+|                                                                    |                                                                           |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| [01-介绍](https://cr0.dpdns.org/2026/02/26/01-Introduction/)       | [10-数组](https://cr0.dpdns.org/2026/03/01/10-Array/)                     |
+| [02-环境搭建](https://cr0.dpdns.org/2026/02/27/02-Installation/)   | [11-指针](https://cr0.dpdns.org/2026/03/01/11-Pointer/)                   |
+| [03-数据类型](https://cr0.dpdns.org/2026/02/27/03-Types/)          | [12-结构体](https://cr0.dpdns.org/2026/03/02/12-Struct/)                  |
+| [04-变量](https://cr0.dpdns.org/2026/02/27/04-Variable/)           | [13-泛型](https://cr0.dpdns.org/2026/03/02/13-Generic/)                   |
+| [05-代码块](https://cr0.dpdns.org/2026/02/28/05-Block/)            | [14-共用体](https://cr0.dpdns.org/2026/08/02/14-Union/)                   |
+| [06-流程控制](https://cr0.dpdns.org/2026/02/28/06-ProcessControl/) | [15-枚举](https://cr0.dpdns.org/2026/08/02/15-Enum/)                      |
+| [07-函数](https://cr0.dpdns.org/2026/02/28/07-Function/)           | [16-Result与Maybe类型](https://cr0.dpdns.org/2026/08/02/16-Result-Maybe/) |
+| [08-函数式编程](https://cr0.dpdns.org/2026/02/28/08-FP/)           | [17-函数注解](https://cr0.dpdns.org/2026/08/06/17-Function-Annotations/)  |
+| [09-外部函数接口](https://cr0.dpdns.org/2026/02/28/09-FFI/)        | [18-编译时求值](https://cr0.dpdns.org/2026/08/08/18-CTE/)                 |
 
 ## Features
 
@@ -28,8 +28,9 @@ The official tutorial series (中文教程) walks through the language from scra
 - **Tagged `Result`/`Maybe`** — `Result<T, E>` and `Maybe<T>` built on `struct` + `union` + `enum`, enabling error handling and null-safety
 - **Functional Programming** — lambdas, higher-order functions, first-class function pointers, and block expressions that produce values
 - **Expression-Oriented Control Flow** — `if-else` and `match` are expressions; `for` iterates arrays and ranges (`n..m`); `while` loops; implicit return of the last expression
+- **Type Cast** — `V@T` syntax converts between primitive types, e.g. `1@float` produces `1.0`, `3.99@int` produces `3` (truncation)
 - **Function Annotations** — `fun(extern)` for FFI, `fun(pub)` to export symbols, `fun(pure)` to mark side-effect-free functions
-- **Compile-Time Evaluation (CTE)** — `pure` functions are evaluated at compile time by the built-in GosVM bytecode interpreter (e.g. `fib(40)` compiles to a single constant in ~10ms)
+- **Compile-Time Evaluation (CTE)** — `pure` functions are evaluated at compile time by the built-in GosVM bytecode interpreter; supports `for` loops, `range` expressions, type casts (`@float`/`@int`), and recursion (e.g. `fib(40)` compiles to a single constant in ~10ms)
 - **Compile-Time Native Evaluation** — `fun(extern, pure)` declarations may be folded at compile time by attaching a native shared library with `--cte-lib ./libfoo.so`. The compiler `dlopen`s the library (using `libffi` via `dlsym`) for constant folding; the `.so` is also linked into the final executable (with an rpath) so any call that could not be folded is still resolved at runtime. Emitting the warning `purity of external function '<name>' cannot be verified` on every `extern pure` declaration, since an external symbol's purity cannot be statically verified. See `examples/32_native_cte/`.
 - **F-String Interpolation** — `println(f"value: {x}")` with embedded expressions
 - **C Interop (FFI)** — call C functions directly via `fun(extern)`; memory layout is C-compatible with no conversion overhead
@@ -179,6 +180,11 @@ fun main(): int {
 
     // generic function
     println(itoa(identity(99)))  // 99
+
+    // type cast: int -> float -> int
+    var f = 42@float        // 42.0
+    var truncated = 3.99@int  // 3
+    println(itoa(truncated))   // 3
 
     // lambda
     var square: int(int) = \(x: int): int {
