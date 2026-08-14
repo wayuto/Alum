@@ -130,6 +130,16 @@ impl IRGen {
             .collect();
 
         let mut body = order_vm_functions(&mut selected);
+
+        for e in self.program_body.iter() {
+            if matches!(
+                e,
+                Expr::Struct(..) | Expr::Union(..) | Expr::Enum(..) | Expr::TypeDef(_)
+            ) {
+                body.push(e.clone());
+            }
+        }
+
         body.push(expr.clone());
         let program = Program { body };
 

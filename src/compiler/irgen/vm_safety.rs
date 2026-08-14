@@ -231,7 +231,6 @@ impl<'a> VmSafety<'a> {
             }
             Inc(..) | Dec(..) => true,
             IndexAssign(..) => false,
-            MemberAssign(..) => false,
             Add(l, r, _)
             | Sub(l, r, _)
             | Mul(l, r, _)
@@ -261,9 +260,10 @@ impl<'a> VmSafety<'a> {
             Index(l, r, _) => self.safe(l) && self.safe(r),
             ArrayLiteral(items, _) => items.iter().all(|it| self.safe(it)),
             ArrayFill(_, len, _) => self.safe(len),
-            StructLiteral(..) => false,
-            UnionLiteral(..) => false,
-            MemberAccess(..) => false,
+            StructLiteral(_, _, fields, _) => fields.iter().all(|(_, v)| self.safe(v)),
+            UnionLiteral(_, _, fields, _) => fields.iter().all(|(_, v)| self.safe(v)),
+            MemberAccess(obj, _, _) => self.safe(obj),
+            MemberAssign(obj, _, val, _) => self.safe(obj) && self.safe(val),
             FString(parts, _) => parts.iter().all(|p| self.safe(p)),
             Cast(inner, _, _) => self.safe(inner),
         }

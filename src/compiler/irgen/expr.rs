@@ -845,11 +845,16 @@ impl IRGen {
                     } else {
                         typ.clone()
                     };
-                let mut value: Operand = match self.eval_const(&value) {
-                    Some((cv, IRType::Int | IRType::Float | IRType::Bool | IRType::Array)) => {
-                        Operand::ConstIdx(self.get_const_index(cv))
+                let is_struct = matches!(&resolved_typ, Type::Struct(_, _) | Type::Union(_, _));
+                let mut value: Operand = if is_struct {
+                    self.compile_expr(*value, ctx)?
+                } else {
+                    match self.eval_const(&value) {
+                        Some((cv, IRType::Int | IRType::Float | IRType::Bool | IRType::Array)) => {
+                            Operand::ConstIdx(self.get_const_index(cv))
+                        }
+                        _ => self.compile_expr(*value, ctx)?,
                     }
-                    _ => self.compile_expr(*value, ctx)?,
                 };
                 if let Some(copy_ty) = copy_info {
                     value = self.copy_resource(ctx, value, &copy_ty)?;
@@ -892,11 +897,16 @@ impl IRGen {
                     } else {
                         typ.clone()
                     };
-                let value = match self.eval_const(&value) {
-                    Some((cv, IRType::Int | IRType::Float | IRType::Bool | IRType::Array)) => {
-                        Operand::ConstIdx(self.get_const_index(cv))
+                let is_struct = matches!(&resolved_typ, Type::Struct(_, _) | Type::Union(_, _));
+                let value = if is_struct {
+                    self.compile_expr(*value, ctx)?
+                } else {
+                    match self.eval_const(&value) {
+                        Some((cv, IRType::Int | IRType::Float | IRType::Bool | IRType::Array)) => {
+                            Operand::ConstIdx(self.get_const_index(cv))
+                        }
+                        _ => self.compile_expr(*value, ctx)?,
                     }
-                    _ => self.compile_expr(*value, ctx)?,
                 };
                 let var_ir_type = Context::type_to_ir_type(&resolved_typ);
 
@@ -1754,7 +1764,11 @@ impl IRGen {
                         Ok(res_tmp)
                     }
                     Type::Primitive(Primitive::Int) => {
-                        if matches!(src_ty, Some(Type::Primitive(Primitive::Int))) {
+                        if matches!(
+                            src_ty,
+                            Some(Type::Primitive(Primitive::Int))
+                                | Some(Type::Primitive(Primitive::Boolean))
+                        ) {
                             return Ok(src);
                         }
                         let res_tmp = ctx.new_tmp(IRType::Int);
@@ -1766,6 +1780,7 @@ impl IRGen {
                         });
                         Ok(res_tmp)
                     }
+                    Type::Primitive(Primitive::Boolean) => Ok(src),
                     _ => Err(CodeGenError::UnsupportedOperation {
                         message: format!("cast to {:?} is not supported", target_ty),
                     }),

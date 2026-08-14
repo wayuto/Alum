@@ -1458,7 +1458,10 @@ impl TypeChecker {
                     (Type::Primitive(Primitive::Int), Type::Primitive(Primitive::Float))
                     | (Type::Primitive(Primitive::Float), Type::Primitive(Primitive::Int))
                     | (Type::Primitive(Primitive::Int), Type::Primitive(Primitive::Int))
-                    | (Type::Primitive(Primitive::Float), Type::Primitive(Primitive::Float)) => {
+                    | (Type::Primitive(Primitive::Float), Type::Primitive(Primitive::Float))
+                    | (Type::Primitive(Primitive::Int), Type::Primitive(Primitive::Boolean))
+                    | (Type::Primitive(Primitive::Boolean), Type::Primitive(Primitive::Int))
+                    | (Type::Primitive(Primitive::Boolean), Type::Primitive(Primitive::Boolean)) => {
                         Ok(resolved_target)
                     }
                     _ => Err(CheckerError::InvalidOperation {

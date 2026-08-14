@@ -525,6 +525,14 @@ impl GVM {
                         _ => panic!("TypeError: Wrong types for ARRAY_SET operation"),
                     }
                 }
+                Op::ARRAYLEN => {
+                    let arr = self.pop();
+                    match arr {
+                        Value::Array(a) => self.stack.push(Value::Int(a.len() as i64)),
+                        Value::Void => self.stack.push(Value::Int(0)),
+                        _ => panic!("TypeError: ARRAYLEN on non-array"),
+                    }
+                }
                 Op::HALT => return,
             }
         }

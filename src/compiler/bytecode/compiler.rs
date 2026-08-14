@@ -40,6 +40,9 @@ pub struct Compiler {
     native_names: Vec<String>,
     native_idx: HashMap<String, u16>,
     loop_targets: Vec<(u32, Vec<u32>)>,
+    structs: HashMap<String, Vec<(String, Type)>>,
+    unions: HashMap<String, Vec<(String, Type)>>,
+    var_types: Vec<HashMap<String, String>>,
 }
 
 impl Compiler {
@@ -55,6 +58,9 @@ impl Compiler {
             native_names: Vec::new(),
             native_idx: HashMap::new(),
             loop_targets: Vec::new(),
+            structs: HashMap::new(),
+            unions: HashMap::new(),
+            var_types: Vec::new(),
         }
     }
 
@@ -71,6 +77,7 @@ impl Compiler {
             slot_count: 0,
         });
         self.funcs.push(HashMap::new());
+        self.var_types.push(HashMap::new());
     }
 
     fn exit_scope(&mut self) {
@@ -78,6 +85,7 @@ impl Compiler {
             self.next_slot -= scope.slot_count;
         }
         self.funcs.pop();
+        self.var_types.pop();
     }
 
     fn load_var(&self, name: &str) -> Option<u32> {
@@ -117,14 +125,53 @@ impl Compiler {
         (self.constants.len() - 1) as u32
     }
 
+    fn lookup_struct_fields(&self, name: &str) -> Option<&Vec<(String, Type)>> {
+        self.structs.get(name).or_else(|| self.unions.get(name))
+    }
+
+    fn field_index(&self, type_name: &str, field_name: &str) -> Option<usize> {
+        self.lookup_struct_fields(type_name)?
+            .iter()
+            .position(|(n, _)| n == field_name)
+    }
+
+    fn track_var_type(&mut self, var_name: &str, type_name: &str) {
+        if let Some(scope) = self.var_types.last_mut() {
+            scope.insert(var_name.to_string(), type_name.to_string());
+        }
+    }
+
+    fn lookup_var_type(&self, var_name: &str) -> Option<&str> {
+        self.var_types
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(var_name).map(|s| s.as_str()))
+    }
+
+    fn resolve_struct_type(&self, obj: &Expr) -> Option<String> {
+        match obj {
+            Expr::StructLiteral(name, _, _, _) => Some(name.clone()),
+            Expr::UnionLiteral(name, _, _, _) => Some(name.clone()),
+            Expr::Var(name, _) => self.lookup_var_type(name).map(|s| s.to_string()),
+            _ => None,
+        }
+    }
+
     pub fn compile(&mut self, program: Program) -> Bytecode {
         for expr in &program.body {
-            if let Expr::FuncDecl(name, attrs, ..) = expr {
-                if attrs.is_external {
+            match expr {
+                Expr::FuncDecl(name, attrs, ..) if attrs.is_external => {
                     let idx = self.native_names.len();
                     self.native_names.push(name.clone());
                     self.native_idx.insert(name.clone(), idx as u16);
                 }
+                Expr::Struct(name, _, fields, _) => {
+                    self.structs.insert(name.clone(), fields.clone());
+                }
+                Expr::Union(name, _, fields, _) => {
+                    self.unions.insert(name.clone(), fields.clone());
+                }
+                _ => {}
             }
         }
 
@@ -274,6 +321,9 @@ impl Compiler {
                     crate::compiler::parser::Type::Primitive(
                         crate::compiler::parser::Primitive::Int,
                     ) => self.emit(Op::F2I, &[]),
+                    crate::compiler::parser::Type::Primitive(
+                        crate::compiler::parser::Primitive::Boolean,
+                    ) => {}
                     _ => {}
                 }
             }
@@ -333,12 +383,22 @@ impl Compiler {
             }
 
             Expr::VarDecl(name, _, value, _) => {
+                if let Expr::StructLiteral(tname, _, _, _) | Expr::UnionLiteral(tname, _, _, _) =
+                    value.as_ref()
+                {
+                    self.track_var_type(name, tname);
+                }
                 self.compile_expr(value);
                 let slot = self.decl_var(name);
                 self.emit(Op::STOREVAR, &[slot]);
                 self.emit(Op::POP, &[]);
             }
             Expr::ConstDecl(name, _, value, _, _) => {
+                if let Expr::StructLiteral(tname, _, _, _) | Expr::UnionLiteral(tname, _, _, _) =
+                    value.as_ref()
+                {
+                    self.track_var_type(name, tname);
+                }
                 self.compile_expr(value);
                 let slot = self.decl_var(name);
                 self.emit(Op::STOREVAR, &[slot]);
@@ -664,9 +724,150 @@ impl Compiler {
                     }
                     self.patch_jump_addr(exit_loop + 1, break_pos);
                 } else {
-                    panic!("Compiler: for-in array not supported in bytecode (use range)");
+                    self.compile_expr(iterable);
+                    let arr_slot = self.decl_var("_for_arr");
+                    self.emit(Op::STOREVAR, &[arr_slot]);
+                    self.emit(Op::POP, &[]);
+
+                    self.emit(Op::LOADVAR, &[arr_slot]);
+                    self.emit(Op::ARRAYLEN, &[]);
+                    let len_slot = self.decl_var("_for_len");
+                    self.emit(Op::STOREVAR, &[len_slot]);
+                    self.emit(Op::POP, &[]);
+
+                    let zero_const = self.add_const(Value::Int(0));
+                    self.emit(Op::LOADCONST, &[zero_const]);
+                    let idx_slot = self.decl_var("_for_idx");
+                    self.emit(Op::STOREVAR, &[idx_slot]);
+                    self.emit(Op::POP, &[]);
+
+                    let var_slot = self.decl_var(var);
+
+                    let loop_pos = self.code.len() as u32;
+                    self.loop_targets.push((loop_pos, Vec::new()));
+
+                    self.emit(Op::LOADVAR, &[idx_slot]);
+                    self.emit(Op::LOADVAR, &[len_slot]);
+                    self.emit(Op::LT, &[]);
+                    let exit_loop = self.code.len() as u32;
+                    self.emit(Op::JUMPIFFALSE, &[0, 0]);
+
+                    self.emit(Op::LOADVAR, &[arr_slot]);
+                    self.emit(Op::LOADVAR, &[idx_slot]);
+                    self.emit(Op::ARRAYGET, &[]);
+                    self.emit(Op::STOREVAR, &[var_slot]);
+                    self.emit(Op::POP, &[]);
+
+                    self.compile_expr(body);
+                    self.emit(Op::POP, &[]);
+
+                    self.emit(Op::LOADVAR, &[idx_slot]);
+                    self.emit(Op::INC, &[]);
+                    self.emit(Op::STOREVAR, &[idx_slot]);
+                    self.emit(Op::POP, &[]);
+
+                    self.emit(Op::JUMP, &[((loop_pos >> 8) & 0xff), loop_pos & 0xFF]);
+                    let break_pos = self.code.len() as u32;
+                    let (_, break_jumps) = self.loop_targets.pop().unwrap();
+                    for j in break_jumps {
+                        self.patch_jump_addr(j + 1, break_pos);
+                    }
+                    self.patch_jump_addr(exit_loop + 1, break_pos);
                 }
                 self.exit_scope();
+            }
+            Expr::Struct(_, _, _, _) | Expr::Union(_, _, _, _) | Expr::Enum(_, _, _) => {}
+            Expr::StructLiteral(name, _, fields, _) => {
+                let field_order = self
+                    .lookup_struct_fields(name)
+                    .map(|f| f.clone())
+                    .unwrap_or_default();
+                for (fname, _) in &field_order {
+                    if let Some((_, fval)) = fields.iter().find(|(n, _)| n == fname) {
+                        self.compile_expr(fval);
+                    } else {
+                        let zero = self.add_const(Value::Int(0));
+                        self.emit(Op::LOADCONST, &[zero]);
+                    }
+                }
+                self.emit(Op::NEWARRAY, &[field_order.len() as u32]);
+            }
+            Expr::UnionLiteral(name, _, fields, _) => {
+                let field_order = self
+                    .lookup_struct_fields(name)
+                    .map(|f| f.clone())
+                    .unwrap_or_default();
+                for (fname, _) in &field_order {
+                    if let Some((_, fval)) = fields.iter().find(|(n, _)| n == fname) {
+                        self.compile_expr(fval);
+                    } else {
+                        let zero = self.add_const(Value::Int(0));
+                        self.emit(Op::LOADCONST, &[zero]);
+                    }
+                }
+                self.emit(Op::NEWARRAY, &[field_order.len() as u32]);
+            }
+            Expr::MemberAccess(obj, field_name, _) => {
+                let type_name = self.resolve_struct_type(obj);
+                let idx = if let Some(ref tname) = type_name {
+                    self.field_index(tname, field_name).unwrap_or(0)
+                } else {
+                    0
+                };
+                self.compile_expr(obj);
+                let idx_const = self.add_const(Value::Int(idx as i64));
+                self.emit(Op::LOADCONST, &[idx_const]);
+                self.emit(Op::ARRAYGET, &[]);
+            }
+            Expr::MemberAssign(obj, field_name, value, _) => {
+                let type_name = self.resolve_struct_type(obj);
+                let idx = if let Some(ref tname) = type_name {
+                    self.field_index(tname, field_name).unwrap_or(0)
+                } else {
+                    0
+                };
+                if let Expr::Var(name, _) = obj.as_ref() {
+                    let slot = self.mod_var(name);
+                    let idx_const = self.add_const(Value::Int(idx as i64));
+                    self.emit(Op::LOADCONST, &[idx_const]);
+                    self.compile_expr(value);
+                    self.emit(Op::ARRAYSET, &[slot]);
+                }
+            }
+            Expr::Match(target, branches, default, _) => {
+                self.compile_expr(target);
+                let target_slot = self.decl_var("_match_target");
+                self.emit(Op::STOREVAR, &[target_slot]);
+                self.emit(Op::POP, &[]);
+
+                let mut end_jumps: Vec<u32> = Vec::new();
+                for (case_expr, result_expr) in branches {
+                    self.emit(Op::LOADVAR, &[target_slot]);
+                    self.compile_expr(case_expr);
+                    self.emit(Op::EQ, &[]);
+                    let skip_addr = self.code.len() as u32;
+                    self.emit(Op::JUMPIFFALSE, &[0, 0]);
+
+                    self.compile_expr(result_expr);
+
+                    end_jumps.push(self.code.len() as u32);
+                    self.emit(Op::JUMP, &[0, 0]);
+
+                    let next_addr = self.code.len() as u32;
+                    self.patch_jump_addr(skip_addr + 1, next_addr);
+                }
+
+                if let Some(default_expr) = default {
+                    self.compile_expr(default_expr);
+                } else {
+                    let void_const = self.add_const(Value::Void);
+                    self.emit(Op::LOADCONST, &[void_const]);
+                }
+
+                let end_addr = self.code.len() as u32;
+                for j in end_jumps {
+                    self.patch_jump_addr(j + 1, end_addr);
+                }
             }
             _ => {
                 panic!("Compiler: unsupported expression for bytecode: {expr:?}");
@@ -707,8 +908,11 @@ impl Compiler {
 
         self.current_func = Some((name.to_string(), func_addr));
         self.enter_scope();
-        for (param, _) in params {
+        for (param, ty) in params {
             self.decl_var(param);
+            if let Type::Struct(sname, _) | Type::Union(sname, _) = ty {
+                self.track_var_type(param, sname);
+            }
         }
         self.compile_expr(body);
 
