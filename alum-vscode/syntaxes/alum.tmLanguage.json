@@ -114,7 +114,7 @@
                 },
                 {
                     "name": "keyword.control.preprocessor.alum",
-                    "match": "\\$(ifdef|ifndef|endif)\\b"
+                    "match": "\\$(ifdef|ifndef|else|endif)\\b"
                 }
             ]
         },
@@ -807,7 +807,11 @@
                 },
                 {
                     "name": "support.function.builtin.vec.alum",
-                    "match": "\\b(vec_new)\\b"
+                    "match": "\\b(vec_new|arr_new)\\b"
+                },
+                {
+                    "name": "support.function.builtin.maybe.alum",
+                    "match": "\\b(is_some)\\b"
                 },
                 {
                     "name": "support.function.builtin.math.alum",
@@ -1207,7 +1211,11 @@
                 },
                 {
                     "name": "keyword.operator.assignment.compound.alum",
-                    "match": "\\+=|\\-=|\\*=|/=|%="
+                    "match": "<<=|>>=|\\+=|\\-=|\\*=|/=|%=|&=|\\|=|\\^="
+                },
+                {
+                    "name": "keyword.operator.bitwise.alum",
+                    "match": "<<|>>|~"
                 },
                 {
                     "name": "keyword.operator.comparison.alum",
@@ -1227,11 +1235,11 @@
                 },
                 {
                     "name": "keyword.operator.bitwise.alum",
-                    "match": "\\^|\\|"
+                    "match": "\\^|\\||&(?![&=])"
                 },
                 {
-                    "name": "keyword.operator.address.alum",
-                    "match": "&(?![&=])"
+                    "name": "keyword.operator.cast.alum",
+                    "match": "@"
                 },
                 {
                     "name": "meta.member-access.alum",

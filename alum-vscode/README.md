@@ -16,7 +16,8 @@ Alum is a lightweight, efficient programming language implemented in **Rust**. T
   - Structs, unions and enums (including generic declarations and literals)
   - F-strings with interpolation
   - Increment/decrement operators (`++`, `--`)
-  - Bitwise operators (`^`, `|`)
+  - Bitwise operators (`^`, `|`, `&`, `<<`, `>>`, `~`) and compound assignments (`+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=`)
+  - Type casts (`42@float`)
 
 ## Installation
 
@@ -31,7 +32,7 @@ npx vsce package
 The resulting `.vsix` file can be installed via:
 
 ```bash
-code --install-alum-vscode-0.9.7.vsix
+code --install-extension alum-vscode-0.9.8.vsix
 ```
 
 ## Building
@@ -41,4 +42,4 @@ npm install
 npx vsce package
 ```
 
-This generates `alum-vscode-0.9.7.vsix` in the project root.
+This generates `alum-vscode-0.9.8.vsix` in the project root.
