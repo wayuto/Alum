@@ -10,6 +10,7 @@ pub mod ir;
 mod irgen;
 mod lambda;
 mod match_expr;
+pub(super) mod optimizer;
 mod purity;
 mod type_info;
 mod vm_safety;

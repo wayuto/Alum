@@ -277,8 +277,32 @@ impl Assembler {
             Je(lbl) => {
                 self.emit_cond_jmp(0x0f84, lbl, section);
             }
+            Jne(lbl) => {
+                self.emit_cond_jmp(0x0f85, lbl, section);
+            }
+            Jl(lbl) => {
+                self.emit_cond_jmp(0x0f8c, lbl, section);
+            }
+            Jle(lbl) => {
+                self.emit_cond_jmp(0x0f8e, lbl, section);
+            }
+            Jg(lbl) => {
+                self.emit_cond_jmp(0x0f8f, lbl, section);
+            }
             Jge(lbl) => {
                 self.emit_cond_jmp(0x0f8d, lbl, section);
+            }
+            Ja(lbl) => {
+                self.emit_cond_jmp(0x0f87, lbl, section);
+            }
+            Jae(lbl) => {
+                self.emit_cond_jmp(0x0f83, lbl, section);
+            }
+            Jb(lbl) => {
+                self.emit_cond_jmp(0x0f82, lbl, section);
+            }
+            Jbe(lbl) => {
+                self.emit_cond_jmp(0x0f86, lbl, section);
             }
             Sete(reg) => {
                 self.emit_setcc(0x0f94, *reg, section);

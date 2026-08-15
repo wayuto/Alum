@@ -453,6 +453,23 @@ fn alloc_pool(
 }
 
 pub fn allocate_registers(func: &IRFunction, program_constants: &[IRConst]) -> Allocation {
+    let is_leaf = !func.instructions.iter().any(|i| {
+        matches!(
+            i.op,
+            Op::Call
+                | Op::Malloc
+                | Op::Free
+                | Op::StrCat
+                | Op::StrByte
+                | Op::Range
+                | Op::StrEq
+                | Op::StrNe
+                | Op::StrLt
+                | Op::StrLe
+                | Op::StrGt
+                | Op::StrGe
+        )
+    });
     let label_map = build_label_map(&func.instructions);
     let (_live_in, _live_out, first_def_or_use, last_live) =
         compute_liveness(&func.instructions, &label_map, program_constants);
@@ -476,6 +493,15 @@ pub fn allocate_registers(func: &IRFunction, program_constants: &[IRConst]) -> A
         Reg::Rsi,
         Reg::Rdi,
     ];
+    let volatile_pool: Vec<Reg> = if is_leaf {
+        VOLATILE_GPR
+            .iter()
+            .copied()
+            .filter(|r| *r != Reg::R15)
+            .collect()
+    } else {
+        VOLATILE_GPR.to_vec()
+    };
     const CALLEE_GPR: [Reg; 3] = [Reg::R12, Reg::R13, Reg::R14];
     const FLOAT_POOL: [Reg; 8] = [
         Reg::Xmm8,
@@ -496,7 +522,7 @@ pub fn allocate_registers(func: &IRFunction, program_constants: &[IRConst]) -> A
     let flt_intervals: Vec<Interval> = intervals.iter().filter(|iv| iv.is_float).cloned().collect();
 
     let (mut int_registers, mut int_spilled) =
-        alloc_pool(&int_intervals, &VOLATILE_GPR, &CALLEE_GPR);
+        alloc_pool(&int_intervals, &volatile_pool, &CALLEE_GPR);
     let (mut flt_registers, flt_spilled) = alloc_pool(&flt_intervals, &[], &FLOAT_POOL);
 
     let must_spill: HashSet<String> = func
@@ -551,7 +577,7 @@ pub fn allocate_registers(func: &IRFunction, program_constants: &[IRConst]) -> A
         }
     }
 
-    let stack_size = ((offset + 15) & !15).max(16);
+    let stack_size = ((offset + 15) & !15).max(if is_leaf { 0 } else { 16 });
 
     let allocation = Allocation {
         registers,

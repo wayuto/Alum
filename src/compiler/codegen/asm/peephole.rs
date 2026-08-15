@@ -116,8 +116,11 @@ fn register_is_used_after(asms: &[Asm], start: usize, reg: Reg) -> bool {
     for asm in asms.iter().skip(start) {
         match asm {
             Asm::Ret => return reg == Reg::Rax,
-            Asm::Jmp(_) | Asm::Je(_) | Asm::Jge(_) | Asm::Call(_) => return true,
+            Asm::Call(_) => return true,
             _ => {}
+        }
+        if asm.jump_target().is_some() {
+            return true;
         }
         if operand_reads(asm, reg) {
             return true;
@@ -251,10 +254,8 @@ fn pass_const_test_jcc(asms: &mut Vec<Asm>) -> bool {
                 break;
             }
             if operand_writes(&asms[j], reg)
-                || matches!(
-                    &asms[j],
-                    Asm::Ret | Asm::Jmp(_) | Asm::Je(_) | Asm::Jge(_) | Asm::Call(_)
-                )
+                || matches!(&asms[j], Asm::Ret | Asm::Call(_))
+                || asms[j].jump_target().is_some()
             {
                 break;
             }
@@ -291,10 +292,9 @@ fn pass_jmp_chain(asms: &mut Vec<Asm>) -> bool {
         }
         let mut any = false;
         for asm in asms.iter_mut() {
-            let target = match asm {
-                Asm::Jmp(l) | Asm::Je(l) | Asm::Jge(l) => Some(l),
-                Asm::Call(Operand::Label(l)) => Some(l),
-                _ => None,
+            let target = match &*asm {
+                Asm::Call(Operand::Label(l)) => Some(l.clone()),
+                other => other.jump_target().cloned(),
             };
             if let Some(l) = target {
                 let mut chain = l.clone();
@@ -305,8 +305,8 @@ fn pass_jmp_chain(asms: &mut Vec<Asm>) -> bool {
                     }
                     chain = t.clone();
                 }
-                if *l != chain {
-                    *l = chain;
+                if l != chain {
+                    set_jump_target(asm, &chain);
                     any = true;
                 }
             }
@@ -380,6 +380,24 @@ fn pass_redundant_ret(asms: &mut Vec<Asm>) -> bool {
         i += 1;
     }
     changed
+}
+
+fn set_jump_target(asm: &mut Asm, label: &str) {
+    match asm {
+        Asm::Jmp(l)
+        | Asm::Je(l)
+        | Asm::Jne(l)
+        | Asm::Jl(l)
+        | Asm::Jle(l)
+        | Asm::Jg(l)
+        | Asm::Jge(l)
+        | Asm::Ja(l)
+        | Asm::Jae(l)
+        | Asm::Jb(l)
+        | Asm::Jbe(l) => *l = label.to_string(),
+        Asm::Call(Operand::Label(l)) => *l = label.to_string(),
+        _ => {}
+    }
 }
 
 fn pass_redundant_jmp(asms: &mut Vec<Asm>) -> bool {
@@ -468,10 +486,10 @@ fn pass_dead_labels(asms: &mut Vec<Asm>) -> bool {
 fn collect_label_refs(asms: &[Asm]) -> HashSet<String> {
     let mut refs = HashSet::new();
     for asm in asms {
+        if let Some(l) = asm.jump_target() {
+            refs.insert(l.clone());
+        }
         match asm {
-            Asm::Jmp(l) | Asm::Je(l) | Asm::Jge(l) => {
-                refs.insert(l.clone());
-            }
             Asm::Call(op) => {
                 if let Operand::Label(l) = op {
                     refs.insert(l.clone());

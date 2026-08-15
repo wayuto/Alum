@@ -22,7 +22,11 @@ impl CodeGen {
 
     pub fn generate(self) -> Result<Vec<u8>, CodeGenError> {
         let mut ir_gen = IRGen::new(&self.cte_libs);
-        let ir_program = ir_gen.compile(self.ast)?;
+        let mut ir_program = ir_gen.compile(self.ast)?;
+
+        if std::env::var("ALC_NO_OPT").is_err() {
+            crate::compiler::irgen::optimizer::optimize(&mut ir_program);
+        }
 
         let mut asm_gen = codegen::AsmCodeGen::new(ir_program);
         let asm_items = asm_gen.compile()?;

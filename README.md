@@ -2,7 +2,7 @@
 
 Alum is a modern, systems programming language designed for simplicity and performance. It features a clean syntax, strong static typing, and compiles to native machine code via an optimizing IR pipeline. Currently supports the x86_64 Linux platform.
 
-## 📖 Tutorial
+## Tutorial
 
 The official tutorial series (中文教程) walks through the language from scratch — installation, syntax, types, and advanced features like FFI, generics, and compile-time evaluation.
 
@@ -19,6 +19,10 @@ The official tutorial series (中文教程) walks through the language from scra
 | [07-函数](https://cr0.dpdns.org/2026/02/28/07-Function/)           | [16-Result与Maybe类型](https://cr0.dpdns.org/2026/08/02/16-Result-Maybe/) |
 | [08-函数式编程](https://cr0.dpdns.org/2026/02/28/08-FP/)           | [17-函数注解](https://cr0.dpdns.org/2026/08/06/17-Function-Annotations/)  |
 | [09-外部函数接口](https://cr0.dpdns.org/2026/02/28/09-FFI/)        | [18-编译时求值](https://cr0.dpdns.org/2026/08/08/18-CTE/)                 |
+
+## Benchmarks
+
+[Click Here](https://github.com/fgaoxing/LangBench)
 
 ## Features
 

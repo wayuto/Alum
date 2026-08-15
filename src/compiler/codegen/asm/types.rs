@@ -199,7 +199,15 @@ pub enum Asm {
     Ret,
     Jmp(String),
     Je(String),
+    Jne(String),
+    Jl(String),
+    Jle(String),
+    Jg(String),
     Jge(String),
+    Ja(String),
+    Jae(String),
+    Jb(String),
+    Jbe(String),
 
     Sete(Reg),
     Setne(Reg),
@@ -221,4 +229,23 @@ pub enum Asm {
     Xorpd(Reg, Operand),
     Cvtsi2sd(Reg, Operand),
     Cvttsd2si(Reg, Operand),
+}
+
+impl Asm {
+    pub fn jump_target(&self) -> Option<&String> {
+        match self {
+            Asm::Jmp(l)
+            | Asm::Je(l)
+            | Asm::Jne(l)
+            | Asm::Jl(l)
+            | Asm::Jle(l)
+            | Asm::Jg(l)
+            | Asm::Jge(l)
+            | Asm::Ja(l)
+            | Asm::Jae(l)
+            | Asm::Jb(l)
+            | Asm::Jbe(l) => Some(l),
+            _ => None,
+        }
+    }
 }
