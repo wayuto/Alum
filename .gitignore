@@ -2,7 +2,10 @@ target/
 .vscode/
 .idea/
 
-
 # Added by cargo
 
 /target
+
+# VS Code extension build artifacts
+node_modules/
+*.vsix

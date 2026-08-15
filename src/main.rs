@@ -1,7 +1,6 @@
 mod cli;
-mod compiler;
 
-use crate::compiler::CompilerError;
+use alc::compiler::CompilerError;
 use clap::Parser;
 use cli::{
     build::DEFAULT_STD_LIB_PATH,

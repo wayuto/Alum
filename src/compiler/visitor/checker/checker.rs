@@ -102,7 +102,7 @@ impl TypeChecker {
         }
     }
 
-    pub fn check(mut self, program: &mut Program) -> Result<(), CheckerError> {
+    fn collect_declarations(&mut self, program: &Program) {
         for expr in &program.body {
             match expr {
                 Expr::FuncDecl(name, attrs, type_params, params, ret_type, _, _) => {
@@ -137,9 +137,20 @@ impl TypeChecker {
                 _ => {}
             }
         }
+    }
+
+    pub fn check(mut self, program: &mut Program) -> Result<(), CheckerError> {
+        self.collect_declarations(program);
 
         for expr in &mut program.body {
-            self.check_expr(expr)?;
+            match self.check_expr(expr) {
+                Ok(_) => {}
+                Err(e) => self.errors.push(e),
+            }
+
+            if self.errors.first().is_some() {
+                return Err(self.errors.remove(0));
+            }
         }
 
         for expr in &mut program.body {
@@ -147,6 +158,31 @@ impl TypeChecker {
         }
 
         Ok(())
+    }
+
+    pub fn check_collect(mut self, program: &mut Program) -> Vec<CheckerError> {
+        self.collect_declarations(program);
+
+        for expr in &mut program.body {
+            let type_stack_len = self.type_stack.len();
+            let const_stack_len = self.const_stack.len();
+            let generic_params_len = self.generic_params.len();
+            let return_types_len = self.return_types.len();
+
+            if let Err(e) = self.check_expr(expr) {
+                self.errors.push(e);
+                self.type_stack.truncate(type_stack_len);
+                self.const_stack.truncate(const_stack_len);
+                self.generic_params.truncate(generic_params_len);
+                self.return_types.truncate(return_types_len);
+            }
+        }
+
+        for expr in &mut program.body {
+            self.resolve_call_type_args(expr);
+        }
+
+        self.errors
     }
 
     pub(super) fn push_scope(&mut self) {

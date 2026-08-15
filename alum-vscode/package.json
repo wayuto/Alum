@@ -9,6 +9,10 @@
     "categories": [
         "Programming Languages"
     ],
+    "main": "./extension.js",
+    "activationEvents": [
+        "onLanguage:alum"
+    ],
     "contributes": {
         "languages": [
             {
@@ -30,6 +34,22 @@
                 "scopeName": "source.alum",
                 "path": "./syntaxes/alum.tmLanguage.json"
             }
+        ],
+        "configuration": {
+            "title": "Alum",
+            "properties": {
+                "alum.lsp.path": {
+                    "type": "string",
+                    "default": "alum-lsp",
+                    "description": "Path to the alum-lsp executable (default: lookup 'alum-lsp' on PATH)"
+                }
+            }
+        },
+        "commands": [
+            {
+                "command": "alum.restartLsp",
+                "title": "Alum: Restart Language Server"
+            }
         ]
     },
     "scripts": {
@@ -38,6 +58,9 @@
     "keywords": [],
     "author": "",
     "license": "ISC",
+    "dependencies": {
+        "vscode-languageclient": "^9.0.1"
+    },
     "devDependencies": {
         "@vscode/vsce": "^3.9.2"
     }

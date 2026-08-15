@@ -4,6 +4,6 @@ $import "io.ah"
 // This is the simplest Alum program
 
 fun main(): int {
-    println("Hello, World!")
+    println("Hello world!")
     return 0
 }

@@ -1,4 +1,4 @@
-use crate::compiler::{
+use alc::compiler::{
     CompilerError, SourceMap,
     codegen::CodeGen,
     lexer::Lexer,
@@ -39,17 +39,21 @@ pub fn build(
     }
     let lexer = Lexer::new(&processed);
     let mut parser = Parser::new(lexer);
-    let mut ast = parser
-        .parse()
-        .map_err(|e| CompilerError::new(e, source_map.clone()))?;
+    let (mut ast, parse_errors) = parser.parse_collect();
+
+    if !parse_errors.is_empty() {
+        return Err(CompilerError::report(source_map.clone(), parse_errors));
+    }
 
     if verbose {
         eprintln!("Type checking...");
     }
     let checker = TypeChecker::new();
-    checker
-        .check(&mut ast)
-        .map_err(|e| CompilerError::new(e, source_map.clone()))?;
+    let check_errors = checker.check_collect(&mut ast);
+
+    if !check_errors.is_empty() {
+        return Err(CompilerError::report(source_map.clone(), check_errors));
+    }
 
     if print_ast {
         println!("{}", ast);

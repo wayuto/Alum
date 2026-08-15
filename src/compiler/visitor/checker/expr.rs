@@ -867,9 +867,19 @@ impl TypeChecker {
             }
             Expr::Block(body, _) => {
                 self.push_scope();
+                let base = self.type_stack.len();
+                let ret_base = self.return_types.len();
+                let gen_base = self.generic_params.len();
                 let mut result = Type::Primitive(Primitive::Void);
                 for e in body {
-                    result = self.check_expr(e)?;
+                    match self.check_expr(e) {
+                        Ok(t) => result = t,
+                        Err(err) => self.errors.push(err),
+                    }
+                    self.type_stack.truncate(base);
+                    self.const_stack.truncate(base);
+                    self.return_types.truncate(ret_base);
+                    self.generic_params.truncate(gen_base);
                 }
                 self.pop_scope();
                 Ok(result)

@@ -21,6 +21,7 @@ pub struct TypeChecker {
     pub(super) type_bindings: HashMap<usize, Type>,
     pub(super) return_types: Vec<Type>,
     pub(super) generic_params: Vec<HashMap<usize, Type>>,
+    pub(super) errors: Vec<CheckerError>,
 }
 
 impl TypeChecker {
@@ -39,6 +40,7 @@ impl TypeChecker {
             type_bindings: HashMap::new(),
             return_types: Vec::new(),
             generic_params: Vec::new(),
+            errors: Vec::new(),
         }
     }
 }

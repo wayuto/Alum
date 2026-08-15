@@ -3,7 +3,7 @@ set -e
 
 export LOCATION="$PWD"
 
-echo "Installing alc (Alum compiler)..."
+echo "Installing alc (Alum compiler) and alc-lsp (Alum language server)..."
 cargo install --path "$LOCATION"
 
 echo "Installing almk (Alum build tool)..."
@@ -38,5 +38,34 @@ rm -rf merged_objs
 
 echo "Installing merged standard library..."
 sudo cp libalum.a /usr/local/lib/libalum.a
+
+echo "Packaging VS Code extension..."
+if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+    cd "$LOCATION/alum-vscode" || {
+        echo "WARNING: cannot enter $LOCATION/alum-vscode; skipping extension." >&2
+    }
+
+    if [ ! -d node_modules ]; then
+        echo "Installing extension dependencies..."
+        npm install || {
+            echo "WARNING: npm install failed; skipping extension packaging." >&2
+        }
+    fi
+
+    if [ -d node_modules ] && npx vsce package --out alum-vscode-lsp.vsix; then
+        echo "Extension packaged: $LOCATION/alum-vscode/alum-vscode-lsp.vsix"
+        if command -v code >/dev/null 2>&1; then
+            echo "Installing extension into VS Code..."
+            code --install-extension alum-vscode-lsp.vsix
+        else
+            echo "VS Code CLI ('code') not found; install the vsix manually with:"
+            echo "  code --install-extension $LOCATION/alum-vscode/alum-vscode-lsp.vsix"
+        fi
+    else
+        echo "WARNING: vsce package failed; skipping extension packaging." >&2
+    fi
+else
+    echo "WARNING: node/npm not found; skipping VS Code extension packaging." >&2
+fi
 
 echo "Installation completed successfully!"
