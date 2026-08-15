@@ -177,6 +177,8 @@ impl Expr {
             | Expr::Mul(_, _, s)
             | Expr::Div(_, _, s)
             | Expr::Mod(_, _, s)
+            | Expr::Shl(_, _, s)
+            | Expr::Shr(_, _, s)
             | Expr::FAdd(_, _, s)
             | Expr::FSub(_, _, s)
             | Expr::FMul(_, _, s)
@@ -227,6 +229,7 @@ impl Expr {
             | Expr::Lambda(_, _, _, s)
             | Expr::Neg(_, s)
             | Expr::FNeg(_, s)
+            | Expr::BNot(_, s)
             | Expr::Inc(_, s)
             | Expr::Dec(_, s)
             | Expr::Xor(_, _, s)
@@ -234,6 +237,14 @@ impl Expr {
             | Expr::LOr(_, _, s)
             | Expr::AddAssign(_, _, s)
             | Expr::SubAssign(_, _, s)
+            | Expr::MulAssign(_, _, s)
+            | Expr::DivAssign(_, _, s)
+            | Expr::ModAssign(_, _, s)
+            | Expr::AndAssign(_, _, s)
+            | Expr::OrAssign(_, _, s)
+            | Expr::XorAssign(_, _, s)
+            | Expr::ShlAssign(_, _, s)
+            | Expr::ShrAssign(_, _, s)
             | Expr::AddressOf(_, s)
             | Expr::Deref(_, s)
             | Expr::DerefAssign(_, _, s)
@@ -286,8 +297,19 @@ pub enum Expr {
     Xor(Box<Expr>, Box<Expr>, Span),
     LAnd(Box<Expr>, Box<Expr>, Span),
     LOr(Box<Expr>, Box<Expr>, Span),
+    Shl(Box<Expr>, Box<Expr>, Span),
+    Shr(Box<Expr>, Box<Expr>, Span),
+    BNot(Box<Expr>, Span),
     AddAssign(String, Box<Expr>, Span),
     SubAssign(String, Box<Expr>, Span),
+    MulAssign(String, Box<Expr>, Span),
+    DivAssign(String, Box<Expr>, Span),
+    ModAssign(String, Box<Expr>, Span),
+    AndAssign(String, Box<Expr>, Span),
+    OrAssign(String, Box<Expr>, Span),
+    XorAssign(String, Box<Expr>, Span),
+    ShlAssign(String, Box<Expr>, Span),
+    ShrAssign(String, Box<Expr>, Span),
     StrCat(Box<Expr>, Box<Expr>, Span),
     Var(String, Span),
     VarDecl(String, Type, Box<Expr>, Span),

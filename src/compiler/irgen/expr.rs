@@ -35,6 +35,8 @@ impl IRGen {
             Expr::Xor(l, r, _) => Ok((Op::Xor, l, r)),
             Expr::LAnd(l, r, _) => Ok((Op::LAnd, l, r)),
             Expr::LOr(l, r, _) => Ok((Op::LOr, l, r)),
+            Expr::Shl(l, r, _) => Ok((Op::Shl, l, r)),
+            Expr::Shr(l, r, _) => Ok((Op::Shr, l, r)),
             Expr::StrCat(l, r, _) => Ok((Op::StrCat, l, r)),
             _ => Err(CodeGenError::UnsupportedOperation {
                 message: "not a binary operation".to_string(),
@@ -445,6 +447,70 @@ impl IRGen {
             src2: None,
         });
         ptr_tmp
+    }
+
+    pub(super) fn emit_compound_assign(
+        &mut self,
+        name: String,
+        value: Expr,
+        bin_op: Op,
+        ctx: &mut Context,
+    ) -> Result<Operand, CodeGenError> {
+        let is_extern = self.extern_vars.contains_key(name.as_str())
+            || self.global_storage.contains_key(name.as_str());
+        let var_op = if is_extern {
+            Operand::Global(name.clone())
+        } else {
+            Operand::Var(ctx.slot(&name))
+        };
+        let var_high = ctx.get_var_high_type(name.as_str()).cloned();
+        let scale = if matches!(bin_op, Op::Add | Op::Sub) {
+            var_high
+                .as_ref()
+                .and_then(|t| t.pointee())
+                .map(Self::ptr_scale)
+        } else {
+            None
+        };
+        let rhs_raw = self.compile_expr(value, ctx)?;
+        let rhs = if let Some(s) = scale {
+            if s == 1 {
+                rhs_raw
+            } else {
+                let scaled = ctx.new_tmp(IRType::Int);
+                let scale_idx = self.get_const_index(IRConst::Int(s as i64));
+                ctx.instructions.push(Instruction {
+                    op: Op::Mul,
+                    dst: Some(scaled.clone()),
+                    src1: Some(rhs_raw),
+                    src2: Some(Operand::ConstIdx(scale_idx)),
+                });
+                scaled
+            }
+        } else {
+            rhs_raw
+        };
+        let var_tmp = ctx.new_tmp(IRType::Int);
+        ctx.instructions.push(Instruction {
+            op: if is_extern { Op::GlobLoad } else { Op::Load },
+            dst: Some(var_tmp.clone()),
+            src1: Some(var_op.clone()),
+            src2: None,
+        });
+        let res_tmp = ctx.new_tmp(IRType::Int);
+        ctx.instructions.push(Instruction {
+            op: bin_op,
+            dst: Some(res_tmp.clone()),
+            src1: Some(var_tmp),
+            src2: Some(rhs),
+        });
+        ctx.instructions.push(Instruction {
+            op: if is_extern { Op::GlobStore } else { Op::Store },
+            dst: Some(var_op),
+            src1: Some(res_tmp.clone()),
+            src2: None,
+        });
+        Ok(res_tmp)
     }
 
     pub(super) fn emit_free_ptr(&mut self, ctx: &mut Context, ptr: Operand) {
@@ -1213,6 +1279,8 @@ impl IRGen {
             | Expr::Xor(_, _, _)
             | Expr::LAnd(_, _, _)
             | Expr::LOr(_, _, _)
+            | Expr::Shl(_, _, _)
+            | Expr::Shr(_, _, _)
             | Expr::StrCat(_, _, _) => {
                 let (op, l, r) = IRGen::get_binop_parts(expr)?;
                 let left = self.compile_expr(*l, ctx)?;
@@ -1257,6 +1325,18 @@ impl IRGen {
                 let res_tmp = ctx.new_tmp(IRType::Bool);
                 ctx.instructions.push(Instruction {
                     op: Op::Not,
+                    dst: Some(res_tmp.clone()),
+                    src1: Some(arg),
+                    src2: None,
+                });
+                Ok(res_tmp)
+            }
+
+            Expr::BNot(e, _) => {
+                let arg = self.compile_expr(*e, ctx)?;
+                let res_tmp = ctx.new_tmp(IRType::Int);
+                ctx.instructions.push(Instruction {
+                    op: Op::BNot,
                     dst: Some(res_tmp.clone()),
                     src1: Some(arg),
                     src2: None,
@@ -1383,111 +1463,41 @@ impl IRGen {
             }
 
             Expr::AddAssign(name, value, _) => {
-                let is_extern = self.extern_vars.contains_key(name.as_str())
-                    || self.global_storage.contains_key(name.as_str());
-                let var_op = if is_extern {
-                    Operand::Global(name.clone())
-                } else {
-                    Operand::Var(ctx.slot(&name))
-                };
-                let var_high = ctx.get_var_high_type(name.as_str()).cloned();
-                let scale = var_high
-                    .as_ref()
-                    .and_then(|t| t.pointee())
-                    .map(Self::ptr_scale);
-                let rhs_raw = self.compile_expr(*value, ctx)?;
-                let rhs = if let Some(s) = scale {
-                    if s == 1 {
-                        rhs_raw
-                    } else {
-                        let scaled = ctx.new_tmp(IRType::Int);
-                        let scale_idx = self.get_const_index(IRConst::Int(s as i64));
-                        ctx.instructions.push(Instruction {
-                            op: Op::Mul,
-                            dst: Some(scaled.clone()),
-                            src1: Some(rhs_raw),
-                            src2: Some(Operand::ConstIdx(scale_idx)),
-                        });
-                        scaled
-                    }
-                } else {
-                    rhs_raw
-                };
-                let var_tmp = ctx.new_tmp(IRType::Int);
-                ctx.instructions.push(Instruction {
-                    op: if is_extern { Op::GlobLoad } else { Op::Load },
-                    dst: Some(var_tmp.clone()),
-                    src1: Some(var_op.clone()),
-                    src2: None,
-                });
-                let res_tmp = ctx.new_tmp(IRType::Int);
-                ctx.instructions.push(Instruction {
-                    op: Op::Add,
-                    dst: Some(res_tmp.clone()),
-                    src1: Some(var_tmp),
-                    src2: Some(rhs),
-                });
-                ctx.instructions.push(Instruction {
-                    op: if is_extern { Op::GlobStore } else { Op::Store },
-                    dst: Some(var_op),
-                    src1: Some(res_tmp.clone()),
-                    src2: None,
-                });
-                Ok(res_tmp)
+                self.emit_compound_assign(name, *value, Op::Add, ctx)
             }
 
             Expr::SubAssign(name, value, _) => {
-                let is_extern = self.extern_vars.contains_key(name.as_str())
-                    || self.global_storage.contains_key(name.as_str());
-                let var_op = if is_extern {
-                    Operand::Global(name.clone())
-                } else {
-                    Operand::Var(ctx.slot(&name))
-                };
-                let var_high = ctx.get_var_high_type(name.as_str()).cloned();
-                let scale = var_high
-                    .as_ref()
-                    .and_then(|t| t.pointee())
-                    .map(Self::ptr_scale);
-                let rhs_raw = self.compile_expr(*value, ctx)?;
-                let rhs = if let Some(s) = scale {
-                    if s == 1 {
-                        rhs_raw
-                    } else {
-                        let scaled = ctx.new_tmp(IRType::Int);
-                        let scale_idx = self.get_const_index(IRConst::Int(s as i64));
-                        ctx.instructions.push(Instruction {
-                            op: Op::Mul,
-                            dst: Some(scaled.clone()),
-                            src1: Some(rhs_raw),
-                            src2: Some(Operand::ConstIdx(scale_idx)),
-                        });
-                        scaled
-                    }
-                } else {
-                    rhs_raw
-                };
-                let var_tmp = ctx.new_tmp(IRType::Int);
-                ctx.instructions.push(Instruction {
-                    op: if is_extern { Op::GlobLoad } else { Op::Load },
-                    dst: Some(var_tmp.clone()),
-                    src1: Some(var_op.clone()),
-                    src2: None,
-                });
-                let res_tmp = ctx.new_tmp(IRType::Int);
-                ctx.instructions.push(Instruction {
-                    op: Op::Sub,
-                    dst: Some(res_tmp.clone()),
-                    src1: Some(var_tmp),
-                    src2: Some(rhs),
-                });
-                ctx.instructions.push(Instruction {
-                    op: if is_extern { Op::GlobStore } else { Op::Store },
-                    dst: Some(var_op),
-                    src1: Some(res_tmp.clone()),
-                    src2: None,
-                });
-                Ok(res_tmp)
+                self.emit_compound_assign(name, *value, Op::Sub, ctx)
+            }
+
+            Expr::MulAssign(name, value, _) => {
+                self.emit_compound_assign(name, *value, Op::Mul, ctx)
+            }
+
+            Expr::DivAssign(name, value, _) => {
+                self.emit_compound_assign(name, *value, Op::Div, ctx)
+            }
+
+            Expr::ModAssign(name, value, _) => {
+                self.emit_compound_assign(name, *value, Op::Mod, ctx)
+            }
+
+            Expr::AndAssign(name, value, _) => {
+                self.emit_compound_assign(name, *value, Op::LAnd, ctx)
+            }
+
+            Expr::OrAssign(name, value, _) => self.emit_compound_assign(name, *value, Op::LOr, ctx),
+
+            Expr::XorAssign(name, value, _) => {
+                self.emit_compound_assign(name, *value, Op::Xor, ctx)
+            }
+
+            Expr::ShlAssign(name, value, _) => {
+                self.emit_compound_assign(name, *value, Op::Shl, ctx)
+            }
+
+            Expr::ShrAssign(name, value, _) => {
+                self.emit_compound_assign(name, *value, Op::Shr, ctx)
             }
 
             Expr::Block(body, _) => {

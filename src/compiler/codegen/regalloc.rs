@@ -150,6 +150,8 @@ fn op_clobbers(op: &Op) -> u32 {
         Op::Move | Op::Load | Op::Store | Op::GlobLoad | Op::GlobStore => R_RAX | R_R10,
         Op::FMove | Op::FLoad | Op::FStore | Op::FGlobLoad | Op::FGlobStore => R_R10,
         Op::Add | Op::Sub | Op::Mul | Op::LAnd | Op::LOr | Op::Xor => R_RAX | R_RBX | R_R10,
+        Op::Shl | Op::Shr => R_RAX | R_RCX | R_R10,
+        Op::BNot => R_RAX | R_R10,
         Op::Div | Op::Mod => R_RAX | R_RDX | R_RBX | R_R10,
         Op::FAdd | Op::FSub | Op::FMul | Op::FDiv => R_R10,
         Op::Eq | Op::Ne | Op::Gt | Op::Ge | Op::Lt | Op::Le => R_RAX | R_RBX | R_R10,

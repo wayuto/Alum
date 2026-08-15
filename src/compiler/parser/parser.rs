@@ -10,6 +10,14 @@ use std::collections::HashMap;
 enum CompoundOp {
     Add,
     Sub,
+    Mul,
+    Div,
+    Mod,
+    And,
+    Or,
+    Xor,
+    Shl,
+    Shr,
 }
 
 fn op_line(expr: &Expr) -> usize {
@@ -17,7 +25,10 @@ fn op_line(expr: &Expr) -> usize {
         Expr::Index(base, _, _) | Expr::MemberAccess(base, _, _) | Expr::Call(base, _, _, _) => {
             op_line(base)
         }
-        Expr::Deref(inner, _) | Expr::AddressOf(inner, _) | Expr::Neg(inner, _) => op_line(inner),
+        Expr::Deref(inner, _)
+        | Expr::AddressOf(inner, _)
+        | Expr::Neg(inner, _)
+        | Expr::BNot(inner, _) => op_line(inner),
         _ => expr.span().line,
     }
 }
@@ -28,6 +39,14 @@ fn make_compound_assign(target: Expr, op: CompoundOp, rhs: Expr, span: Span) -> 
         match op {
             CompoundOp::Add => Expr::Add(Box::new(l), Box::new(r), sp),
             CompoundOp::Sub => Expr::Sub(Box::new(l), Box::new(r), sp),
+            CompoundOp::Mul => Expr::Mul(Box::new(l), Box::new(r), sp),
+            CompoundOp::Div => Expr::Div(Box::new(l), Box::new(r), sp),
+            CompoundOp::Mod => Expr::Mod(Box::new(l), Box::new(r), sp),
+            CompoundOp::And => Expr::LAnd(Box::new(l), Box::new(r), sp),
+            CompoundOp::Or => Expr::LOr(Box::new(l), Box::new(r), sp),
+            CompoundOp::Xor => Expr::Xor(Box::new(l), Box::new(r), sp),
+            CompoundOp::Shl => Expr::Shl(Box::new(l), Box::new(r), sp),
+            CompoundOp::Shr => Expr::Shr(Box::new(l), Box::new(r), sp),
         }
     };
     match &target {
@@ -776,15 +795,8 @@ impl<'a> Parser<'a> {
                             )),
                         };
                     }
-                    if let Some(Ok((Token::PLUSEQ, _))) = self.peek() {
-                        self.next()?;
-                        let val = self.expr()?;
-                        return Ok(make_compound_assign(expr, CompoundOp::Add, val, span));
-                    }
-                    if let Some(Ok((Token::MINUSEQ, _))) = self.peek() {
-                        self.next()?;
-                        let val = self.expr()?;
-                        return Ok(make_compound_assign(expr, CompoundOp::Sub, val, span));
+                    if let Some(e) = self.try_compound_assign(&expr, span)? {
+                        return Ok(e);
                     }
                     Ok(expr)
                 }
@@ -799,6 +811,68 @@ impl<'a> Parser<'a> {
         left_line == 0 || op_line == left_line
     }
 
+    fn compound_op_for_token(tok: &Token) -> Option<CompoundOp> {
+        match tok {
+            Token::PLUSEQ => Some(CompoundOp::Add),
+            Token::MINUSEQ => Some(CompoundOp::Sub),
+            Token::STAREQ => Some(CompoundOp::Mul),
+            Token::SLASHEQ => Some(CompoundOp::Div),
+            Token::PERCENTEQ => Some(CompoundOp::Mod),
+            Token::ANDEQ => Some(CompoundOp::And),
+            Token::OREQ => Some(CompoundOp::Or),
+            Token::XOREQ => Some(CompoundOp::Xor),
+            Token::SHLEQ => Some(CompoundOp::Shl),
+            Token::SHREQ => Some(CompoundOp::Shr),
+            _ => None,
+        }
+    }
+
+    fn try_compound_assign(
+        &mut self,
+        expr: &Expr,
+        span: Span,
+    ) -> Result<Option<Expr>, ParserError> {
+        let op = match self.peek().cloned() {
+            Some(Ok((tok, _))) => Self::compound_op_for_token(&tok),
+            _ => None,
+        };
+        if let Some(op) = op {
+            self.next()?;
+            let val = self.expr()?;
+            return Ok(Some(make_compound_assign(expr.clone(), op, val, span)));
+        }
+        Ok(None)
+    }
+
+    fn try_compound_assign_name(
+        &mut self,
+        name: &str,
+        span: Span,
+    ) -> Result<Option<Expr>, ParserError> {
+        let op = match self.peek().cloned() {
+            Some(Ok((tok, _))) => Self::compound_op_for_token(&tok),
+            _ => None,
+        };
+        if let Some(op) = op {
+            self.next()?;
+            let val = self.expr()?;
+            let assign = match op {
+                CompoundOp::Add => Expr::AddAssign(name.to_string(), Box::new(val), span),
+                CompoundOp::Sub => Expr::SubAssign(name.to_string(), Box::new(val), span),
+                CompoundOp::Mul => Expr::MulAssign(name.to_string(), Box::new(val), span),
+                CompoundOp::Div => Expr::DivAssign(name.to_string(), Box::new(val), span),
+                CompoundOp::Mod => Expr::ModAssign(name.to_string(), Box::new(val), span),
+                CompoundOp::And => Expr::AndAssign(name.to_string(), Box::new(val), span),
+                CompoundOp::Or => Expr::OrAssign(name.to_string(), Box::new(val), span),
+                CompoundOp::Xor => Expr::XorAssign(name.to_string(), Box::new(val), span),
+                CompoundOp::Shl => Expr::ShlAssign(name.to_string(), Box::new(val), span),
+                CompoundOp::Shr => Expr::ShrAssign(name.to_string(), Box::new(val), span),
+            };
+            return Ok(Some(assign));
+        }
+        Ok(None)
+    }
+
     fn logical(&mut self) -> Result<Expr, ParserError> {
         let mut left = self.bitwise()?;
         while let Some(Ok((op, span))) = self.peek().cloned() {
@@ -806,13 +880,15 @@ impl<'a> Parser<'a> {
                 break;
             }
             match op {
-                Token::AND | Token::OR => {
+                Token::AND | Token::OR | Token::LAND | Token::LOR => {
                     self.next()?;
                     let right = self.bitwise()?;
                     let span = left.span();
                     left = match op {
-                        Token::AND => Expr::LAnd(Box::new(left), Box::new(right), span),
-                        Token::OR => Expr::LOr(Box::new(left), Box::new(right), span),
+                        Token::AND | Token::LAND => {
+                            Expr::LAnd(Box::new(left), Box::new(right), span)
+                        }
+                        Token::OR | Token::LOR => Expr::LOr(Box::new(left), Box::new(right), span),
                         _ => unreachable!(),
                     };
                 }
@@ -959,7 +1035,7 @@ impl<'a> Parser<'a> {
     }
 
     fn comparison(&mut self) -> Result<Expr, ParserError> {
-        let mut left = self.additive()?;
+        let mut left = self.shift()?;
         while let Some(Ok((op, span))) = self.peek().cloned() {
             if !Self::on_same_line(span.line, left.span().line) {
                 break;
@@ -967,7 +1043,7 @@ impl<'a> Parser<'a> {
             match op {
                 Token::CEQ | Token::NE | Token::LT | Token::LE | Token::GT | Token::GE => {
                     self.next()?;
-                    let right = self.additive()?;
+                    let right = self.shift()?;
                     let span = left.span();
                     left = match op {
                         Token::CEQ => Expr::Eq(Box::new(left), Box::new(right), span),
@@ -976,6 +1052,29 @@ impl<'a> Parser<'a> {
                         Token::LE => Expr::Le(Box::new(left), Box::new(right), span),
                         Token::GT => Expr::Gt(Box::new(left), Box::new(right), span),
                         Token::GE => Expr::Ge(Box::new(left), Box::new(right), span),
+                        _ => unreachable!(),
+                    };
+                }
+                _ => break,
+            }
+        }
+        Ok(left)
+    }
+
+    fn shift(&mut self) -> Result<Expr, ParserError> {
+        let mut left = self.additive()?;
+        while let Some(Ok((op, span))) = self.peek().cloned() {
+            if !Self::on_same_line(span.line, left.span().line) {
+                break;
+            }
+            match op {
+                Token::SHL | Token::SHR => {
+                    self.next()?;
+                    let right = self.additive()?;
+                    let span = left.span();
+                    left = match op {
+                        Token::SHL => Expr::Shl(Box::new(left), Box::new(right), span),
+                        Token::SHR => Expr::Shr(Box::new(left), Box::new(right), span),
                         _ => unreachable!(),
                     };
                 }
@@ -1336,15 +1435,8 @@ impl<'a> Parser<'a> {
                             let val = self.expr()?;
                             return Ok(Expr::VarAssign(name, Box::new(val), span));
                         }
-                        if let Some(Ok((Token::PLUSEQ, _))) = self.peek() {
-                            self.next()?;
-                            let val = self.expr()?;
-                            return Ok(Expr::AddAssign(name, Box::new(val), span));
-                        }
-                        if let Some(Ok((Token::MINUSEQ, _))) = self.peek() {
-                            self.next()?;
-                            let val = self.expr()?;
-                            return Ok(Expr::SubAssign(name, Box::new(val), span));
+                        if let Some(e) = self.try_compound_assign_name(&name, span)? {
+                            return Ok(e);
                         }
                     }
                     if self.deref_depth == 0 {
@@ -1393,6 +1485,11 @@ impl<'a> Parser<'a> {
                     self.next()?;
                     let operand = self.factor()?;
                     return Ok(Expr::Not(Box::new(operand), span));
+                }
+                Ok((Token::BNOT, span)) => {
+                    self.next()?;
+                    let operand = self.factor()?;
+                    return Ok(Expr::BNot(Box::new(operand), span));
                 }
                 Ok((token, span)) => {
                     return Err(ParserError::UnexpectedToken {

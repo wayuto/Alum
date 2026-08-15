@@ -216,10 +216,20 @@ impl<'a> VmSafety<'a> {
                 }
                 r
             }
-            Not(v, _) | Neg(v, _) | FNeg(v, _) => self.safe(v),
+            Not(v, _) | BNot(v, _) | Neg(v, _) | FNeg(v, _) => self.safe(v),
             AddressOf(..) => false,
             Deref(..) => false,
-            VarAssign(name, v, _) | AddAssign(name, v, _) | SubAssign(name, v, _) => {
+            VarAssign(name, v, _)
+            | AddAssign(name, v, _)
+            | SubAssign(name, v, _)
+            | MulAssign(name, v, _)
+            | DivAssign(name, v, _)
+            | ModAssign(name, v, _)
+            | AndAssign(name, v, _)
+            | OrAssign(name, v, _)
+            | XorAssign(name, v, _)
+            | ShlAssign(name, v, _)
+            | ShrAssign(name, v, _) => {
                 let r = self.safe(v);
                 if r {
                     match v.as_ref() {
@@ -255,6 +265,8 @@ impl<'a> VmSafety<'a> {
             | Xor(l, r, _)
             | LAnd(l, r, _)
             | LOr(l, r, _)
+            | Shl(l, r, _)
+            | Shr(l, r, _)
             | StrCat(l, r, _) => self.safe(l) && self.safe(r),
             DerefAssign(..) => false,
             Index(l, r, _) => self.safe(l) && self.safe(r),

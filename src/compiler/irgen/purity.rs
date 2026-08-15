@@ -148,9 +148,13 @@ pub(super) fn check_lambda_params(program_body: &[Expr]) -> Result<(), CodeGenEr
                 }
                 Ok(())
             }
-            Return(v, _) | Not(v, _) | Neg(v, _) | FNeg(v, _) | AddressOf(v, _) | Deref(v, _) => {
-                walk(v)
-            }
+            Return(v, _)
+            | Not(v, _)
+            | BNot(v, _)
+            | Neg(v, _)
+            | FNeg(v, _)
+            | AddressOf(v, _)
+            | Deref(v, _) => walk(v),
             VarDecl(_, _, v, _) | ConstDecl(_, _, v, _, _) => walk(v),
             Add(l, r, _)
             | Sub(l, r, _)
@@ -176,6 +180,8 @@ pub(super) fn check_lambda_params(program_body: &[Expr]) -> Result<(), CodeGenEr
             | Xor(l, r, _)
             | LAnd(l, r, _)
             | LOr(l, r, _)
+            | Shl(l, r, _)
+            | Shr(l, r, _)
             | StrCat(l, r, _)
             | Index(l, r, _)
             | DerefAssign(l, r, _) => {
@@ -200,7 +206,17 @@ pub(super) fn check_lambda_params(program_body: &[Expr]) -> Result<(), CodeGenEr
                 Ok(())
             }
             MemberAccess(o, _, _) => walk(o),
-            VarAssign(_, v, _) | AddAssign(_, v, _) | SubAssign(_, v, _) => walk(v),
+            VarAssign(_, v, _)
+            | AddAssign(_, v, _)
+            | SubAssign(_, v, _)
+            | MulAssign(_, v, _)
+            | DivAssign(_, v, _)
+            | ModAssign(_, v, _)
+            | AndAssign(_, v, _)
+            | OrAssign(_, v, _)
+            | XorAssign(_, v, _)
+            | ShlAssign(_, v, _)
+            | ShrAssign(_, v, _) => walk(v),
             FString(parts, _) => {
                 for p in parts {
                     walk(p)?;
@@ -337,7 +353,7 @@ fn classify(
             classify(fn_name, value, decls, globals, in_progress, memo, bound)
         }
 
-        Not(e, _) | Neg(e, _) | FNeg(e, _) => {
+        Not(e, _) | BNot(e, _) | Neg(e, _) | FNeg(e, _) => {
             classify(fn_name, e, decls, globals, in_progress, memo, bound)
         }
         AddressOf(e, _) | Deref(e, _) => Err(format!(
@@ -371,6 +387,8 @@ fn classify(
         | Xor(l, r, _)
         | LAnd(l, r, _)
         | LOr(l, r, _)
+        | Shl(l, r, _)
+        | Shr(l, r, _)
         | StrCat(l, r, _)
         | Index(l, r, _) => {
             classify(fn_name, l, decls, globals, in_progress, memo, bound)?;
@@ -402,7 +420,16 @@ fn classify(
             }
             result
         }
-        AddAssign(name, value, _) | SubAssign(name, value, _) => {
+        AddAssign(name, value, _)
+        | SubAssign(name, value, _)
+        | MulAssign(name, value, _)
+        | DivAssign(name, value, _)
+        | ModAssign(name, value, _)
+        | AndAssign(name, value, _)
+        | OrAssign(name, value, _)
+        | XorAssign(name, value, _)
+        | ShlAssign(name, value, _)
+        | ShrAssign(name, value, _) => {
             if globals.contains(name) {
                 return Err(format!("write to global '{}'", name));
             }

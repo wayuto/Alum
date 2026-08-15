@@ -399,6 +399,43 @@ impl TypeChecker {
                 }
                 Ok(Type::Primitive(Primitive::Int))
             }
+            Expr::Shl(lhs, rhs, _) | Expr::Shr(lhs, rhs, _) => {
+                let lhs_type = self.check_expr(lhs)?;
+                let rhs_type = self.check_expr(rhs)?;
+                if lhs_type.is_float() || rhs_type.is_float() {
+                    return Err(CheckerError::InvalidOperation {
+                        op: "shift".to_string(),
+                        type_name: "float".to_string(),
+                        span: span,
+                    });
+                }
+                if !lhs_type.is_numeric() || !rhs_type.is_numeric() {
+                    return Err(CheckerError::InvalidOperation {
+                        op: "shift".to_string(),
+                        type_name: format!("{:?} and {:?}", lhs_type, rhs_type),
+                        span: span,
+                    });
+                }
+                Ok(Type::Primitive(Primitive::Int))
+            }
+            Expr::BNot(operand, _) => {
+                let ty = self.check_expr(operand)?;
+                if ty.is_float() {
+                    return Err(CheckerError::InvalidOperation {
+                        op: "bitwise not".to_string(),
+                        type_name: "float".to_string(),
+                        span: span,
+                    });
+                }
+                if !ty.is_numeric() {
+                    return Err(CheckerError::InvalidOperation {
+                        op: "bitwise not".to_string(),
+                        type_name: format!("{:?}", ty),
+                        span: span,
+                    });
+                }
+                Ok(Type::Primitive(Primitive::Int))
+            }
             Expr::Inc(name, _) | Expr::Dec(name, _) => {
                 if self.is_constant(name) {
                     return Err(CheckerError::InvalidOperation {
@@ -459,17 +496,58 @@ impl TypeChecker {
                 }
                 Ok(var_type)
             }
-            Expr::LAnd(lhs, rhs, _) | Expr::LOr(lhs, rhs, _) => {
-                let lhs_type = self.check_expr(lhs)?;
-                let rhs_type = self.check_expr(rhs)?;
-                if !lhs_type.is_bool() || !rhs_type.is_bool() {
+            Expr::MulAssign(name, value, _)
+            | Expr::DivAssign(name, value, _)
+            | Expr::ModAssign(name, value, _)
+            | Expr::AndAssign(name, value, _)
+            | Expr::OrAssign(name, value, _)
+            | Expr::XorAssign(name, value, _)
+            | Expr::ShlAssign(name, value, _)
+            | Expr::ShrAssign(name, value, _) => {
+                if self.is_constant(name) {
                     return Err(CheckerError::InvalidOperation {
-                        op: "logical".to_string(),
-                        type_name: format!("{:?} and {:?}", lhs_type, rhs_type),
+                        op: "compound assignment".to_string(),
+                        type_name: format!("constant '{}'", name),
                         span: span,
                     });
                 }
-                Ok(Type::Primitive(Primitive::Boolean))
+                let var_type = self
+                    .lookup_var(name)
+                    .or_else(|| self.extern_vars.get(name).cloned())
+                    .or_else(|| self.globals.get(name).cloned())
+                    .ok_or_else(|| CheckerError::UndefinedVariable(name.clone(), span))?;
+                if var_type.is_pointer() {
+                    return Err(CheckerError::InvalidOperation {
+                        op: "compound assignment".to_string(),
+                        type_name: format!("pointer '{}'", name),
+                        span: span,
+                    });
+                }
+                let value_type = self.check_expr(value)?;
+                self.unify_types(&var_type, &value_type).map_err(|_| {
+                    CheckerError::TypeMismatch {
+                        expected: var_type.clone(),
+                        found: value_type,
+                        context: format!("compound assignment to '{}'", name),
+                        span: span,
+                    }
+                })?;
+                Ok(var_type)
+            }
+            Expr::LAnd(lhs, rhs, _) | Expr::LOr(lhs, rhs, _) => {
+                let lhs_type = self.check_expr(lhs)?;
+                let rhs_type = self.check_expr(rhs)?;
+                if lhs_type.is_bool() && rhs_type.is_bool() {
+                    return Ok(Type::Primitive(Primitive::Boolean));
+                }
+                if lhs_type.is_numeric() && rhs_type.is_numeric() {
+                    return Ok(Type::Primitive(Primitive::Int));
+                }
+                return Err(CheckerError::InvalidOperation {
+                    op: "logical/bitwise".to_string(),
+                    type_name: format!("{:?} and {:?}", lhs_type, rhs_type),
+                    span: span,
+                });
             }
             Expr::Eq(lhs, rhs, _)
             | Expr::Ne(lhs, rhs, _)

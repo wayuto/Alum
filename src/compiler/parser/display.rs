@@ -221,6 +221,28 @@ impl Expr {
                 r.fmt_with_indent(f, indent + 1)?;
                 write!(f, "\n{})", indent_str)
             }
+            Expr::Shl(l, r, _) => {
+                write!(f, "{}Shl(", indent_str)?;
+                write!(f, "\n")?;
+                l.fmt_with_indent(f, indent + 1)?;
+                write!(f, "\n")?;
+                r.fmt_with_indent(f, indent + 1)?;
+                write!(f, "\n{})", indent_str)
+            }
+            Expr::Shr(l, r, _) => {
+                write!(f, "{}Shr(", indent_str)?;
+                write!(f, "\n")?;
+                l.fmt_with_indent(f, indent + 1)?;
+                write!(f, "\n")?;
+                r.fmt_with_indent(f, indent + 1)?;
+                write!(f, "\n{})", indent_str)
+            }
+            Expr::BNot(e, _) => {
+                write!(f, "{}BNot(", indent_str)?;
+                write!(f, "\n")?;
+                e.fmt_with_indent(f, indent + 1)?;
+                write!(f, "\n{})", indent_str)
+            }
             Expr::LAnd(l, r, _) => {
                 write!(f, "{}LAnd(", indent_str)?;
                 write!(f, "\n")?;
@@ -245,6 +267,54 @@ impl Expr {
             }
             Expr::SubAssign(name, val, _) => {
                 write!(f, "{}SubAssign(\"{}\"", indent_str, name)?;
+                write!(f, "\n")?;
+                val.fmt_with_indent(f, indent + 1)?;
+                write!(f, "\n{})", indent_str)
+            }
+            Expr::MulAssign(name, val, _) => {
+                write!(f, "{}MulAssign(\"{}\"", indent_str, name)?;
+                write!(f, "\n")?;
+                val.fmt_with_indent(f, indent + 1)?;
+                write!(f, "\n{})", indent_str)
+            }
+            Expr::DivAssign(name, val, _) => {
+                write!(f, "{}DivAssign(\"{}\"", indent_str, name)?;
+                write!(f, "\n")?;
+                val.fmt_with_indent(f, indent + 1)?;
+                write!(f, "\n{})", indent_str)
+            }
+            Expr::ModAssign(name, val, _) => {
+                write!(f, "{}ModAssign(\"{}\"", indent_str, name)?;
+                write!(f, "\n")?;
+                val.fmt_with_indent(f, indent + 1)?;
+                write!(f, "\n{})", indent_str)
+            }
+            Expr::AndAssign(name, val, _) => {
+                write!(f, "{}AndAssign(\"{}\"", indent_str, name)?;
+                write!(f, "\n")?;
+                val.fmt_with_indent(f, indent + 1)?;
+                write!(f, "\n{})", indent_str)
+            }
+            Expr::OrAssign(name, val, _) => {
+                write!(f, "{}OrAssign(\"{}\"", indent_str, name)?;
+                write!(f, "\n")?;
+                val.fmt_with_indent(f, indent + 1)?;
+                write!(f, "\n{})", indent_str)
+            }
+            Expr::XorAssign(name, val, _) => {
+                write!(f, "{}XorAssign(\"{}\"", indent_str, name)?;
+                write!(f, "\n")?;
+                val.fmt_with_indent(f, indent + 1)?;
+                write!(f, "\n{})", indent_str)
+            }
+            Expr::ShlAssign(name, val, _) => {
+                write!(f, "{}ShlAssign(\"{}\"", indent_str, name)?;
+                write!(f, "\n")?;
+                val.fmt_with_indent(f, indent + 1)?;
+                write!(f, "\n{})", indent_str)
+            }
+            Expr::ShrAssign(name, val, _) => {
+                write!(f, "{}ShrAssign(\"{}\"", indent_str, name)?;
                 write!(f, "\n")?;
                 val.fmt_with_indent(f, indent + 1)?;
                 write!(f, "\n{})", indent_str)

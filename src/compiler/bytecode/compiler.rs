@@ -246,6 +246,16 @@ impl Compiler {
                 self.compile_expr(r);
                 self.emit(Op::MOD, &[]);
             }
+            Expr::Shl(l, r, _) => {
+                self.compile_expr(l);
+                self.compile_expr(r);
+                self.emit(Op::SHL, &[]);
+            }
+            Expr::Shr(l, r, _) => {
+                self.compile_expr(l);
+                self.compile_expr(r);
+                self.emit(Op::SHR, &[]);
+            }
             Expr::FAdd(l, r, _)
             | Expr::FSub(l, r, _)
             | Expr::FMul(l, r, _)
@@ -335,6 +345,10 @@ impl Compiler {
                 self.compile_expr(r);
                 self.emit(Op::LOGOR, &[]);
             }
+            Expr::BNot(e, _) => {
+                self.compile_expr(e);
+                self.emit(Op::BNOT, &[]);
+            }
             Expr::StrCat(l, r, _) => {
                 self.compile_expr(l);
                 self.compile_expr(r);
@@ -415,15 +429,33 @@ impl Compiler {
                 self.emit(Op::STOREVAR, &[slot]);
                 self.emit(Op::POP, &[]);
             }
-            Expr::AddAssign(name, value, _) | Expr::SubAssign(name, value, _) => {
+            Expr::AddAssign(name, value, _)
+            | Expr::SubAssign(name, value, _)
+            | Expr::MulAssign(name, value, _)
+            | Expr::DivAssign(name, value, _)
+            | Expr::ModAssign(name, value, _)
+            | Expr::AndAssign(name, value, _)
+            | Expr::OrAssign(name, value, _)
+            | Expr::XorAssign(name, value, _)
+            | Expr::ShlAssign(name, value, _)
+            | Expr::ShrAssign(name, value, _) => {
                 let slot = self.mod_var(name);
                 self.compile_expr(&Expr::Var(name.clone(), Span::new(0, 0)));
                 self.compile_expr(value);
-                match expr {
-                    Expr::AddAssign(..) => self.emit(Op::ADD, &[]),
-                    Expr::SubAssign(..) => self.emit(Op::SUB, &[]),
+                let op = match expr {
+                    Expr::AddAssign(..) => Op::ADD,
+                    Expr::SubAssign(..) => Op::SUB,
+                    Expr::MulAssign(..) => Op::MUL,
+                    Expr::DivAssign(..) => Op::DIV,
+                    Expr::ModAssign(..) => Op::MOD,
+                    Expr::AndAssign(..) => Op::LOGAND,
+                    Expr::OrAssign(..) => Op::LOGOR,
+                    Expr::XorAssign(..) => Op::LOGXOR,
+                    Expr::ShlAssign(..) => Op::SHL,
+                    Expr::ShrAssign(..) => Op::SHR,
                     _ => unreachable!(),
-                }
+                };
+                self.emit(op, &[]);
                 self.emit(Op::STOREVAR, &[slot]);
                 self.emit(Op::POP, &[]);
             }

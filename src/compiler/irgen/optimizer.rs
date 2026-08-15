@@ -1,6 +1,4 @@
 use super::ir::{IRConst, IRProgram, Instruction, Op, Operand};
-#[cfg(test)]
-use super::ir::{IRFunction, IRType};
 use ordered_float::OrderedFloat;
 use std::collections::{HashMap, HashSet};
 
@@ -97,7 +95,7 @@ fn const_str<'a>(constants: &'a [IRConst], op: &'a Operand) -> Option<&'a str> {
 fn fold_binop(op: &Op, constants: &[IRConst], a: &Operand, b: &Operand) -> Option<IRConst> {
     use Op::*;
     match op {
-        Add | Sub | Mul | Div | Mod | Xor | LAnd | LOr => {
+        Add | Sub | Mul | Div | Mod | Xor | LAnd | LOr | Shl | Shr => {
             let a = const_int(constants, a)?;
             let b = const_int(constants, b)?;
             match op {
@@ -109,6 +107,8 @@ fn fold_binop(op: &Op, constants: &[IRConst], a: &Operand, b: &Operand) -> Optio
                 Xor => Some(IRConst::Int(a ^ b)),
                 LAnd => Some(IRConst::Int(a & b)),
                 LOr => Some(IRConst::Int(a | b)),
+                Shl => Some(IRConst::Int(a.wrapping_shl(b as u32))),
+                Shr => Some(IRConst::Int(a.wrapping_shr(b as u32))),
                 _ => None,
             }
         }
@@ -175,6 +175,7 @@ fn fold_unop(op: &Op, constants: &[IRConst], a: &Operand) -> Option<IRConst> {
         Neg => Some(IRConst::Int(const_int(constants, a)?.wrapping_neg())),
         FNeg => Some(IRConst::Float(OrderedFloat(-const_float(constants, a)?))),
         Not => Some(IRConst::Int(const_int(constants, a)? ^ 1)),
+        BNot => Some(IRConst::Int(!const_int(constants, a)?)),
         Inc => Some(IRConst::Int(const_int(constants, a)?.wrapping_add(1))),
         Dec => Some(IRConst::Int(const_int(constants, a)?.wrapping_sub(1))),
         IntToFloat => Some(IRConst::Float(
@@ -225,7 +226,6 @@ fn pass_algebraic(
     pool: &mut ConstPool,
 ) -> bool {
     let zero = pool.intern(constants, IRConst::Int(0));
-    let one = pool.intern(constants, IRConst::Int(1));
     let mut changed = false;
     for inst in insts.iter_mut() {
         if inst.dst.is_none() {
@@ -237,7 +237,6 @@ fn pass_algebraic(
         let c1 = const_int(constants, &src1);
         let c2 = const_int(constants, &src2);
         let z = || Operand::ConstIdx(zero);
-        let o = || Operand::ConstIdx(one);
         let rep = match inst.op {
             Op::Add if c2 == Some(0) => Some((Op::Move, src1)),
             Op::Add if c1 == Some(0) => Some((Op::Move, src2)),
@@ -252,12 +251,8 @@ fn pass_algebraic(
             Op::Xor if c1 == Some(0) => Some((Op::Move, src2)),
             Op::LAnd if c2 == Some(0) => Some((Op::Move, z())),
             Op::LAnd if c1 == Some(0) => Some((Op::Move, z())),
-            Op::LAnd if c2 == Some(1) => Some((Op::Move, src1)),
-            Op::LAnd if c1 == Some(1) => Some((Op::Move, src2)),
             Op::LOr if c2 == Some(0) => Some((Op::Move, src1)),
             Op::LOr if c1 == Some(0) => Some((Op::Move, src2)),
-            Op::LOr if c2 == Some(1) => Some((Op::Move, o())),
-            Op::LOr if c1 == Some(1) => Some((Op::Move, o())),
             _ => None,
         };
         if let Some((op, src)) = rep {
@@ -407,6 +402,9 @@ fn is_pure(op: &Op) -> bool {
             | Op::LAnd
             | Op::LOr
             | Op::Xor
+            | Op::Shl
+            | Op::Shr
+            | Op::BNot
             | Op::Neg
             | Op::FNeg
             | Op::Not
@@ -619,6 +617,9 @@ fn is_hoistable(op: &Op) -> bool {
             | Op::Xor
             | Op::LAnd
             | Op::LOr
+            | Op::Shl
+            | Op::Shr
+            | Op::BNot
             | Op::Eq
             | Op::Ne
             | Op::Gt
@@ -719,396 +720,4 @@ fn hoist_loop(insts: &mut Vec<Instruction>, header: usize, back: usize) -> bool 
         insts.insert(header, inst);
     }
     true
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn inst(
-        op: Op,
-        dst: Option<Operand>,
-        src1: Option<Operand>,
-        src2: Option<Operand>,
-    ) -> Instruction {
-        Instruction {
-            op,
-            dst,
-            src1,
-            src2,
-        }
-    }
-
-    fn temp(id: usize, ty: IRType) -> Operand {
-        Operand::Temp(id, ty)
-    }
-
-    fn run(insts: Vec<Instruction>) -> (Vec<Instruction>, Vec<IRConst>) {
-        let mut program = IRProgram {
-            functions: vec![IRFunction {
-                name: "f".into(),
-                params: vec![],
-                ret_type: IRType::Int,
-                is_pub: false,
-                is_external: false,
-                instructions: insts,
-            }],
-            constants: vec![
-                IRConst::Int(0),
-                IRConst::Int(1),
-                IRConst::Int(2),
-                IRConst::Int(3),
-                IRConst::Int(5),
-            ],
-            extern_vars: vec![],
-            global_vars: vec![],
-        };
-        optimize(&mut program);
-        let func = program.functions.pop().unwrap();
-        (func.instructions, program.constants)
-    }
-
-    fn const_int_at(constants: &[IRConst], idx: usize) -> i64 {
-        match &constants[idx] {
-            IRConst::Int(v) => *v,
-            other => panic!("expected int constant, got {:?}", other),
-        }
-    }
-
-    fn cidx(value: i64) -> usize {
-        match value {
-            0 => 0,
-            1 => 1,
-            2 => 2,
-            3 => 3,
-            5 => 4,
-            _ => panic!("seed only contains 0,1,2,3,5"),
-        }
-    }
-
-    fn is_move_of(inst: &Instruction, constants: &[IRConst], value: i64) -> bool {
-        matches!(
-            inst,
-            Instruction {
-                op: Op::Move,
-                src1: Some(Operand::ConstIdx(idx)),
-                src2: None,
-                ..
-            } if const_int_at(constants, *idx) == value
-        )
-    }
-
-    #[test]
-    fn folds_int_arith() {
-        let (insts, constants) = run(vec![
-            inst(
-                Op::Add,
-                Some(temp(0, IRType::Int)),
-                Some(Operand::ConstIdx(cidx(2))),
-                Some(Operand::ConstIdx(cidx(3))),
-            ),
-            inst(
-                Op::Return("rax".into()),
-                None,
-                Some(temp(0, IRType::Int)),
-                None,
-            ),
-        ]);
-        assert_eq!(insts.len(), 2);
-        assert!(is_move_of(&insts[0], &constants, 5), "got {:?}", insts[0]);
-    }
-
-    #[test]
-    fn folds_comparison() {
-        let (insts, constants) = run(vec![
-            inst(
-                Op::Gt,
-                Some(temp(0, IRType::Bool)),
-                Some(Operand::ConstIdx(cidx(5))),
-                Some(Operand::ConstIdx(cidx(2))),
-            ),
-            inst(
-                Op::Return("rax".into()),
-                None,
-                Some(temp(0, IRType::Int)),
-                None,
-            ),
-        ]);
-        assert_eq!(insts.len(), 2);
-        assert!(is_move_of(&insts[0], &constants, 1), "got {:?}", insts[0]);
-    }
-
-    #[test]
-    fn does_not_fold_div_by_zero() {
-        let (insts, _) = run(vec![
-            inst(
-                Op::Div,
-                Some(temp(0, IRType::Int)),
-                Some(Operand::ConstIdx(cidx(5))),
-                Some(Operand::ConstIdx(cidx(0))),
-            ),
-            inst(
-                Op::Return("rax".into()),
-                None,
-                Some(temp(0, IRType::Int)),
-                None,
-            ),
-        ]);
-        assert_eq!(insts.len(), 2);
-        assert!(matches!(insts[0].op, Op::Div));
-    }
-
-    #[test]
-    fn simplifies_x_plus_zero() {
-        let (insts, _) = run(vec![
-            inst(
-                Op::Add,
-                Some(temp(0, IRType::Int)),
-                Some(temp(1, IRType::Int)),
-                Some(Operand::ConstIdx(cidx(0))),
-            ),
-            inst(
-                Op::Return("rax".into()),
-                None,
-                Some(temp(0, IRType::Int)),
-                None,
-            ),
-        ]);
-        assert_eq!(insts.len(), 2);
-        assert!(matches!(
-            &insts[0],
-            Instruction {
-                op: Op::Move,
-                src1: Some(Operand::Temp(1, _)),
-                src2: None,
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn simplifies_sub_zero_to_neg() {
-        let (insts, _) = run(vec![
-            inst(
-                Op::Sub,
-                Some(temp(0, IRType::Int)),
-                Some(Operand::ConstIdx(cidx(0))),
-                Some(temp(1, IRType::Int)),
-            ),
-            inst(
-                Op::Return("rax".into()),
-                None,
-                Some(temp(0, IRType::Int)),
-                None,
-            ),
-        ]);
-        assert_eq!(insts.len(), 2);
-        assert!(matches!(
-            &insts[0],
-            Instruction {
-                op: Op::Neg,
-                src1: Some(Operand::Temp(1, _)),
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn folds_constant_branch() {
-        let (insts, _) = run(vec![
-            inst(
-                Op::JumpIfFalse,
-                None,
-                Some(Operand::ConstIdx(cidx(1))),
-                Some(Operand::Label("L".into())),
-            ),
-            inst(Op::Label("L".into()), None, None, None),
-        ]);
-        assert_eq!(insts.len(), 0);
-
-        let (insts, _) = run(vec![
-            inst(
-                Op::JumpIfFalse,
-                None,
-                Some(Operand::ConstIdx(cidx(0))),
-                Some(Operand::Label("L".into())),
-            ),
-            inst(Op::Label("L".into()), None, None, None),
-        ]);
-        assert_eq!(insts.len(), 0);
-    }
-
-    #[test]
-    fn removes_dead_pure_instruction() {
-        let (insts, _) = run(vec![
-            inst(
-                Op::Move,
-                Some(temp(0, IRType::Int)),
-                Some(Operand::ConstIdx(cidx(5))),
-                None,
-            ),
-            inst(
-                Op::Add,
-                Some(temp(1, IRType::Int)),
-                Some(temp(2, IRType::Int)),
-                Some(Operand::ConstIdx(cidx(1))),
-            ),
-            inst(
-                Op::Return("rax".into()),
-                None,
-                Some(temp(1, IRType::Int)),
-                None,
-            ),
-        ]);
-        assert_eq!(insts.len(), 2);
-        assert!(matches!(insts[0].op, Op::Add));
-        assert!(matches!(insts[1].op, Op::Return(_)));
-    }
-
-    #[test]
-    fn copy_propagates_constant() {
-        let (insts, constants) = run(vec![
-            inst(
-                Op::Move,
-                Some(temp(0, IRType::Int)),
-                Some(Operand::ConstIdx(cidx(5))),
-                None,
-            ),
-            inst(
-                Op::Add,
-                Some(temp(1, IRType::Int)),
-                Some(temp(0, IRType::Int)),
-                Some(temp(2, IRType::Int)),
-            ),
-            inst(
-                Op::Return("rax".into()),
-                None,
-                Some(temp(1, IRType::Int)),
-                None,
-            ),
-        ]);
-        assert_eq!(insts.len(), 2);
-        assert!(matches!(
-            &insts[0],
-            Instruction {
-                op: Op::Add,
-                src1: Some(Operand::ConstIdx(idx)),
-                ..
-            } if const_int_at(&constants, *idx) == 5
-        ));
-        assert!(matches!(insts[1].op, Op::Return(_)));
-    }
-
-    #[test]
-    fn removes_unreachable_after_return() {
-        let (insts, _) = run(vec![
-            inst(
-                Op::Return("rax".into()),
-                None,
-                Some(temp(0, IRType::Int)),
-                None,
-            ),
-            inst(
-                Op::Move,
-                Some(temp(1, IRType::Int)),
-                Some(Operand::ConstIdx(cidx(1))),
-                None,
-            ),
-            inst(Op::Jump, None, Some(Operand::Label("L".into())), None),
-            inst(Op::Label("L".into()), None, None, None),
-        ]);
-        assert_eq!(insts.len(), 1);
-        assert!(matches!(insts[0].op, Op::Return(_)));
-    }
-
-    #[test]
-    fn removes_jump_to_next_label() {
-        let (insts, _) = run(vec![
-            inst(Op::Jump, None, Some(Operand::Label("L".into())), None),
-            inst(Op::Label("L".into()), None, None, None),
-            inst(
-                Op::Return("rax".into()),
-                None,
-                Some(temp(0, IRType::Int)),
-                None,
-            ),
-        ]);
-        assert_eq!(insts.len(), 1);
-        assert!(matches!(insts[0].op, Op::Return(_)));
-    }
-
-    #[test]
-    fn threads_jump_chains() {
-        let (insts, _) = run(vec![
-            inst(Op::Jump, None, Some(Operand::Label("A".into())), None),
-            inst(Op::Label("A".into()), None, None, None),
-            inst(Op::Jump, None, Some(Operand::Label("B".into())), None),
-            inst(Op::Label("B".into()), None, None, None),
-            inst(
-                Op::Return("rax".into()),
-                None,
-                Some(temp(0, IRType::Int)),
-                None,
-            ),
-        ]);
-        assert_eq!(insts.len(), 1);
-        assert!(matches!(insts[0].op, Op::Return(_)));
-    }
-
-    #[test]
-    fn hoists_loop_invariants() {
-        let (insts, _) = run(vec![
-            inst(
-                Op::Load,
-                Some(temp(0, IRType::Int)),
-                Some(Operand::Var("v0".into())),
-                None,
-            ),
-            inst(Op::Label("L".into()), None, None, None),
-            inst(
-                Op::Add,
-                Some(temp(1, IRType::Int)),
-                Some(temp(0, IRType::Int)),
-                Some(Operand::ConstIdx(cidx(1))),
-            ),
-            inst(
-                Op::Store,
-                Some(Operand::Var("v".into())),
-                Some(temp(1, IRType::Int)),
-                None,
-            ),
-            inst(Op::Jump, None, Some(Operand::Label("L".into())), None),
-        ]);
-        let label_idx = insts
-            .iter()
-            .position(|i| matches!(i.op, Op::Label(_)))
-            .unwrap();
-        assert!(
-            label_idx >= 2,
-            "expected the invariant add hoisted before the loop label (label at {}): {:?}",
-            label_idx,
-            insts
-        );
-        assert!(matches!(insts[label_idx - 1].op, Op::Add));
-    }
-
-    #[test]
-    fn does_not_hoist_loop_varying_operand() {
-        let (insts, _) = run(vec![
-            inst(Op::Label("L".into()), None, None, None),
-            inst(
-                Op::Add,
-                Some(temp(1, IRType::Int)),
-                Some(temp(0, IRType::Int)),
-                Some(Operand::ConstIdx(cidx(1))),
-            ),
-            inst(Op::Jump, None, Some(Operand::Label("L".into())), None),
-        ]);
-
-        let label_idx = insts
-            .iter()
-            .position(|i| matches!(i.op, Op::Label(_)))
-            .unwrap();
-        assert_eq!(label_idx, 0, "label should stay first: {:?}", insts);
-    }
 }

@@ -232,7 +232,7 @@ impl IRGen {
             FuncDecl(_, _, _, _, _, b, _) => self.expr_has_var(b),
             GlobalVar(..) | ExternVar(..) => false,
             VarDecl(_, _, v, _) | ConstDecl(_, _, v, _, _) => self.expr_has_var(v),
-            Not(e, _) | Neg(e, _) | FNeg(e, _) | AddressOf(e, _) | Deref(e, _) => {
+            Not(e, _) | BNot(e, _) | Neg(e, _) | FNeg(e, _) | AddressOf(e, _) | Deref(e, _) => {
                 self.expr_has_var(e)
             }
             Add(l, r, _)
@@ -259,6 +259,8 @@ impl IRGen {
             | Xor(l, r, _)
             | LAnd(l, r, _)
             | LOr(l, r, _)
+            | Shl(l, r, _)
+            | Shr(l, r, _)
             | StrCat(l, r, _)
             | Index(l, r, _)
             | DerefAssign(l, r, _) => self.expr_has_var(l) || self.expr_has_var(r),
@@ -272,7 +274,17 @@ impl IRGen {
             }
             MemberAccess(o, _, _) => self.expr_has_var(o),
             Inc(..) | Dec(..) => false,
-            VarAssign(_, v, _) | AddAssign(_, v, _) | SubAssign(_, v, _) => self.expr_has_var(v),
+            VarAssign(_, v, _)
+            | AddAssign(_, v, _)
+            | SubAssign(_, v, _)
+            | MulAssign(_, v, _)
+            | DivAssign(_, v, _)
+            | ModAssign(_, v, _)
+            | AndAssign(_, v, _)
+            | OrAssign(_, v, _)
+            | XorAssign(_, v, _)
+            | ShlAssign(_, v, _)
+            | ShrAssign(_, v, _) => self.expr_has_var(v),
             FString(parts, _) => parts.iter().any(|p| self.expr_has_var(p)),
             Cast(inner, _, _) => self.expr_has_var(inner),
         }
@@ -366,9 +378,13 @@ fn collect_var_refs(expr: &Expr, out: &mut HashSet<String>) {
                 collect_var_refs(x, out);
             }
         }
-        Return(v, _) | Not(v, _) | Neg(v, _) | FNeg(v, _) | AddressOf(v, _) | Deref(v, _) => {
-            collect_var_refs(v, out)
-        }
+        Return(v, _)
+        | Not(v, _)
+        | BNot(v, _)
+        | Neg(v, _)
+        | FNeg(v, _)
+        | AddressOf(v, _)
+        | Deref(v, _) => collect_var_refs(v, out),
         Lambda(_, b, _, _) => collect_var_refs(b, out),
         VarDecl(_, _, v, _) | ConstDecl(_, _, v, _, _) => collect_var_refs(v, out),
         Add(l, r, _)
@@ -395,6 +411,8 @@ fn collect_var_refs(expr: &Expr, out: &mut HashSet<String>) {
         | Xor(l, r, _)
         | LAnd(l, r, _)
         | LOr(l, r, _)
+        | Shl(l, r, _)
+        | Shr(l, r, _)
         | StrCat(l, r, _)
         | Index(l, r, _)
         | DerefAssign(l, r, _) => {
@@ -418,7 +436,17 @@ fn collect_var_refs(expr: &Expr, out: &mut HashSet<String>) {
         }
         MemberAccess(o, _, _) => collect_var_refs(o, out),
         Inc(..) | Dec(..) => {}
-        VarAssign(_, v, _) | AddAssign(_, v, _) | SubAssign(_, v, _) => collect_var_refs(v, out),
+        VarAssign(_, v, _)
+        | AddAssign(_, v, _)
+        | SubAssign(_, v, _)
+        | MulAssign(_, v, _)
+        | DivAssign(_, v, _)
+        | ModAssign(_, v, _)
+        | AndAssign(_, v, _)
+        | OrAssign(_, v, _)
+        | XorAssign(_, v, _)
+        | ShlAssign(_, v, _)
+        | ShrAssign(_, v, _) => collect_var_refs(v, out),
         FString(parts, _) => {
             for p in parts {
                 collect_var_refs(p, out);

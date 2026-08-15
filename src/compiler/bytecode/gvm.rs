@@ -349,6 +349,32 @@ impl GVM {
                         _ => panic!("TypeError: Wrong types for LOG_XOR operation"),
                     });
                 }
+                Op::SHL => {
+                    let right = self.pop();
+                    let left = self.pop();
+                    self.stack.push(match (left, right) {
+                        (Value::Int(l), Value::Int(r)) => Value::Int(l.wrapping_shl(r as u32)),
+                        (Value::Void, _) | (_, Value::Void) => Value::Void,
+                        _ => panic!("TypeError: Wrong types for SHL operation"),
+                    });
+                }
+                Op::SHR => {
+                    let right = self.pop();
+                    let left = self.pop();
+                    self.stack.push(match (left, right) {
+                        (Value::Int(l), Value::Int(r)) => Value::Int(l.wrapping_shr(r as u32)),
+                        (Value::Void, _) | (_, Value::Void) => Value::Void,
+                        _ => panic!("TypeError: Wrong types for SHR operation"),
+                    });
+                }
+                Op::BNOT => {
+                    let v = self.pop();
+                    self.stack.push(match v {
+                        Value::Int(i) => Value::Int(!i),
+                        Value::Void => Value::Void,
+                        _ => panic!("TypeError: Wrong types for BNOT operation"),
+                    });
+                }
                 Op::JUMP => {
                     let high = self.read() as usize;
                     let low = self.read() as usize;

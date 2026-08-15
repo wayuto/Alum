@@ -222,6 +222,18 @@ impl Assembler {
                 self.emit_rex(section, true, false, false, reg.rex_b());
                 self.emit_slice(section, &[0xf7, self.modrm(3, 3, reg.reg_id() & 7)]);
             }
+            Not(reg) => {
+                self.emit_rex(section, true, false, false, reg.rex_b());
+                self.emit_slice(section, &[0xf7, self.modrm(3, 2, reg.reg_id() & 7)]);
+            }
+            Shl(reg) => {
+                self.emit_rex(section, true, false, false, reg.rex_b());
+                self.emit_slice(section, &[0xd3, self.modrm(3, 4, reg.reg_id() & 7)]);
+            }
+            Sar(reg) => {
+                self.emit_rex(section, true, false, false, reg.rex_b());
+                self.emit_slice(section, &[0xd3, self.modrm(3, 7, reg.reg_id() & 7)]);
+            }
             Inc(reg) => {
                 self.emit_rex(section, true, false, false, reg.rex_b());
                 self.emit_slice(section, &[0xff, self.modrm(3, 0, reg.reg_id() & 7)]);

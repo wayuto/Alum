@@ -176,7 +176,12 @@ impl<'a> Lexer<'a> {
             }
             '*' => {
                 self.bump();
-                Token::STAR
+                if self.current == Some('=') {
+                    self.bump();
+                    Token::STAREQ
+                } else {
+                    Token::STAR
+                }
             }
             '/' => {
                 self.bump();
@@ -186,11 +191,21 @@ impl<'a> Lexer<'a> {
                     }
                     return self.next_tok();
                 }
-                Token::SLASH
+                if self.current == Some('=') {
+                    self.bump();
+                    Token::SLASHEQ
+                } else {
+                    Token::SLASH
+                }
             }
             '%' => {
                 self.bump();
-                Token::PERCENT
+                if self.current == Some('=') {
+                    self.bump();
+                    Token::PERCENTEQ
+                } else {
+                    Token::PERCENT
+                }
             }
             '.' => {
                 self.bump();
@@ -245,7 +260,15 @@ impl<'a> Lexer<'a> {
             }
             '>' => {
                 self.bump();
-                if self.current == Some('=') {
+                if self.current == Some('>') {
+                    self.bump();
+                    if self.current == Some('=') {
+                        self.bump();
+                        Token::SHREQ
+                    } else {
+                        Token::SHR
+                    }
+                } else if self.current == Some('=') {
                     self.bump();
                     Token::GE
                 } else {
@@ -254,7 +277,15 @@ impl<'a> Lexer<'a> {
             }
             '<' => {
                 self.bump();
-                if self.current == Some('=') {
+                if self.current == Some('<') {
+                    self.bump();
+                    if self.current == Some('=') {
+                        self.bump();
+                        Token::SHLEQ
+                    } else {
+                        Token::SHL
+                    }
+                } else if self.current == Some('=') {
                     self.bump();
                     Token::LE
                 } else {
@@ -266,6 +297,9 @@ impl<'a> Lexer<'a> {
                 if self.current == Some('&') {
                     self.bump();
                     Token::AND
+                } else if self.current == Some('=') {
+                    self.bump();
+                    Token::ANDEQ
                 } else {
                     Token::LAND
                 }
@@ -275,13 +309,25 @@ impl<'a> Lexer<'a> {
                 if self.current == Some('|') {
                     self.bump();
                     Token::OR
+                } else if self.current == Some('=') {
+                    self.bump();
+                    Token::OREQ
                 } else {
                     Token::LOR
                 }
             }
             '^' => {
                 self.bump();
-                Token::XOR
+                if self.current == Some('=') {
+                    self.bump();
+                    Token::XOREQ
+                } else {
+                    Token::XOR
+                }
+            }
+            '~' => {
+                self.bump();
+                Token::BNOT
             }
             ':' => {
                 self.bump();
