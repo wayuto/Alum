@@ -1,4 +1,6 @@
 use super::ir::{IRConst, IRProgram, Instruction, Op, Operand};
+#[cfg(test)]
+use super::ir::{IRFunction, IRType};
 use ordered_float::OrderedFloat;
 use std::collections::{HashMap, HashSet};
 
@@ -722,7 +724,6 @@ fn hoist_loop(insts: &mut Vec<Instruction>, header: usize, back: usize) -> bool 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::irgen::ir::{IRFunction, IRType};
 
     fn inst(
         op: Op,

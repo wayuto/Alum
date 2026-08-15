@@ -1,6 +1,7 @@
 use super::context::Context;
 use super::ir::{IRConst, IRType, Instruction, Op, Operand};
 use crate::compiler::{
+    Span,
     codegen::CodeGenError,
     irgen::IRGen,
     parser::{Expr, Primitive, Type},
@@ -1078,7 +1079,7 @@ impl IRGen {
                 } else {
                     Err(CodeGenError::UndefinedVariable {
                         name: name.clone(),
-                        span: crate::compiler::Span::new(0, 0),
+                        span: Span::new(0, 0),
                     })
                 }
             }
@@ -1576,7 +1577,7 @@ impl IRGen {
                 } else {
                     Err(CodeGenError::UndefinedVariable {
                         name: name.clone(),
-                        span: crate::compiler::Span::new(0, 0),
+                        span: Span::new(0, 0),
                     })
                 }
             }

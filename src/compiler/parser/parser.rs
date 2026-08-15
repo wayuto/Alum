@@ -1659,11 +1659,11 @@ impl<'a> Parser<'a> {
 
         let base_type = match first_token {
             Token::TYPE(t) => match t.as_str() {
-                "int" => Type::Primitive(crate::compiler::parser::Primitive::Int),
-                "float" => Type::Primitive(crate::compiler::parser::Primitive::Float),
-                "bool" => Type::Primitive(crate::compiler::parser::Primitive::Boolean),
-                "string" => Type::Primitive(crate::compiler::parser::Primitive::String),
-                "void" => Type::Primitive(crate::compiler::parser::Primitive::Void),
+                "int" => Type::Primitive(Primitive::Int),
+                "float" => Type::Primitive(Primitive::Float),
+                "bool" => Type::Primitive(Primitive::Boolean),
+                "string" => Type::Primitive(Primitive::String),
+                "void" => Type::Primitive(Primitive::Void),
                 name => {
                     let mut args = Vec::new();
                     if matches!(self.peek(), Some(Ok((Token::LT, _)))) {
@@ -1674,7 +1674,7 @@ impl<'a> Parser<'a> {
                     if self.unions.contains_key(name) {
                         Type::Union(name.to_string(), args)
                     } else if self.enums.contains_key(name) {
-                        Type::Primitive(crate::compiler::parser::Primitive::Int)
+                        Type::Primitive(Primitive::Int)
                     } else {
                         Type::Struct(name.to_string(), args)
                     }
@@ -1695,7 +1695,7 @@ impl<'a> Parser<'a> {
                     if self.unions.contains_key(&s) {
                         Type::Union(s, args)
                     } else if self.enums.contains_key(&s) {
-                        Type::Primitive(crate::compiler::parser::Primitive::Int)
+                        Type::Primitive(Primitive::Int)
                     } else {
                         Type::Struct(s, args)
                     }

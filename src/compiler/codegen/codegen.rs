@@ -1,7 +1,7 @@
 use super::error::CodeGenError;
 use crate::compiler::{
     codegen::asm::*,
-    irgen::ir::{IRProgram, Operand as IROperand},
+    irgen::ir::{IRConst, IRProgram, Operand as IROperand},
 };
 use ordered_float::OrderedFloat;
 use std::{
@@ -203,10 +203,10 @@ impl AsmCodeGen {
             }
             self.data_asms.push(Asm::Label(gv.name.clone()));
             match &gv.value {
-                Some(crate::compiler::irgen::ir::IRConst::Int(v)) => {
+                Some(IRConst::Int(v)) => {
                     self.data_asms.push(Asm::Dq(vec![*v as u64]));
                 }
-                Some(crate::compiler::irgen::ir::IRConst::Float(f)) => {
+                Some(IRConst::Float(f)) => {
                     self.data_asms.push(Asm::Dq(vec![f.into_inner().to_bits()]));
                 }
                 _ => {

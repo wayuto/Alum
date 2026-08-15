@@ -1,10 +1,9 @@
-use std::collections::HashMap;
-
 use crate::compiler::{
     Span,
     bytecode::{Op, Value},
     parser::{Expr, Primitive, Program, Type},
 };
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct Bytecode {
@@ -315,15 +314,9 @@ impl Compiler {
             Expr::Cast(inner, target_ty, _) => {
                 self.compile_expr(inner);
                 match target_ty {
-                    crate::compiler::parser::Type::Primitive(
-                        crate::compiler::parser::Primitive::Float,
-                    ) => self.emit(Op::I2F, &[]),
-                    crate::compiler::parser::Type::Primitive(
-                        crate::compiler::parser::Primitive::Int,
-                    ) => self.emit(Op::F2I, &[]),
-                    crate::compiler::parser::Type::Primitive(
-                        crate::compiler::parser::Primitive::Boolean,
-                    ) => {}
+                    Type::Primitive(Primitive::Float) => self.emit(Op::I2F, &[]),
+                    Type::Primitive(Primitive::Int) => self.emit(Op::F2I, &[]),
+                    Type::Primitive(Primitive::Boolean) => {}
                     _ => {}
                 }
             }

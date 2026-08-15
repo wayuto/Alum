@@ -8,7 +8,10 @@ mod regalloc;
 
 pub use error::CodeGenError;
 
-use crate::compiler::{irgen::IRGen, parser::Program};
+use crate::compiler::{
+    irgen::{IRGen, optimizer},
+    parser::Program,
+};
 
 pub struct CodeGen {
     ast: Program,
@@ -25,7 +28,7 @@ impl CodeGen {
         let mut ir_program = ir_gen.compile(self.ast)?;
 
         if std::env::var("ALC_NO_OPT").is_err() {
-            crate::compiler::irgen::optimizer::optimize(&mut ir_program);
+            optimizer::optimize(&mut ir_program);
         }
 
         let mut asm_gen = codegen::AsmCodeGen::new(ir_program);

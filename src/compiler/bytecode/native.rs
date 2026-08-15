@@ -1,3 +1,4 @@
+use crate::compiler::bytecode::Value;
 use std::collections::HashMap;
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
 use std::sync::OnceLock;
@@ -147,12 +148,7 @@ fn ffi_type_of(kind: NativeKind, f: &Ffi) -> *const c_void {
     }
 }
 
-pub fn call_native(
-    entry: &NativeEntry,
-    args: &[crate::compiler::bytecode::Value],
-) -> Option<crate::compiler::bytecode::Value> {
-    use crate::compiler::bytecode::Value;
-
+pub fn call_native(entry: &NativeEntry, args: &[Value]) -> Option<Value> {
     let ffi = ffi()?;
     let params = entry.sig.params;
     if params.len() != args.len() {

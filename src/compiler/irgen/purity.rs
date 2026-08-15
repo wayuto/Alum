@@ -1,5 +1,8 @@
-use crate::compiler::codegen::CodeGenError;
-use crate::compiler::parser::{Expr, Type};
+use crate::compiler::{
+    Span,
+    codegen::CodeGenError,
+    parser::{Expr, Type},
+};
 use std::collections::{HashMap, HashSet};
 
 const LAMBDA_MARKER: &str = "\u{03bb}";
@@ -223,7 +226,7 @@ fn type_has_pointer(ty: &Type) -> bool {
     }
 }
 
-fn op_err(fn_name: &str, what: &str, _span: crate::compiler::Span) -> CodeGenError {
+fn op_err(fn_name: &str, what: &str, _span: Span) -> CodeGenError {
     CodeGenError::NameError {
         message: format!("pure function '{}' may not {}", fn_name, what),
     }

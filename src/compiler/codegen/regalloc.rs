@@ -1,7 +1,6 @@
-use std::collections::{HashMap, HashSet};
-
 use super::asm::Reg;
 use crate::compiler::irgen::ir::{IRConst, IRFunction, IRType, Instruction, Op, Operand};
+use std::collections::{HashMap, HashSet};
 
 fn collect_float_vars(instructions: &[Instruction]) -> HashSet<String> {
     let mut vars = HashSet::new();

@@ -1,3 +1,4 @@
+use crate::compiler::Span;
 use std::fmt;
 
 #[derive(Debug, Clone)]
@@ -27,14 +28,12 @@ pub enum PreprocessorError {
 impl std::error::Error for PreprocessorError {}
 
 impl PreprocessorError {
-    pub fn span(&self) -> crate::compiler::Span {
+    pub fn span(&self) -> Span {
         match self {
             PreprocessorError::ImportError { row, col, .. }
             | PreprocessorError::IoError { row, col, .. }
             | PreprocessorError::ConditionError { row, col, .. }
-            | PreprocessorError::MacroError { row, col, .. } => {
-                crate::compiler::Span::new(*row, *col)
-            }
+            | PreprocessorError::MacroError { row, col, .. } => Span::new(*row, *col),
         }
     }
 }

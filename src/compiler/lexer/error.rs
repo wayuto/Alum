@@ -1,3 +1,4 @@
+use crate::compiler::Span;
 use std::fmt::{Display, Formatter, Result};
 
 #[derive(Debug, Clone)]
@@ -50,11 +51,11 @@ impl Display for LexerError {
 impl std::error::Error for LexerError {}
 
 impl LexerError {
-    pub fn span(&self) -> crate::compiler::Span {
+    pub fn span(&self) -> Span {
         match self {
             LexerError::InvalidNumber { line, col }
             | LexerError::UnexpectedChar { line, col, .. }
-            | LexerError::UnclosedQuote { line, col } => crate::compiler::Span::new(*line, *col),
+            | LexerError::UnclosedQuote { line, col } => Span::new(*line, *col),
         }
     }
 }

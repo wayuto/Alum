@@ -1,5 +1,6 @@
 use super::error::CheckerError;
 use crate::compiler::{
+    Span,
     parser::{Expr, Primitive, Program, Type},
     visitor::TypeChecker,
 };
@@ -267,7 +268,7 @@ impl TypeChecker {
         target_ty: &Type,
         branches: &[(Expr, Expr)],
         has_default: bool,
-        span: crate::compiler::Span,
+        span: Span,
     ) -> Result<(), CheckerError> {
         if has_default {
             return Ok(());

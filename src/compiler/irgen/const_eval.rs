@@ -1,7 +1,7 @@
 use super::ir::{IRConst, IRType, Operand};
 use super::vm_safety::VmSafety;
 use crate::compiler::{
-    bytecode::NativeSig,
+    bytecode::{Compiler, GVM, NativeKind, NativeSig, Value},
     irgen::IRGen,
     parser::{Expr, Primitive, Program, Type},
 };
@@ -80,8 +80,6 @@ impl IRGen {
     }
 
     pub(super) fn eval_const_vm(&mut self, expr: &Expr) -> Option<(IRConst, IRType)> {
-        use crate::compiler::bytecode::{Compiler, GVM};
-
         if self.expr_has_var(expr) {
             return None;
         }
@@ -159,41 +157,35 @@ impl IRGen {
         .flatten()?;
 
         match result {
-            crate::compiler::bytecode::Value::Int(i) => Some((IRConst::Int(i), IRType::Int)),
-            crate::compiler::bytecode::Value::Float(f) => {
-                Some((IRConst::Float(OrderedFloat(f)), IRType::Float))
-            }
-            crate::compiler::bytecode::Value::Str(s) => Some((IRConst::Str(s), IRType::String)),
-            crate::compiler::bytecode::Value::Bool(b) => {
-                Some((IRConst::Int(if b { 1 } else { 0 }), IRType::Bool))
-            }
-            crate::compiler::bytecode::Value::Array(elems) => {
+            Value::Int(i) => Some((IRConst::Int(i), IRType::Int)),
+            Value::Float(f) => Some((IRConst::Float(OrderedFloat(f)), IRType::Float)),
+            Value::Str(s) => Some((IRConst::Str(s), IRType::String)),
+            Value::Bool(b) => Some((IRConst::Int(if b { 1 } else { 0 }), IRType::Bool)),
+            Value::Array(elems) => {
                 let mut operands = Vec::with_capacity(elems.len());
                 for e in elems {
                     operands.push(self.vm_value_to_const(&e)?);
                 }
                 Some((IRConst::Array(operands), IRType::Array))
             }
-            crate::compiler::bytecode::Value::Void => None,
-            crate::compiler::bytecode::Value::Fn(..) => None,
+            Value::Void => None,
+            Value::Fn(..) => None,
         }
     }
 
-    fn vm_value_to_const(&mut self, value: &crate::compiler::bytecode::Value) -> Option<Operand> {
+    fn vm_value_to_const(&mut self, value: &Value) -> Option<Operand> {
         match value {
-            crate::compiler::bytecode::Value::Int(i) => {
-                Some(Operand::ConstIdx(self.get_const_index(IRConst::Int(*i))))
-            }
-            crate::compiler::bytecode::Value::Float(f) => Some(Operand::ConstIdx(
+            Value::Int(i) => Some(Operand::ConstIdx(self.get_const_index(IRConst::Int(*i)))),
+            Value::Float(f) => Some(Operand::ConstIdx(
                 self.get_const_index(IRConst::Float(OrderedFloat(*f))),
             )),
-            crate::compiler::bytecode::Value::Str(s) => Some(Operand::ConstIdx(
+            Value::Str(s) => Some(Operand::ConstIdx(
                 self.get_const_index(IRConst::Str(s.clone())),
             )),
-            crate::compiler::bytecode::Value::Bool(b) => Some(Operand::ConstIdx(
+            Value::Bool(b) => Some(Operand::ConstIdx(
                 self.get_const_index(IRConst::Int(if *b { 1 } else { 0 })),
             )),
-            crate::compiler::bytecode::Value::Array(elems) => {
+            Value::Array(elems) => {
                 let mut operands = Vec::with_capacity(elems.len());
                 for e in elems {
                     operands.push(self.vm_value_to_const(e)?);
@@ -202,8 +194,8 @@ impl IRGen {
                     self.get_const_index(IRConst::Array(operands)),
                 ))
             }
-            crate::compiler::bytecode::Value::Void => None,
-            crate::compiler::bytecode::Value::Fn(..) => None,
+            Value::Void => None,
+            Value::Fn(..) => None,
         }
     }
 
@@ -437,7 +429,6 @@ fn collect_var_refs(expr: &Expr, out: &mut HashSet<String>) {
 }
 
 pub(super) fn native_sig(params: &[(String, Type)], ret_type: &Type) -> Option<NativeSig> {
-    use crate::compiler::bytecode::NativeKind;
     let f = |ty: &Type| -> Option<NativeKind> {
         match ty {
             Type::Primitive(Primitive::Int) => Some(NativeKind::Int),

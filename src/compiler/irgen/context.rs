@@ -1,8 +1,8 @@
 use super::ir::{IRConst, IRType, Instruction, Operand};
 use crate::compiler::{
+    Span,
     codegen::CodeGenError,
-    parser::Type,
-    parser::{Primitive, Type as HighType},
+    parser::{Primitive, Type, Type as HighType},
 };
 use std::collections::{HashMap, HashSet};
 
@@ -22,7 +22,7 @@ pub(super) struct Context {
     pub loop_end_labels: Vec<String>,
     pub loop_inc_labels: Vec<String>,
     pub loop_scope_depths: Vec<usize>,
-    pub var_types: HashMap<String, crate::compiler::parser::Type>,
+    pub var_types: HashMap<String, Type>,
     pub array_lengths: HashMap<String, usize>,
     pub func_name: String,
     pub borrowed: HashSet<String>,
@@ -93,7 +93,7 @@ impl Context {
         }
         Err(CodeGenError::UndefinedVariable {
             name: name.to_string(),
-            span: crate::compiler::Span::new(0, 0),
+            span: Span::new(0, 0),
         })
     }
 
@@ -165,14 +165,14 @@ impl Context {
         &mut self,
         name: String,
         ir_type: IRType,
-        htype: crate::compiler::parser::Type,
+        htype: Type,
     ) -> Result<(), CodeGenError> {
         self.declare_var(name.clone(), ir_type)?;
         self.var_types.insert(name, htype);
         Ok(())
     }
 
-    pub fn get_var_high_type(&self, name: &str) -> Option<&crate::compiler::parser::Type> {
+    pub fn get_var_high_type(&self, name: &str) -> Option<&Type> {
         self.var_types.get(name)
     }
 }

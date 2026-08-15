@@ -3,7 +3,7 @@ use super::ir::{IRConst, IRType, Instruction, Op, Operand};
 use crate::compiler::{
     codegen::CodeGenError,
     irgen::IRGen,
-    parser::{Expr, Type},
+    parser::{Expr, Primitive, Type},
 };
 
 impl IRGen {
@@ -47,7 +47,7 @@ impl IRGen {
     ) -> Result<Operand, CodeGenError> {
         let len_op = self.compile_expr(*len, ctx)?;
         let elem_size = match &typ {
-            Type::Primitive(crate::compiler::parser::Primitive::Boolean) => 1i64,
+            Type::Primitive(Primitive::Boolean) => 1i64,
             _ => 8i64,
         };
         let ptr_tmp = ctx.new_tmp(IRType::Int);

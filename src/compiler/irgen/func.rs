@@ -1,6 +1,7 @@
 use super::context::{Context, Symbol};
 use super::ir::{IRFunction, IRType, Instruction, Op, Operand};
 use crate::compiler::{
+    Span,
     codegen::CodeGenError,
     irgen::IRGen,
     parser::{Expr, FuncAttrs, Type},
@@ -111,7 +112,7 @@ impl IRGen {
         }
         Err(CodeGenError::UndefinedFunction {
             name: name.to_string(),
-            span: crate::compiler::Span::new(0, 0),
+            span: Span::new(0, 0),
         })
     }
 
@@ -139,7 +140,7 @@ impl IRGen {
             .get(name)
             .ok_or_else(|| CodeGenError::UndefinedFunction {
                 name: name.to_string(),
-                span: crate::compiler::Span::new(0, 0),
+                span: Span::new(0, 0),
             })?
             .clone();
 

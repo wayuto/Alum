@@ -1,7 +1,6 @@
 use super::context::Context;
-use crate::compiler::irgen::ir::IRType;
 use crate::compiler::{
-    irgen::IRGen,
+    irgen::{IRGen, ir::IRType},
     parser::{Expr, Primitive, Type},
 };
 

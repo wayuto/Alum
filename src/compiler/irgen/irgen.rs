@@ -1,6 +1,7 @@
 use super::context::Context;
 use super::ir::{IRConst, IRProgram};
 use crate::compiler::{
+    Span,
     codegen::CodeGenError,
     irgen::IRGen,
     parser::{Expr, Primitive, Program, Type},
@@ -56,7 +57,7 @@ impl IRGen {
                             "_global".to_string(),
                             Type::Primitive(Primitive::Int),
                             Box::new(expr),
-                            crate::compiler::Span::new(0, 0),
+                            Span::new(0, 0),
                         ),
                         &mut ctx,
                     )?;
