@@ -27,8 +27,6 @@ impl CompilerError {
         ce
     }
 
-    /// Builds a report from several errors of the same stage, sharing one
-    /// `SourceMap` for line resolution.
     pub fn report<E: Into<CompilerError>>(
         source_map: SourceMap,
         errors: impl IntoIterator<Item = E>,
@@ -142,7 +140,6 @@ impl From<CodeGenError> for CompilerError {
 }
 
 impl CompilerError {
-    /// Returns the span of the first error, if it has one.
     pub fn span(&self) -> Option<Span> {
         Self::span_of(self.errors.first()?)
     }

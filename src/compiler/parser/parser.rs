@@ -116,10 +116,6 @@ impl<'a> Parser<'a> {
         Ok(Program { body })
     }
 
-    /// Like [`Parser::parse`], but recovers from errors and returns all of
-    /// them instead of stopping at the first. On an error, the token stream is
-    /// synchronized to the next statement boundary (a `;` or a `}` at brace
-    /// depth 0), so parsing resumes cleanly at the next top-level item.
     pub fn parse_collect(&mut self) -> (Program, Vec<ParserError>) {
         let mut body = Vec::new();
         let mut errors = Vec::new();
@@ -143,10 +139,6 @@ impl<'a> Parser<'a> {
         (Program { body }, errors)
     }
 
-    /// Skips tokens until a likely restart point for the next statement: a `;`
-    /// at brace depth 0, a `}` that closes the enclosing block, or a top-level
-    /// declaration keyword (these cannot appear inside a block, so they are
-    /// safe to restart from). Used for error recovery after a failed statement.
     fn synchronize(&mut self) {
         let mut depth: i32 = 0;
         loop {
