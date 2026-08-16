@@ -1,9 +1,9 @@
-struct Timespec {
+struct(pub) Timespec {
     sec: int,
     nsec: int
 }
 
-struct Timeval {
+struct(pub) Timeval {
     sec: int,
     usec: int
 }

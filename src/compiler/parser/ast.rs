@@ -259,6 +259,7 @@ pub struct FuncAttrs {
     pub is_pub: bool,
     pub is_external: bool,
     pub is_pure: bool,
+    pub link_name: Option<String>,
 }
 
 #[derive(Debug, Clone)]

@@ -388,7 +388,12 @@ impl AsmCodeGen {
                         if self.internals.contains(name) {
                             self.push_text(Asm::Call(Operand::Label(name.clone())));
                         } else {
-                            self.push_text(Asm::Call(Operand::PLT(name.clone())));
+                            let sym = self
+                                .extern_link
+                                .get(name)
+                                .cloned()
+                                .unwrap_or_else(|| name.clone());
+                            self.push_text(Asm::Call(Operand::PLT(sym)));
                         }
                     }
                     _ => {

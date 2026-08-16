@@ -29,6 +29,7 @@ impl IRGen {
             instructions: Vec::new(),
             is_pub,
             is_external: attrs.is_external,
+            link_name: attrs.link_name,
         });
         Ok(())
     }

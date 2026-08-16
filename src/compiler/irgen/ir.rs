@@ -129,6 +129,8 @@ pub struct IRFunction {
     pub ret_type: IRType,
     pub is_pub: bool,
     pub is_external: bool,
+
+    pub link_name: Option<String>,
 }
 
 #[derive(Debug, Clone)]

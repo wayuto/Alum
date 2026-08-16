@@ -43,7 +43,7 @@ fun(pub) itoa(n: int): string {
     return buf
 }
 
-fun(pure) atoi(s: string): int {
+fun(pub, pure) atoi(s: string): int {
     var p: *void = s
     var i: int = 0
     while true {

@@ -12,7 +12,10 @@ pub enum ParserError {
         span: Span,
     },
     LexerError(LexerError),
-    ModuleError { message: String, span: Option<Span> },
+    ModuleError {
+        message: String,
+        span: Option<Span>,
+    },
 }
 
 impl Display for ParserError {

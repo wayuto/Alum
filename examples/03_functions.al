@@ -1,4 +1,4 @@
-using io::println
+using io::{print, println}
 
 // Functions Example
 // Demonstrates function definitions and calls

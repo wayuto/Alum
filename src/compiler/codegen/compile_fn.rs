@@ -62,7 +62,12 @@ impl AsmCodeGen {
     pub(super) fn compile_fn(&mut self, func: IRFunction) -> Result<(), CodeGenError> {
         if func.is_external {
             if !self.internals.contains(&func.name) {
-                self.push_text(Asm::Extern(func.name.clone()));
+                let sym = self
+                    .extern_link
+                    .get(&func.name)
+                    .cloned()
+                    .unwrap_or_else(|| func.name.clone());
+                self.push_text(Asm::Extern(sym));
             }
             return Ok(());
         }

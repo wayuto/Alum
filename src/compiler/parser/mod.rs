@@ -29,7 +29,9 @@ pub struct Parser<'a> {
     base_path: String,
     alias_map: HashMap<String, String>,
     from_alias: HashMap<String, (String, DeclKind)>,
-    own_decls: Vec<(String, DeclKind)>,
+    own_decls: Vec<(String, DeclKind, bool)>,
+
+    decl_pub: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -52,6 +54,7 @@ impl<'a> Parser<'a> {
         let mut out: Vec<(String, DeclKind)> = lm
             .names
             .keys()
+            .filter(|n| lm.pub_names.contains(*n))
             .map(|n| (n.clone(), lm.kinds.get(n).copied().unwrap_or(DeclKind::Fn)))
             .collect();
         out.sort_by(|a, b| a.0.cmp(&b.0));

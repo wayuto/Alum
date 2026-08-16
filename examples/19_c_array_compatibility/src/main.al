@@ -1,6 +1,7 @@
 import io
 using io::println
 import array_compat
+using array_compat::{c_array_sum, c_array_max, c_array_reverse}
 
 // C Array Compatibility Example
 // Alum arrays are now fully compatible with C arrays

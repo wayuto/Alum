@@ -110,6 +110,7 @@ impl<'a> Parser<'a> {
             alias_map: HashMap::new(),
             from_alias: HashMap::new(),
             own_decls: Vec::new(),
+            decl_pub: false,
         }
     }
 
@@ -135,6 +136,7 @@ impl<'a> Parser<'a> {
             alias_map: HashMap::new(),
             from_alias: HashMap::new(),
             own_decls: Vec::new(),
+            decl_pub: false,
         }
     }
 
@@ -238,22 +240,42 @@ impl<'a> Parser<'a> {
 
     fn record_decl(&mut self, expr: &Expr) {
         match expr {
-            Expr::FuncDecl(name, attrs, ..) => self.own_decls.push((
-                name.clone(),
-                if attrs.is_external {
+            Expr::FuncDecl(name, attrs, ..) => {
+                let kind = if attrs.is_external {
                     DeclKind::ExternFn
                 } else {
                     DeclKind::Fn
-                },
-            )),
-            Expr::Struct(name, ..) => self.own_decls.push((name.clone(), DeclKind::Struct)),
-            Expr::Union(name, ..) => self.own_decls.push((name.clone(), DeclKind::Union)),
-            Expr::Enum(name, ..) => self.own_decls.push((name.clone(), DeclKind::Enum)),
-            Expr::ConstDecl(name, ..) => self.own_decls.push((name.clone(), DeclKind::Const)),
-            Expr::GlobalVar(name, ..) => self.own_decls.push((name.clone(), DeclKind::GlobalVar)),
-            Expr::ExternVar(name, ..) => self.own_decls.push((name.clone(), DeclKind::ExternVar)),
+                };
+                let is_pub = attrs.is_pub || attrs.is_external;
+                self.own_decls.push((name.clone(), kind, is_pub));
+            }
+            Expr::Struct(name, ..) => {
+                self.own_decls
+                    .push((name.clone(), DeclKind::Struct, self.decl_pub))
+            }
+            Expr::Union(name, ..) => {
+                self.own_decls
+                    .push((name.clone(), DeclKind::Union, self.decl_pub))
+            }
+            Expr::Enum(name, ..) => {
+                self.own_decls
+                    .push((name.clone(), DeclKind::Enum, self.decl_pub))
+            }
+            Expr::ConstDecl(name, _, _, is_pub, _) => {
+                self.own_decls
+                    .push((name.clone(), DeclKind::Const, *is_pub))
+            }
+            Expr::GlobalVar(name, is_pub, ..) => {
+                self.own_decls
+                    .push((name.clone(), DeclKind::GlobalVar, *is_pub))
+            }
+            Expr::ExternVar(name, ..) => {
+                self.own_decls
+                    .push((name.clone(), DeclKind::ExternVar, true))
+            }
             _ => {}
         }
+        self.decl_pub = false;
     }
 
     fn parse_ident(&mut self) -> Result<(String, Span), ParserError> {
@@ -285,6 +307,26 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
+    fn insert_from_alias(
+        &mut self,
+        key: String,
+        target: String,
+        kind: DeclKind,
+    ) -> Result<(), ParserError> {
+        if let Some((prev, _)) = self.from_alias.get(&key) {
+            if prev != &target {
+                return Err(ParserError::ModuleError {
+                    message: format!(
+                        "conflicting import: '{key}' is already imported (points to '{prev}')"
+                    ),
+                    span: Some(self.last_span),
+                });
+            }
+        }
+        self.from_alias.insert(key, (target, kind));
+        Ok(())
+    }
+
     fn parse_using_stmt(&mut self, body: &mut Vec<Expr>) -> Result<(), ParserError> {
         self.next()?;
         let (mod_name, _) = self.parse_ident()?;
@@ -306,9 +348,9 @@ impl<'a> Parser<'a> {
                 if matches!(self.peek(), Some(Ok((Token::AS, _)))) {
                     self.next()?;
                     let (a, _) = self.parse_ident()?;
-                    self.from_alias.insert(a, (target, kind));
+                    self.insert_from_alias(a, target, kind)?;
                 } else {
-                    self.from_alias.insert(name, (target, kind));
+                    self.insert_from_alias(name, target, kind)?;
                 }
                 match self.peek() {
                     Some(Ok((Token::COMMA, _))) => {
@@ -337,9 +379,9 @@ impl<'a> Parser<'a> {
             if matches!(self.peek(), Some(Ok((Token::AS, _)))) {
                 self.next()?;
                 let (a, _) = self.parse_ident()?;
-                self.from_alias.insert(a, (target, kind));
+                self.insert_from_alias(a, target, kind)?;
             } else {
-                self.from_alias.insert(name, (target, kind));
+                self.insert_from_alias(name, target, kind)?;
             }
         }
         Ok(())
@@ -426,12 +468,18 @@ impl<'a> Parser<'a> {
             self.typedefs.insert(k, v.clone());
         }
 
-        let kinds = own_decls.iter().map(|(n, k)| (n.clone(), *k)).collect();
+        let kinds = own_decls.iter().map(|(n, k, _)| (n.clone(), *k)).collect();
+        let pub_names = own_decls
+            .iter()
+            .filter(|(_, _, p)| *p)
+            .map(|(n, _, _)| n.clone())
+            .collect();
         self.modules.borrow_mut().loaded.insert(
             mod_name.to_string(),
             LoadedModule {
                 names,
                 kinds,
+                pub_names,
                 structs,
                 unions,
                 enums,
@@ -461,6 +509,14 @@ impl<'a> Parser<'a> {
         let m = self.modules.borrow();
         if let Some(lm) = m.loaded.get(mod_name) {
             if let Some(target) = lm.names.get(name) {
+                if !lm.pub_names.contains(name) {
+                    return Err(ParserError::ModuleError {
+                        message: format!(
+                            "member '{name}' of module '{mod_name}' is private (not marked pub)"
+                        ),
+                        span: Some(self.last_span),
+                    });
+                }
                 return Ok(target.clone());
             }
         }
@@ -487,6 +543,7 @@ impl<'a> Parser<'a> {
         if self.has_fstring {
             let mut itoa_attrs = FuncAttrs::default();
             itoa_attrs.is_external = true;
+            itoa_attrs.link_name = Some("itoa".to_string());
             body.push(Expr::FuncDecl(
                 "itoa".to_string(),
                 itoa_attrs,
@@ -498,6 +555,7 @@ impl<'a> Parser<'a> {
             ));
             let mut ftoa_attrs = FuncAttrs::default();
             ftoa_attrs.is_external = true;
+            ftoa_attrs.link_name = Some("ftoa".to_string());
             body.push(Expr::FuncDecl(
                 "ftoa".to_string(),
                 ftoa_attrs,
@@ -537,6 +595,7 @@ impl<'a> Parser<'a> {
             alias_map: self.alias_map.clone(),
             from_alias: self.from_alias.clone(),
             own_decls: Vec::new(),
+            decl_pub: false,
         };
         sub.expr()
     }
@@ -694,6 +753,9 @@ impl<'a> Parser<'a> {
                             });
                         }
                     };
+                    if attrs.is_external {
+                        attrs.link_name = Some(name.clone());
+                    }
                     let type_params = if matches!(self.peek(), Some(Ok((Token::LT, _)))) {
                         self.next()?;
                         let params = self.get_type_params_list()?;
@@ -903,6 +965,7 @@ impl<'a> Parser<'a> {
                 }
                 Ok((Token::STRUCT, _)) => {
                     self.next()?;
+                    self.decl_pub = self.parse_global_annotation("struct")?;
                     let (token, span) = self.next()?;
                     let name = match token {
                         Token::IDENT(s) => s,
@@ -974,6 +1037,7 @@ impl<'a> Parser<'a> {
 
                 Ok((Token::UNION, _)) => {
                     self.next()?;
+                    self.decl_pub = self.parse_global_annotation("union")?;
                     let (token, span) = self.next()?;
                     let name = match token {
                         Token::IDENT(s) => s,
@@ -1045,6 +1109,7 @@ impl<'a> Parser<'a> {
 
                 Ok((Token::ENUM, span)) => {
                     self.next()?;
+                    self.decl_pub = self.parse_global_annotation("enum")?;
                     let (token, name_span) = self.next()?;
                     let name = match token {
                         Token::IDENT(s) => s,

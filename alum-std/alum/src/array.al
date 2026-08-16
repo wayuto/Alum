@@ -1,7 +1,7 @@
 import maybe
 using maybe::{Maybe}
 
-struct Array<T> {
+struct(pub) Array<T> {
     data: T[],
     len: int,
     iter: int,

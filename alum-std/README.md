@@ -44,8 +44,14 @@ using io::{write, read, print, println, input, fopen, fclose, fread, fwrite, lse
 ```
 
 Modules can be aliased (`import io as i`) and names aliased
-(`using io::println as p`). Extern declarations keep their global ABI symbol
-names so they can link against the Rust runtime and C code.
+(`using io::println as p`).
+
+Visibility: only declarations marked `pub` (`fun(pub)`, `struct(pub)`,
+`union(pub)`, `enum(pub)`, `cst(pub)`, `var(pub)`) are importable from
+outside the module — a private member referenced via `mod::name` or `using`
+is a compile error. Extern declarations (`fun(extern)`, `extern var`) are
+always visible: they bind foreign symbols and are never renamed internally;
+their link name is the C ABI symbol.
 
 ### I/O Module (`io`)
 
@@ -349,11 +355,15 @@ Alum supports function annotations for controlling linkage and optimization:
 
 | Annotation | Meaning |
 | --- | --- |
-| `pub` | Export the function symbol for linking |
+| `pub` | Export the symbol and make it importable from other modules |
 | `pure` | Mark the function as side-effect-free (enables optimization) |
 | `extern` | Declare an external function (no body, linked at compile time) |
 
 Annotations can be combined, e.g. `fun(pure,pub) name(params): ret`.
+
+`struct(pub)`, `union(pub)`, `enum(pub)`, `cst(pub)` and `var(pub)` follow
+the same rule: only `pub` type/constant/global declarations of a module can
+be imported by other files.
 
 ## Global Variables
 

@@ -1,11 +1,11 @@
-fun(pure) abs(n: int): int {
+fun(pub, pure) abs(n: int): int {
     if n < 0 {
         return -n
     }
     return n
 }
 
-fun(pure) sqrt(n: int): int {
+fun(pub, pure) sqrt(n: int): int {
     if n <= 0 {
         return 0
     }
@@ -16,21 +16,21 @@ fun(pure) sqrt(n: int): int {
     return i - 1
 }
 
-fun(pure) max(a: int, b: int): int {
+fun(pub, pure) max(a: int, b: int): int {
     if a > b {
         return a
     }
     return b
 }
 
-fun(pure) min(a: int, b: int): int {
+fun(pub, pure) min(a: int, b: int): int {
     if a < b {
         return a
     }
     return b
 }
 
-fun(pure) pow(base: int, exp: int): int {
+fun(pub, pure) pow(base: int, exp: int): int {
     if exp == 0 {
         return 1
     }
@@ -47,7 +47,7 @@ fun(pure) pow(base: int, exp: int): int {
     return result
 }
 
-fun(pure) fact(n: int): int {
+fun(pub, pure) fact(n: int): int {
     if n <= 1 {
         return 1
     }

@@ -123,9 +123,10 @@ impl IRGen {
         let mut warned: std::collections::HashSet<String> = std::collections::HashSet::new();
         for expr in &self.program_body {
             if let Expr::FuncDecl(name, attrs, _, _, _, _, _) = expr {
-                if attrs.is_external && attrs.is_pure && !warned.contains(name.as_str()) {
-                    warned.insert(name.clone());
-                    eprintln!("warning: purity of external function '{name}' cannot be verified");
+                let shown = attrs.link_name.as_deref().unwrap_or(name);
+                if attrs.is_external && attrs.is_pure && !warned.contains(shown) {
+                    warned.insert(shown.to_string());
+                    eprintln!("warning: purity of external function '{shown}' cannot be verified");
                 }
             }
         }
@@ -137,7 +138,16 @@ impl IRGen {
                 if let Expr::FuncDecl(name, attrs, _, params, ret_type, _, _) = expr {
                     if attrs.is_external && attrs.is_pure {
                         if let Some(sig) = super::const_eval::native_sig(params, ret_type) {
-                            natives.resolve(name, sig);
+                            match &attrs.link_name {
+                                Some(l) => {
+                                    if let Some(entry) = natives.resolve(l, sig) {
+                                        natives.entries.insert(name.clone(), entry);
+                                    }
+                                }
+                                None => {
+                                    natives.resolve(name, sig);
+                                }
+                            }
                         }
                     }
                 }

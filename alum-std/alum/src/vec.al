@@ -1,7 +1,7 @@
 import maybe
 using maybe::{Maybe}
 
-struct Vec<T> {
+struct(pub) Vec<T> {
     data: T[],
     len: int,
     capacity: int,

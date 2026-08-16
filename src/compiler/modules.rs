@@ -17,6 +17,8 @@ pub enum DeclKind {
 #[derive(Debug, Clone, Default)]
 pub struct LoadedModule {
     pub names: HashMap<String, String>,
+
+    pub pub_names: std::collections::HashSet<String>,
     pub kinds: HashMap<String, DeclKind>,
 
     pub structs: HashMap<String, (Vec<String>, Vec<(String, Type)>)>,
@@ -67,12 +69,12 @@ impl ModuleLoader {
 
     pub fn build_names_map(
         mod_name: &str,
-        own_decls: &[(String, DeclKind)],
+        own_decls: &[(String, DeclKind, bool)],
     ) -> HashMap<String, String> {
         let mut map = HashMap::new();
-        for (name, kind) in own_decls {
+        for (name, kind, _) in own_decls {
             let final_name = match kind {
-                DeclKind::ExternFn | DeclKind::ExternVar => name.clone(),
+                DeclKind::ExternVar => name.clone(),
                 _ => format!("{}__{}", mod_name, name),
             };
             map.insert(name.clone(), final_name);
@@ -156,10 +158,8 @@ fn rename_expr(e: &mut Expr, map: &HashMap<String, String>) {
                 rename_expr(v, map);
             }
         }
-        Expr::FuncDecl(name, attrs, _, params, ret, body, _) => {
-            if !attrs.is_external {
-                ren(name, map);
-            }
+        Expr::FuncDecl(name, _, _, params, ret, body, _) => {
+            ren(name, map);
             for (_, t) in params {
                 rename_type(t, map);
             }

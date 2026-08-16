@@ -1,4 +1,4 @@
-fun(pure) strlen(s: string): int {
+fun(pub, pure) strlen(s: string): int {
     var p: *void = s
     var i: int = 0
     while true {
@@ -41,7 +41,7 @@ fun(pub) strcat(dst: string, src: string): string {
     return dst
 }
 
-fun(pure) strcmp(s1: string, s2: string): int {
+fun(pub, pure) strcmp(s1: string, s2: string): int {
     var p1: *void = s1
     var p2: *void = s2
     var i: int = 0
@@ -82,7 +82,7 @@ fun(pub) memset(s: string, c: int, n: int): string {
     return s
 }
 
-fun(pure) bcmp(s1: string, s2: string, n: int): int {
+fun(pub, pure) bcmp(s1: string, s2: string, n: int): int {
     var p1: *void = s1
     var p2: *void = s2
     var i: int = 0
@@ -97,6 +97,6 @@ fun(pure) bcmp(s1: string, s2: string, n: int): int {
     return 0
 }
 
-fun(pure) memcmp(s1: string, s2: string, n: int): int {
+fun(pub, pure) memcmp(s1: string, s2: string, n: int): int {
     return bcmp(s1, s2, n)
 }

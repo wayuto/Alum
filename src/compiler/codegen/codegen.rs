@@ -113,6 +113,7 @@ pub struct AsmCodeGen {
     pub(super) curr_fn: String,
     pub(super) curr_flt_reg: usize,
     pub(super) internals: HashSet<String>,
+    pub(super) extern_link: HashMap<String, String>,
     pub(super) used_callee_saved: Vec<Reg>,
 }
 
@@ -123,6 +124,12 @@ impl AsmCodeGen {
             .iter()
             .filter(|f| !f.is_external)
             .map(|f| f.name.clone())
+            .collect();
+        let extern_link = program
+            .functions
+            .iter()
+            .filter(|f| f.is_external)
+            .filter_map(|f| f.link_name.clone().map(|l| (f.name.clone(), l)))
             .collect();
         Self {
             program,
@@ -165,6 +172,7 @@ impl AsmCodeGen {
             curr_fn: String::new(),
             curr_flt_reg: 0,
             internals,
+            extern_link,
             used_callee_saved: Vec::new(),
         }
     }
@@ -179,7 +187,12 @@ impl AsmCodeGen {
                     .iter()
                     .any(|f| f.name == func.name && !f.is_external);
                 if !has_internal {
-                    self.text_asms.push(Asm::Extern(func.name.clone()));
+                    let sym = self
+                        .extern_link
+                        .get(&func.name)
+                        .cloned()
+                        .unwrap_or_else(|| func.name.clone());
+                    self.text_asms.push(Asm::Extern(sym));
                 } else {
                 }
             }

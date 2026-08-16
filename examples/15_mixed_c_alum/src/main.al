@@ -1,4 +1,5 @@
 import helper
+using helper::{c_add, c_multiply, c_calculate_factorial}
 import io
 using io::println
 
