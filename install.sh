@@ -33,6 +33,7 @@ if [ -f "$LOCATION/alum-std/alum/target/libalum.a" ]; then
     ar x "$LOCATION/alum-std/alum/target/libalum.a"
 fi
 
+rm -f ../libalum.a
 ar rcs ../libalum.a *.o
 cd ..
 rm -rf merged_objs

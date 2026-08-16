@@ -1,2 +1,2 @@
-fun(extern) syscall(int, int, int, int): int
-fun(extern) exit(int): void
+fun(pub, extern) syscall(int, int, int, int): int
+fun(pub, extern) exit(int): void

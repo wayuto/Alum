@@ -1,17 +1,17 @@
-fun(extern) write(int, string, int): int
-fun(extern) read(int, string, int): int
-fun(extern) print(string): int
-fun(extern) println(string): int
-fun(extern) input(string): string
-fun(extern) fopen(string, int, int): int
-fun(extern) fclose(int): int
-fun(extern) fread(int): string
-fun(extern) fwrite(int, string, int): int
-fun(extern) lseek(int, int, int): int
+fun(pub, extern) write(int, string, int): int
+fun(pub, extern) read(int, string, int): int
+fun(pub, extern) print(string): int
+fun(pub, extern) println(string): int
+fun(pub, extern) input(string): string
+fun(pub, extern) fopen(string, int, int): int
+fun(pub, extern) fclose(int): int
+fun(pub, extern) fread(int): string
+fun(pub, extern) fwrite(int, string, int): int
+fun(pub, extern) lseek(int, int, int): int
 
-fun(extern) pipe(*void): int
-fun(extern) pipe2(*void, int): int
-fun(extern) dup(int): int
-fun(extern) dup2(int, int): int
-fun(extern) dup3(int, int, int): int
+fun(pub, extern) pipe(*void): int
+fun(pub, extern) pipe2(*void, int): int
+fun(pub, extern) dup(int): int
+fun(pub, extern) dup2(int, int): int
+fun(pub, extern) dup3(int, int, int): int
 

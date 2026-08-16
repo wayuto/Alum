@@ -181,7 +181,7 @@
             "patterns": [
                 {
                     "name": "meta.typedef.alum",
-                    "match": "\\b(typedef)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(=)\\s*([A-Za-z_][A-Za-z0-9_]*(?:<[^>\\n]*>)?(?:\\[[0-9]*\\])?(?:\\s*\\([^)\\n]*\\))?)",
+                    "match": "\\b(typedef)(?:\\s*\\([^)]*\\))?\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(=)\\s*([A-Za-z_][A-Za-z0-9_]*(?:<[^>\\n]*>)?(?:\\[[0-9]*\\])?(?:\\s*\\([^)\\n]*\\))?)",
                     "captures": {
                         "1": {
                             "name": "keyword.declaration.typedef.alum"
@@ -395,7 +395,7 @@
             "patterns": [
                 {
                     "name": "meta.struct.declaration.alum",
-                    "begin": "\\b(struct)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(<[^>\\n]*>)?\\s*(\\{)",
+                    "begin": "\\b(struct)(?:\\s*\\([^)]*\\))?\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(<[^>\\n]*>)?\\s*(\\{)",
                     "end": "(\\})",
                     "beginCaptures": {
                         "1": {
@@ -460,7 +460,7 @@
             "patterns": [
                 {
                     "name": "meta.union.declaration.alum",
-                    "begin": "\\b(union)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(<[^>\\n]*>)?\\s*(\\{)",
+                    "begin": "\\b(union)(?:\\s*\\([^)]*\\))?\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(<[^>\\n]*>)?\\s*(\\{)",
                     "end": "(\\})",
                     "beginCaptures": {
                         "1": {
@@ -525,7 +525,7 @@
             "patterns": [
                 {
                     "name": "meta.enum.declaration.alum",
-                    "begin": "\\b(enum)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(\\{)",
+                    "begin": "\\b(enum)(?:\\s*\\([^)]*\\))?\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(\\{)",
                     "end": "(\\})",
                     "beginCaptures": {
                         "1": {
@@ -1319,7 +1319,7 @@
                 },
                 {
                     "name": "meta.using.alum",
-                    "match": "\\b(using)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(::)(\\s*\\{)?",
+                    "match": "\\b(using)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(::)\\s*([A-Za-z_][A-Za-z0-9_]*)?(\\s+(as)\\s+([A-Za-z_][A-Za-z0-9_]*))?(\\s*\\{)?",
                     "captures": {
                         "1": {
                             "name": "keyword.control.using.alum"
@@ -1329,6 +1329,15 @@
                         },
                         "3": {
                             "name": "keyword.operator.module.alum"
+                        },
+                        "4": {
+                            "name": "entity.name.function.alum"
+                        },
+                        "6": {
+                            "name": "keyword.control.import.alum"
+                        },
+                        "7": {
+                            "name": "entity.name.namespace.alum"
                         }
                     }
                 }

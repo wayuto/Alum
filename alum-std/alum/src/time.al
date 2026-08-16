@@ -8,7 +8,7 @@ struct(pub) Timeval {
     usec: int
 }
 
-fun(extern) nanosleep(*Timespec, *Timespec): int
-fun(extern) clock_gettime(int, *Timespec): int
-fun(extern) gettimeofday(*Timeval, *void): int
+fun(pub, extern) nanosleep(*Timespec, *Timespec): int
+fun(pub, extern) clock_gettime(int, *Timespec): int
+fun(pub, extern) gettimeofday(*Timeval, *void): int
 

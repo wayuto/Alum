@@ -71,5 +71,5 @@ fun(pub, pure) atoi(s: string): int {
     return result * sign
 }
 
-fun(extern) atof(string): float
-fun(extern) ftoa(float): string
+fun(pub, extern) atof(string): float
+fun(pub, extern) ftoa(float): string
