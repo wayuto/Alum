@@ -1,4 +1,5 @@
-$import "io.ah"
+import io
+using io::println
 
 // Factorial Comparison Example
 // Compares iterative vs recursive factorial implementations
@@ -45,3 +46,6 @@ fun main(): int {
     
     return 0
 }
+
+
+

@@ -1,6 +1,3 @@
-$ifndef ALUM_RESULT
-$define ALUM_RESULT 1
-
 enum ResultStatus {
     Ok,
     Err
@@ -16,4 +13,3 @@ struct Result<T, E> {
     value: ResultValue<T, E>
 }
 
-$endif

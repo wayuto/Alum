@@ -1,7 +1,0 @@
-$ifndef ALUM_LIB
-$define ALUM_LIB 1
-
-fun(extern) syscall(int, int, int, int): int
-fun(extern) exit(int): void
-
-$endif

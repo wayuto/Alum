@@ -1,6 +1,6 @@
-$import "io.ah"
-$import "convert.ah"
-$import "array_compat.ah"
+import io
+using io::println
+import array_compat
 
 // C Array Compatibility Example
 // Alum arrays are now fully compatible with C arrays
@@ -21,3 +21,6 @@ fun main(): int {
 
     return 0
 }
+
+
+

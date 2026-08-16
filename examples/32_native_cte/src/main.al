@@ -1,4 +1,5 @@
-$import "io.ah"
+import io
+using io::println
 
 // `fun(extern, pure)` declares call into the native shared library built from
 // native/cte_native.c. The compiler emits a warning that an extern function's
@@ -36,3 +37,6 @@ fun main(): int {
     println(f"fold in pure fn    = {v}")
     return 0
 }
+
+
+

@@ -1,4 +1,5 @@
-$import "io.ah"
+import io
+using io::println
 
 fun main(): int {
     // continue in while loop
@@ -25,3 +26,6 @@ fun main(): int {
 
     return 0;
 }
+
+
+

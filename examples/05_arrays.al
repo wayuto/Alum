@@ -1,5 +1,4 @@
-$import "io.ah"
-
+using io::println
 // Arrays Example
 // Demonstrates array operations with new T[N] syntax
 
@@ -37,3 +36,6 @@ fun main(): int {
 
     return 0
 }
+
+
+

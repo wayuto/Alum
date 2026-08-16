@@ -1,6 +1,3 @@
-$ifndef ALUM_IO
-$define ALUM_IO 1
-
 fun(extern) write(int, string, int): int
 fun(extern) read(int, string, int): int
 fun(extern) print(string): int
@@ -12,4 +9,9 @@ fun(extern) fread(int): string
 fun(extern) fwrite(int, string, int): int
 fun(extern) lseek(int, int, int): int
 
-$endif
+fun(extern) pipe(*void): int
+fun(extern) pipe2(*void, int): int
+fun(extern) dup(int): int
+fun(extern) dup2(int, int): int
+fun(extern) dup3(int, int, int): int
+

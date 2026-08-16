@@ -1,4 +1,5 @@
-$import "io.ah"
+import io
+using io::{print, println}
 
 // Array Search Example
 // Demonstrates searching for elements in an array
@@ -57,3 +58,7 @@ fun main(): int {
 
     return 0
 }
+
+
+
+

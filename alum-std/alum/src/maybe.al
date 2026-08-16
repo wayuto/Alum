@@ -1,6 +1,3 @@
-$ifndef ALUM_MAYBE
-$define ALUM_MAYBE 1
-
 enum MaybeTag {
     Nothing,
     Just
@@ -18,4 +15,3 @@ fun(pure) is_some<T>(m: Maybe<T>): int {
     return 0
 }
 
-$endif

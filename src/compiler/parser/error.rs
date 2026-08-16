@@ -12,6 +12,7 @@ pub enum ParserError {
         span: Span,
     },
     LexerError(LexerError),
+    ModuleError { message: String, span: Option<Span> },
 }
 
 impl Display for ParserError {
@@ -37,6 +38,7 @@ impl Display for ParserError {
                 }
             }
             ParserError::LexerError(le) => write!(f, "{}", le),
+            ParserError::ModuleError { message, .. } => write!(f, "module error: {}", message),
         }
     }
 }
@@ -48,6 +50,7 @@ impl ParserError {
         match self {
             ParserError::UnexpectedToken { span, .. } => Some(*span),
             ParserError::LexerError(e) => Some(e.span()),
+            ParserError::ModuleError { span, .. } => *span,
         }
     }
 }

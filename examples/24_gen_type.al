@@ -1,4 +1,5 @@
-$import "io.ah"
+import io
+using io::println
 
 // Generic Type Example
 // Demonstrates generic functions with type parameters
@@ -21,3 +22,7 @@ fun main(): int {
 
     return 0
 }
+
+
+
+

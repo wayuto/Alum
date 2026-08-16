@@ -1,4 +1,5 @@
-$import "io.ah"
+import io
+using io::println
 
 // TypeDef Example
 
@@ -14,3 +15,7 @@ fun main(): int {
 
     return 0
 }
+
+
+
+

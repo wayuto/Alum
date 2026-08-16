@@ -4,4 +4,4 @@ version = 4
 
 [[package]]
 name = "alum-std"
-version = "0.9.7"
+version = "0.9.8"

@@ -12,26 +12,44 @@ The standard library is automatically installed when running the main installati
 
 This installs:
 - `libalum_std.a` to `/usr/local/lib/`
-- Standard library headers to `/usr/local/include/alum/`
+- Standard library modules to `/usr/local/include/alum/`
 
 ## Modules
 
 ### Importing Modules
 
 ```al
-$import "io.ah"
-$import "string.ah"
-$import "math.ah"
-$import "memory.ah"
-$import "convert.ah"
-$import "vec.ah"
-$import "result.ah"
-$import "maybe.ah"
+import io
+import string
+import math
+import memory
+import convert
+import vec
+import result
+import maybe
+import process
+import time
+import fs
+import sys
+import lib
 ```
 
-### I/O Module (`io.ah`)
+`import` loads a module (`io.al`) and makes its declarations available.
+Qualified references use the `mod::name` syntax; to call a module's
+declarations without the prefix, import selected names with `using`:
 
-Provides input/output and file operations.
+```al
+import io
+using io::{write, read, print, println, input, fopen, fclose, fread, fwrite, lseek, pipe, pipe2, dup, dup2, dup3}
+```
+
+Modules can be aliased (`import io as i`) and names aliased
+(`using io::println as p`). Extern declarations keep their global ABI symbol
+names so they can link against the Rust runtime and C code.
+
+### I/O Module (`io`)
+
+Provides input/output, file operations, and file descriptor manipulation.
 
 ```al
 fun(extern) write(int, string, int): int    // Write to file descriptor
@@ -44,9 +62,15 @@ fun(extern) fclose(int): int                // Close file
 fun(extern) fread(int): string              // Read from file
 fun(extern) fwrite(int, string, int): int   // Write to file
 fun(extern) lseek(int, int, int): int       // Seek in file
+
+fun(extern) pipe(*void): int         // Create pipe, pipefd[0]=read [1]=write
+fun(extern) pipe2(*void, int): int   // Create pipe with flags (O_CLOEXEC=0x80000)
+fun(extern) dup(int): int            // Duplicate fd (lowest available)
+fun(extern) dup2(int, int): int      // Duplicate oldfd onto newfd
+fun(extern) dup3(int, int, int): int // dup2 with flags
 ```
 
-### String Module (`string.ah`)
+### String Module (`string`)
 
 Provides string (byte array) operations.
 
@@ -60,7 +84,7 @@ fun(pure,extern) bcmp(string, string, int): int       // Byte comparison
 fun(pure,extern) memcmp(string, string, int): int     // Byte comparison (n bytes)
 ```
 
-### Math Module (`math.ah`)
+### Math Module (`math`)
 
 Provides mathematical operations.
 
@@ -73,16 +97,95 @@ fun(pure,extern) pow(int, int): int   // Power function
 fun(pure,extern) fact(int): int       // Factorial
 ```
 
-### Memory Module (`memory.ah`)
+### Memory Module (`memory`)
 
-Provides memory management functions using a free-list allocator with block headers.
+Provides memory management functions using a free-list allocator with block headers, plus the raw memory syscalls.
 
 ```al
 fun(extern) malloc(int): *void  // Allocate memory, returns byte pointer
 fun(extern) free(*void): void   // Free memory (no size needed)
+
+fun(extern) mmap(*void, int, int, int, int, int): *void  // Map memory, -1 = MAP_FAILED
+fun(extern) munmap(*void, int): int  // Unmap memory
+fun(extern) mprotect(*void, int, int): int  // Change memory protection
+fun(extern) brk(int): int            // Adjust program break
 ```
 
-### Convert Module (`convert.ah`)
+### Process Module (`process`)
+
+Process identity, scheduling, and control syscalls. All return the raw kernel
+value, negative = `-errno`. Signals: `SIGINT=2 SIGKILL=9 SIGTERM=15 SIGCHLD=17`.
+
+```al
+fun(extern) getpid(): int            // Process ID
+fun(extern) getppid(): int           // Parent process ID
+fun(extern) getuid(): int            // User ID
+fun(extern) geteuid(): int           // Effective user ID
+fun(extern) getgid(): int            // Group ID
+fun(extern) getegid(): int           // Effective group ID
+fun(extern) sched_yield(): int       // Yield the CPU
+
+fun(extern) fork(): int              // 0 in child, child PID in parent
+fun(extern) execve(string, *void, *void): int  // Replace process image (path, argv, envp)
+fun(extern) wait4(int, *int, int, *void): int // Wait for child (pid, &status, options, rusage*)
+fun(extern) kill(int, int): int      // Send signal to process
+fun(extern) exit_group(int): void    // Terminate whole process
+```
+
+### Time Module (`time`)
+
+Time syscalls using `Timespec`/`Timeval` structs (matching the kernel ABI:
+two 64-bit fields, no padding).
+
+```al
+struct Timespec {
+    sec: int,
+    nsec: int
+}
+
+struct Timeval {
+    sec: int,
+    usec: int
+}
+
+fun(extern) nanosleep(*Timespec, *Timespec): int    // Sleep, rem may be nil
+fun(extern) clock_gettime(int, *Timespec): int      // Realtime(0)/monotonic(1) clock
+fun(extern) gettimeofday(*Timeval, *void): int      // Wall-clock time, tz may be nil
+```
+
+### File System Module (`fs`)
+
+File system syscalls. All return the raw kernel value, negative = `-errno`.
+Open flags (subset): `O_RDONLY=0 O_WRONLY=1 O_RDWR=2 O_CREAT=0x40 O_TRUNC=0x200`.
+(`read`/`write`/`lseek` live in `io`.)
+
+```al
+fun(extern) open(string, int, int): int  // Open file, returns fd or -errno
+fun(extern) close(int): int              // Close file descriptor
+fun(extern) access(string, int): int     // Check file permissions
+fun(extern) mkdir(string, int): int      // Create directory
+fun(extern) rmdir(string): int           // Remove directory
+fun(extern) unlink(string): int          // Remove file
+fun(extern) fsync(int): int              // Flush fd to disk
+fun(extern) ftruncate(int, int): int     // Truncate file to length
+fun(extern) getcwd(string, int): int     // Current working directory
+fun(extern) chdir(string): int           // Change directory
+```
+
+### Syscall Module (`sys`)
+
+Raw syscall entry points and miscellaneous syscalls. All return the raw kernel value;
+on error it is negative (`-errno`).
+
+```al
+fun(extern) syscall(int, int, int, int): int                 // Raw 3-arg syscall
+fun(extern) syscall6(int, int, int, int, int, int, int): int // Raw 6-arg syscall (mmap)
+
+fun(extern) getrandom(string, int, int): int  // Fill buffer with random bytes
+fun(extern) uname(*void): int                 // System info (struct utsname)
+```
+
+### Convert Module (`convert`)
 
 Provides type conversion functions.
 
@@ -93,13 +196,19 @@ fun(pure,extern) atof(string): float  // String to float
 fun(pure,extern) ftoa(float): string  // Float to string
 ```
 
-### Vec Container (`vec.ah`)
+### Vec Container (`vec`)
 
-A generic dynamic array. `Vec<T>` is monomorphically instantiated per element type; methods are stored as function-pointer fields and called with `&vec` as the first argument.
+A generic dynamic array. `Vec<T>` is monomorphically instantiated per element type; methods are stored as function-pointer fields and called with `&vec` as the first argument. Indexing (`vec[i]`) and `next` return a `Maybe<T>` so out-of-range access is safe.
 
 ```al
-$import "vec.ah"
-$import "convert.ah"
+import vec
+using vec::{Vec, vec_new}
+import maybe
+using maybe::{MaybeTag, Maybe, is_some}
+import convert
+using convert::{itoa, atoi, atof, ftoa}
+import io
+using io::{write, read, print, println, input, fopen, fclose, fread, fwrite, lseek, pipe, pipe2, dup, dup2, dup3}
 
 fun main(): int {
     var vec: Vec<int> = vec_new()
@@ -108,9 +217,14 @@ fun main(): int {
     vec.push(&vec, 20)
     vec.push(&vec, 30)
 
-    println(itoa(vec.at(&vec, 0)))  // 10
-    println(itoa(vec.at(&vec, 2)))  // 30
-    println(itoa(vec.pop(&vec)))    // 30 (removed from the end)
+    var first: Maybe<int> = vec.nth(&vec, 0)
+    if first.tag == Just {
+        println(itoa(first.value))  // 10
+    }
+    var last: Maybe<int> = vec.pop(&vec)
+    if last.tag == Just {
+        println(itoa(last.value))  // 30 (removed from the end)
+    }
 
     vec.clear(&vec)
     return 0
@@ -119,12 +233,13 @@ fun main(): int {
 
 **Methods:**
 - `vec_new<T>()`: Creates a new empty `Vec<T>` (pure function)
-- `vec.at(&vec, index)`: Access element at the given index
-- `vec.push(&vec, element)`: Add an element to the end
-- `vec.pop(&vec)`: Remove and return the last element
-- `vec.clear(&vec)`: Remove all elements
+- `vec.nth(&vec, index): Maybe<T>`: Access element at the given index (error-safe)
+- `vec.push(&vec, element): void`: Add an element to the end
+- `vec.pop(&vec): Maybe<T>`: Remove and return the last element
+- `vec.next(&vec): Maybe<T>`: Iterate (resets after the last element)
+- `vec.clear(&vec): void`: Remove all elements
 
-### Result Type (`result.ah`)
+### Result Type (`result`)
 
 A generic tagged-union style result for error handling, built from an `enum` tag, a `union` payload, and a `struct`:
 
@@ -144,10 +259,14 @@ struct Result<T, E> {
 
 **Usage:**
 ```al
-$import "io.ah"
-$import "convert.ah"
-$import "string.ah"
-$import "result.ah"
+import result
+using result::{ResultStatus, ResultValue, Result}
+import io
+using io::{write, read, print, println, input, fopen, fclose, fread, fwrite, lseek, pipe, pipe2, dup, dup2, dup3}
+import string
+using string::{strlen, strcpy, strcat, memcpy, memset, bcmp, memcmp}
+import convert
+using convert::{itoa, atoi, atof, ftoa}
 
 fun auth(password: string): Result<int, string> {
     if memcmp(password, "123456", 6) == 0 {
@@ -177,7 +296,7 @@ fun main(): int {
 
 Because enum members are also referable bare when unambiguous, `ResultStatus.Ok` can be written as `Ok` (and `Err`) as long as no other enum in the program defines those names.
 
-### Maybe Type (`maybe.ah`)
+### Maybe Type (`maybe`)
 
 A generic optional value using a tag + payload struct:
 
@@ -194,16 +313,19 @@ fun(pure) is_some<T>(m: Maybe<T>): int  // 1 if Just, 0 if Nothing
 
 **Usage:**
 ```al
-$import "io.ah"
-$import "convert.ah"
-$import "maybe.ah"
+import maybe
+using maybe::{MaybeTag, Maybe, is_some}
+import io
+using io::{write, read, print, println, input, fopen, fclose, fread, fwrite, lseek, pipe, pipe2, dup, dup2, dup3}
+import convert
+using convert::{itoa, atoi, atof, ftoa}
 
 fun main(): int {
     var a = Maybe<int> {
         tag: Just,
         value: 42
     }
-    if is_some(a) {
+    if a.tag == Just {
         println(itoa(a.value))  // 42
     }
     return 0
@@ -212,7 +334,7 @@ fun main(): int {
 
 Note: as a plain struct, `Maybe<T>` always stores a `value` of type `T` — the `Nothing` case still occupies space and requires a dummy value.
 
-### Main Library (`lib.ah`)
+### Main Library (`lib`)
 
 The main library module provides system call access.
 

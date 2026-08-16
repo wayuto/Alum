@@ -331,7 +331,12 @@ impl<'a> Lexer<'a> {
             }
             ':' => {
                 self.bump();
-                Token::COLON
+                if self.current == Some(':') {
+                    self.bump();
+                    Token::COLONCOLON
+                } else {
+                    Token::COLON
+                }
             }
             ',' => {
                 self.bump();
@@ -420,6 +425,9 @@ impl<'a> Lexer<'a> {
             "for" => Token::FOR,
             "in" => Token::IN,
             "extern" => Token::EXTERN,
+            "import" => Token::IMPORT,
+            "using" => Token::USING,
+            "as" => Token::AS,
             "int" => Token::TYPE(ident),
             "float" => Token::TYPE(ident),
             "bool" => Token::TYPE(ident),

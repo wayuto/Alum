@@ -1,4 +1,5 @@
-$import "io.ah"
+import io
+using io::println
 
 // Union declaration and usage Example
 
@@ -21,3 +22,7 @@ fun main(): int {
 
     return 0
 }
+
+
+
+

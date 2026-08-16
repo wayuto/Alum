@@ -9,6 +9,7 @@ pub mod convert;
 pub mod io;
 pub mod memory;
 pub mod string;
+pub mod sys;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_eh_personality() {}
@@ -21,41 +22,6 @@ unsafe extern "C" {
 fn panic(_info: &PanicInfo) -> ! {
     unsafe {
         asm!("ud2", options(noreturn));
-    }
-}
-
-#[inline(always)]
-pub extern "C" fn syscall(nr: usize, a1: isize, a2: isize, a3: isize) -> isize {
-    let ret: isize;
-    unsafe {
-        asm!("
-        mov rax, {nr} 
-        mov rdi, {a1}
-        mov rsi, {a2}
-        mov rdx, {a3}
-        syscall
-        ", 
-            nr = in(reg) nr as isize,
-            a1 = in(reg) a1,
-            a2 = in(reg) a2,
-            a3 = in(reg) a3,
-        lateout("rax") ret,
-        clobber_abi("C"),
-        );
-    }
-    ret
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn exit(code: isize) -> ! {
-    unsafe {
-        asm!("
-            mov rax, 60    
-            syscall
-            ",
-        in("rdi") code,
-        options(noreturn, nostack)
-        );
     }
 }
 
@@ -83,5 +49,5 @@ extern "C" fn _start_impl(argc: isize, argv: *const *const u8) -> ! {
     }
 
     let ret = unsafe { main(argc, arr as *const *const u8) };
-    exit(ret);
+    crate::sys::exit(ret);
 }

@@ -1,4 +1,5 @@
-$import "io.ah"
+import io
+using io::{read, println}
 
 // Global variables and exported constants
 // - `cst(pub)`  exports a read-only data symbol (linkable via `extern`)
@@ -23,3 +24,7 @@ fun main(): int {
     println(f"ratio = {ratio}")
     return 0
 }
+
+
+
+

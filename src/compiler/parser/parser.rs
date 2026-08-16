@@ -2,9 +2,13 @@ use super::error::ParserError;
 use crate::compiler::{
     Span,
     lexer::{FstringSeg, Lexer, LexerError, Token},
+    modules::{DeclKind, LoadedModule, ModuleLoader},
     parser::{Expr, FuncAttrs, Parser, Primitive, Program, Type},
+    preprocessor::Preprocessor,
 };
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 #[derive(Clone, Copy)]
 enum CompoundOp {
@@ -88,7 +92,7 @@ fn make_inc_dec(target: Expr, is_inc: bool, span: Span) -> Expr {
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(lex: Lexer<'a>) -> Self {
+    pub fn new(lex: Lexer<'a>, base_path: String, include_paths: Vec<String>) -> Self {
         Self {
             lex: lex.peekable(),
             lookahead: Vec::new(),
@@ -101,6 +105,36 @@ impl<'a> Parser<'a> {
             has_fstring: false,
             scope_depth: 0,
             deref_depth: 0,
+            modules: Rc::new(RefCell::new(ModuleLoader::new(include_paths))),
+            base_path,
+            alias_map: HashMap::new(),
+            from_alias: HashMap::new(),
+            own_decls: Vec::new(),
+        }
+    }
+
+    pub fn new_loader(
+        lex: Lexer<'a>,
+        base_path: String,
+        modules: Rc<RefCell<ModuleLoader>>,
+    ) -> Self {
+        Self {
+            lex: lex.peekable(),
+            lookahead: Vec::new(),
+            last_span: Span::new(1, 1),
+            typedefs: HashMap::new(),
+            structs: HashMap::new(),
+            unions: HashMap::new(),
+            enums: HashMap::new(),
+            type_param_scopes: Vec::new(),
+            has_fstring: false,
+            scope_depth: 0,
+            deref_depth: 0,
+            modules,
+            base_path,
+            alias_map: HashMap::new(),
+            from_alias: HashMap::new(),
+            own_decls: Vec::new(),
         }
     }
 
@@ -109,7 +143,13 @@ impl<'a> Parser<'a> {
         loop {
             match self.peek() {
                 Some(Ok((Token::EOF, _))) | None => break,
-                _ => body.push(self.expr()?),
+                Some(Ok((Token::IMPORT, _))) => self.parse_import_stmt(&mut body)?,
+                Some(Ok((Token::USING, _))) => self.parse_using_stmt(&mut body)?,
+                _ => {
+                    let expr = self.expr()?;
+                    self.record_decl(&expr);
+                    body.push(expr);
+                }
             }
         }
         self.append_fstring_helpers(&mut body);
@@ -126,8 +166,23 @@ impl<'a> Parser<'a> {
                     errors.push(ParserError::LexerError(le));
                     let _ = self.next();
                 }
+                Some(Ok((Token::IMPORT, _))) => {
+                    if let Err(e) = self.parse_import_stmt(&mut body) {
+                        errors.push(e);
+                        self.synchronize();
+                    }
+                }
+                Some(Ok((Token::USING, _))) => {
+                    if let Err(e) = self.parse_using_stmt(&mut body) {
+                        errors.push(e);
+                        self.synchronize();
+                    }
+                }
                 Some(Ok(_)) => match self.expr() {
-                    Ok(expr) => body.push(expr),
+                    Ok(expr) => {
+                        self.record_decl(&expr);
+                        body.push(expr);
+                    }
                     Err(e) => {
                         errors.push(e);
                         self.synchronize();
@@ -143,7 +198,8 @@ impl<'a> Parser<'a> {
         let mut depth: i32 = 0;
         loop {
             match self.peek().cloned() {
-                None | Some(Err(_)) => {
+                None => break,
+                Some(Err(_)) => {
                     let _ = self.next();
                 }
                 Some(Ok((Token::EOF, _))) => break,
@@ -157,7 +213,9 @@ impl<'a> Parser<'a> {
                     | Token::UNION
                     | Token::ENUM
                     | Token::TYPEDEF
-                    | Token::EXTERN,
+                    | Token::EXTERN
+                    | Token::IMPORT
+                    | Token::USING,
                     _,
                 ))) if depth == 0 => break,
                 Some(Ok((Token::LBRACE, _))) => {
@@ -176,6 +234,253 @@ impl<'a> Parser<'a> {
                 }
             }
         }
+    }
+
+    fn record_decl(&mut self, expr: &Expr) {
+        match expr {
+            Expr::FuncDecl(name, attrs, ..) => self.own_decls.push((
+                name.clone(),
+                if attrs.is_external {
+                    DeclKind::ExternFn
+                } else {
+                    DeclKind::Fn
+                },
+            )),
+            Expr::Struct(name, ..) => self.own_decls.push((name.clone(), DeclKind::Struct)),
+            Expr::Union(name, ..) => self.own_decls.push((name.clone(), DeclKind::Union)),
+            Expr::Enum(name, ..) => self.own_decls.push((name.clone(), DeclKind::Enum)),
+            Expr::ConstDecl(name, ..) => self.own_decls.push((name.clone(), DeclKind::Const)),
+            Expr::GlobalVar(name, ..) => self.own_decls.push((name.clone(), DeclKind::GlobalVar)),
+            Expr::ExternVar(name, ..) => self.own_decls.push((name.clone(), DeclKind::ExternVar)),
+            _ => {}
+        }
+    }
+
+    fn parse_ident(&mut self) -> Result<(String, Span), ParserError> {
+        let (tok, span) = self.next()?;
+        match tok {
+            Token::IDENT(s) | Token::TYPE(s) => Ok((s, span)),
+            token => Err(ParserError::UnexpectedToken {
+                expected: Some(Token::IDENT("NAME".to_string())),
+                found: token,
+                span,
+            }),
+        }
+    }
+
+    fn parse_import_stmt(&mut self, body: &mut Vec<Expr>) -> Result<(), ParserError> {
+        self.next()?;
+        let (mod_name, _) = self.parse_ident()?;
+        let mut alias = None;
+        if matches!(self.peek(), Some(Ok((Token::AS, _)))) {
+            self.next()?;
+            let (a, _) = self.parse_ident()?;
+            alias = Some(a);
+        }
+        let decls = self.load_module(&mod_name)?;
+        body.extend(decls);
+        if let Some(a) = alias {
+            self.alias_map.insert(a, mod_name);
+        }
+        Ok(())
+    }
+
+    fn parse_using_stmt(&mut self, body: &mut Vec<Expr>) -> Result<(), ParserError> {
+        self.next()?;
+        let (mod_name, _) = self.parse_ident()?;
+        self.expect(Token::COLONCOLON)?;
+        let real_name = self
+            .alias_map
+            .get(&mod_name)
+            .cloned()
+            .unwrap_or_else(|| mod_name.clone());
+        let decls = self.load_module(&real_name)?;
+        body.extend(decls);
+
+        if matches!(self.peek(), Some(Ok((Token::LBRACE, _)))) {
+            self.next()?;
+            loop {
+                let (name, _) = self.parse_ident()?;
+                let target = self.resolve_module_name(&real_name, &name)?;
+                let kind = self.resolve_module_kind(&real_name, &name);
+                if matches!(self.peek(), Some(Ok((Token::AS, _)))) {
+                    self.next()?;
+                    let (a, _) = self.parse_ident()?;
+                    self.from_alias.insert(a, (target, kind));
+                } else {
+                    self.from_alias.insert(name, (target, kind));
+                }
+                match self.peek() {
+                    Some(Ok((Token::COMMA, _))) => {
+                        self.next()?;
+                    }
+                    Some(Ok((Token::RBRACE, _))) => {
+                        self.next()?;
+                        break;
+                    }
+                    _ => {
+                        return Err(ParserError::UnexpectedToken {
+                            expected: Some(Token::COMMA),
+                            found: match self.peek().cloned() {
+                                Some(Ok((t, _))) => t,
+                                _ => Token::EOF,
+                            },
+                            span: self.last_span,
+                        });
+                    }
+                }
+            }
+        } else {
+            let (name, _) = self.parse_ident()?;
+            let target = self.resolve_module_name(&real_name, &name)?;
+            let kind = self.resolve_module_kind(&real_name, &name);
+            if matches!(self.peek(), Some(Ok((Token::AS, _)))) {
+                self.next()?;
+                let (a, _) = self.parse_ident()?;
+                self.from_alias.insert(a, (target, kind));
+            } else {
+                self.from_alias.insert(name, (target, kind));
+            }
+        }
+        Ok(())
+    }
+
+    fn load_module(&mut self, mod_name: &str) -> Result<Vec<Expr>, ParserError> {
+        {
+            let m = self.modules.borrow();
+            if m.loading.iter().any(|n| n == mod_name) {
+                return Err(ParserError::ModuleError {
+                    message: format!("circular import of module '{}'", mod_name),
+                    span: Some(self.last_span),
+                });
+            }
+            let already = m.loaded.get(mod_name).cloned();
+            if let Some(lm) = already {
+                drop(m);
+                self.merge_module_types(&lm);
+                return Ok(Vec::new());
+            }
+        }
+
+        let file_path = {
+            let m = self.modules.borrow();
+            m.find_file(mod_name, &self.base_path)
+        };
+        let Some(file_path) = file_path else {
+            return Err(ParserError::ModuleError {
+                message: format!("module '{}' not found", mod_name),
+                span: Some(self.last_span),
+            });
+        };
+
+        let content =
+            std::fs::read_to_string(&file_path).map_err(|e| ParserError::ModuleError {
+                message: format!("failed to read '{}': {}", file_path, e),
+                span: Some(self.last_span),
+            })?;
+        let include_paths = self.modules.borrow().include_paths.clone();
+        let mut pp = Preprocessor::new(&content, file_path.clone(), include_paths);
+        let (processed, _) = pp.preprocess().map_err(|e| ParserError::ModuleError {
+            message: format!("preprocessing module '{}': {}", mod_name, e),
+            span: Some(self.last_span),
+        })?;
+
+        let lex = Lexer::new(&processed);
+        let rc = self.modules.clone();
+        self.modules.borrow_mut().loading.push(mod_name.to_string());
+        let mut sub = Parser::new_loader(lex, file_path, rc);
+        let parse_result = sub.parse();
+        self.modules.borrow_mut().loading.pop();
+        let mut sub_program = parse_result.map_err(|e| ParserError::ModuleError {
+            message: format!("parsing module '{}': {}", mod_name, e),
+            span: Some(self.last_span),
+        })?;
+
+        let own_decls = std::mem::take(&mut sub.own_decls);
+        let names = ModuleLoader::build_names_map(mod_name, &own_decls);
+        ModuleLoader::rename_module(&mut sub_program.body, &names);
+
+        let renamed = |n: &String| names.get(n).cloned().unwrap_or_else(|| n.clone());
+        let mut structs = HashMap::new();
+        let mut unions = HashMap::new();
+        let mut enums = HashMap::new();
+        let mut typedefs = HashMap::new();
+        for (k, v) in sub.structs.iter() {
+            let k = renamed(k);
+            structs.insert(k.clone(), v.clone());
+            self.structs.insert(k, v.clone());
+        }
+        for (k, v) in sub.unions.iter() {
+            let k = renamed(k);
+            unions.insert(k.clone(), v.clone());
+            self.unions.insert(k, v.clone());
+        }
+        for (k, v) in sub.enums.iter() {
+            let k = renamed(k);
+            enums.insert(k.clone(), v.clone());
+            self.enums.insert(k, v.clone());
+        }
+        for (k, v) in sub.typedefs.iter() {
+            let k = renamed(k);
+            typedefs.insert(k.clone(), v.clone());
+            self.typedefs.insert(k, v.clone());
+        }
+
+        let kinds = own_decls.iter().map(|(n, k)| (n.clone(), *k)).collect();
+        self.modules.borrow_mut().loaded.insert(
+            mod_name.to_string(),
+            LoadedModule {
+                names,
+                kinds,
+                structs,
+                unions,
+                enums,
+                typedefs,
+            },
+        );
+
+        Ok(sub_program.body)
+    }
+
+    fn merge_module_types(&mut self, lm: &LoadedModule) {
+        for (k, v) in lm.structs.iter() {
+            self.structs.insert(k.clone(), v.clone());
+        }
+        for (k, v) in lm.unions.iter() {
+            self.unions.insert(k.clone(), v.clone());
+        }
+        for (k, v) in lm.enums.iter() {
+            self.enums.insert(k.clone(), v.clone());
+        }
+        for (k, v) in lm.typedefs.iter() {
+            self.typedefs.insert(k.clone(), v.clone());
+        }
+    }
+
+    fn resolve_module_name(&self, mod_name: &str, name: &str) -> Result<String, ParserError> {
+        let m = self.modules.borrow();
+        if let Some(lm) = m.loaded.get(mod_name) {
+            if let Some(target) = lm.names.get(name) {
+                return Ok(target.clone());
+            }
+        }
+        Err(ParserError::ModuleError {
+            message: format!(
+                "'{}' has no member '{}' (module not imported?)",
+                mod_name, name
+            ),
+            span: Some(self.last_span),
+        })
+    }
+
+    fn resolve_module_kind(&self, mod_name: &str, name: &str) -> DeclKind {
+        let m = self.modules.borrow();
+        if let Some(lm) = m.loaded.get(mod_name) {
+            if let Some(kind) = lm.kinds.get(name) {
+                return *kind;
+            }
+        }
+        DeclKind::Fn
     }
 
     fn append_fstring_helpers(&mut self, body: &mut Vec<Expr>) {
@@ -227,6 +532,11 @@ impl<'a> Parser<'a> {
             has_fstring: false,
             deref_depth: 0,
             scope_depth: self.scope_depth,
+            modules: self.modules.clone(),
+            base_path: self.base_path.clone(),
+            alias_map: self.alias_map.clone(),
+            from_alias: self.from_alias.clone(),
+            own_decls: Vec::new(),
         };
         sub.expr()
     }
@@ -1389,9 +1699,29 @@ impl<'a> Parser<'a> {
                         return Ok(Expr::ArrayLiteral(elements, span));
                     }
                 }
-                Ok((Token::IDENT(s), span)) => {
-                    let name = s.clone();
+                Ok((Token::IDENT(s), span)) | Ok((Token::TYPE(s), span)) => {
+                    let is_type_kw = matches!(self.peek(), Some(Ok((Token::TYPE(_), _))));
+                    let mut name = s.clone();
                     self.next()?;
+
+                    if matches!(self.peek(), Some(Ok((Token::COLONCOLON, _)))) {
+                        self.next()?;
+                        let (member, _) = self.parse_ident()?;
+                        let mod_name = self
+                            .alias_map
+                            .get(&name)
+                            .cloned()
+                            .unwrap_or_else(|| name.clone());
+                        name = self.resolve_module_name(&mod_name, &member)?;
+                    } else if let Some((target, _)) = self.from_alias.get(&name).cloned() {
+                        name = target;
+                    } else if is_type_kw {
+                        return Err(ParserError::UnexpectedToken {
+                            expected: None,
+                            found: Token::TYPE(name.clone()),
+                            span,
+                        });
+                    }
 
                     if self.structs.contains_key(&name) || self.unions.contains_key(&name) {
                         let is_union = self.unions.contains_key(&name);
@@ -1821,30 +2151,80 @@ impl<'a> Parser<'a> {
         let (first_token, span) = self.next()?;
 
         let base_type = match first_token {
-            Token::TYPE(t) => match t.as_str() {
-                "int" => Type::Primitive(Primitive::Int),
-                "float" => Type::Primitive(Primitive::Float),
-                "bool" => Type::Primitive(Primitive::Boolean),
-                "string" => Type::Primitive(Primitive::String),
-                "void" => Type::Primitive(Primitive::Void),
-                name => {
+            Token::TYPE(t) => {
+                if matches!(self.peek(), Some(Ok((Token::COLONCOLON, _)))) {
+                    self.next()?;
+                    let (member, _) = self.parse_ident()?;
+                    let mod_name = self.alias_map.get(&t).cloned().unwrap_or_else(|| t.clone());
+                    let target = self.resolve_module_name(&mod_name, &member)?;
+                    let kind = self.resolve_module_kind(&mod_name, &member);
                     let mut args = Vec::new();
                     if matches!(self.peek(), Some(Ok((Token::LT, _)))) {
                         self.next()?;
                         args = self.get_type_args_list()?;
                         self.expect(Token::GT)?;
                     }
-                    if self.unions.contains_key(name) {
-                        Type::Union(name.to_string(), args)
-                    } else if self.enums.contains_key(name) {
-                        Type::Primitive(Primitive::Int)
-                    } else {
-                        Type::Struct(name.to_string(), args)
+                    match kind {
+                        DeclKind::Union => Type::Union(target, args),
+                        DeclKind::Enum => Type::Primitive(Primitive::Int),
+                        _ => Type::Struct(target, args),
+                    }
+                } else {
+                    match t.as_str() {
+                        "int" => Type::Primitive(Primitive::Int),
+                        "float" => Type::Primitive(Primitive::Float),
+                        "bool" => Type::Primitive(Primitive::Boolean),
+                        "string" => Type::Primitive(Primitive::String),
+                        "void" => Type::Primitive(Primitive::Void),
+                        name => {
+                            let mut args = Vec::new();
+                            if matches!(self.peek(), Some(Ok((Token::LT, _)))) {
+                                self.next()?;
+                                args = self.get_type_args_list()?;
+                                self.expect(Token::GT)?;
+                            }
+                            if self.unions.contains_key(name) {
+                                Type::Union(name.to_string(), args)
+                            } else if self.enums.contains_key(name) {
+                                Type::Primitive(Primitive::Int)
+                            } else {
+                                Type::Struct(name.to_string(), args)
+                            }
+                        }
                     }
                 }
-            },
+            }
             Token::IDENT(s) => {
-                if let Some(idx) = self.lookup_type_param(&s) {
+                if matches!(self.peek(), Some(Ok((Token::COLONCOLON, _)))) {
+                    self.next()?;
+                    let (member, _) = self.parse_ident()?;
+                    let mod_name = self.alias_map.get(&s).cloned().unwrap_or_else(|| s.clone());
+                    let target = self.resolve_module_name(&mod_name, &member)?;
+                    let kind = self.resolve_module_kind(&mod_name, &member);
+                    let mut args = Vec::new();
+                    if matches!(self.peek(), Some(Ok((Token::LT, _)))) {
+                        self.next()?;
+                        args = self.get_type_args_list()?;
+                        self.expect(Token::GT)?;
+                    }
+                    match kind {
+                        DeclKind::Union => Type::Union(target, args),
+                        DeclKind::Enum => Type::Primitive(Primitive::Int),
+                        _ => Type::Struct(target, args),
+                    }
+                } else if let Some((target, kind)) = self.from_alias.get(&s).cloned() {
+                    let mut args = Vec::new();
+                    if matches!(self.peek(), Some(Ok((Token::LT, _)))) {
+                        self.next()?;
+                        args = self.get_type_args_list()?;
+                        self.expect(Token::GT)?;
+                    }
+                    match kind {
+                        DeclKind::Union => Type::Union(target, args),
+                        DeclKind::Enum => Type::Primitive(Primitive::Int),
+                        _ => Type::Struct(target, args),
+                    }
+                } else if let Some(idx) = self.lookup_type_param(&s) {
                     Type::Param(idx)
                 } else if let Some(ty) = self.typedefs.get(&s) {
                     ty.clone()

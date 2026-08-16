@@ -1,4 +1,5 @@
-$import "io.ah"
+import io
+using io::println
 
 // Loops and Sum Example
 // Demonstrates calculating sum of numbers using loops
@@ -62,3 +63,7 @@ fun main(): int {
 
     return 0
 }
+
+
+
+

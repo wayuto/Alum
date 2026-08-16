@@ -1,6 +1,9 @@
-$import "io.ah"
-$import "string.ah"
-$import "memory.ah"
+import io
+using io::{write, read, print, println}
+import string
+using string::{strlen, strcpy, memcmp}
+import memory
+using memory::malloc
 
 // String Operations Example
 // Demonstrates string manipulation
@@ -39,3 +42,6 @@ fun main(): int {
     
     return 0
 }
+
+
+

@@ -1,7 +1,5 @@
-$ifndef ALUM_ARRAY
-$define ALUM_ARRAY 1
-
-$import "maybe.ah"
+import maybe
+using maybe::{Maybe}
 
 struct Array<T> {
     data: T[],
@@ -42,4 +40,3 @@ fun(pub) arr_new<T>(data: T[], len: int): Array<T> {
     }
 }
 
-$endif

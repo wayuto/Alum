@@ -1,4 +1,4 @@
-$import "io.ah"
+using io::println
 
 // Control Flow Example
 // Demonstrates if-else, while loops, and for loops
@@ -50,3 +50,5 @@ fun main(): int {
     
     return 0
 }
+
+

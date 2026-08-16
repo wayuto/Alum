@@ -1,4 +1,5 @@
-$import "io.ah"
+import io
+using io::println
 
 // C-style enum with auto-incrementing and explicit values
 
@@ -47,3 +48,7 @@ fun main(): int {
 
     return 0
 }
+
+
+
+

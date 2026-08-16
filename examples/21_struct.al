@@ -1,4 +1,5 @@
-$import "io.ah"
+import io
+using io::println
 
 // Struct declaration and using Example
 
@@ -15,3 +16,7 @@ fun main(): int {
     println(f"Point({p.x}, {p.y})")
     return 0
 }
+
+
+
+

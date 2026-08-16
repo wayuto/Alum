@@ -1,8 +1,10 @@
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Mutex;
 
 use alc::compiler::{
-    Span, lexer::Lexer, parser::Parser, preprocessor::Preprocessor, visitor::TypeChecker,
+    Span, lexer::Lexer, modules::DeclKind, parser::Parser, preprocessor::Preprocessor,
+    visitor::TypeChecker,
 };
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
@@ -51,6 +53,44 @@ impl LanguageServer for Backend {
 
         let line = source.lines().nth(pos.line as usize).unwrap_or("");
         let prefix = word_prefix(line, pos.character as usize);
+
+        let base_path = uri
+            .to_file_path()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default();
+
+        if let Some((mod_name, member_prefix)) = module_member_context(line, pos.character as usize)
+        {
+            if let Some(members) =
+                parse_loaded_modules(&source, &base_path).and_then(|m| m.get(&mod_name).cloned())
+            {
+                let items = members
+                    .iter()
+                    .filter(|(n, _)| n.starts_with(&member_prefix))
+                    .map(|(n, kind)| CompletionItem {
+                        label: n.clone(),
+                        kind: Some(item_kind(*kind)),
+                        insert_text: Some(n.clone()),
+                        ..Default::default()
+                    })
+                    .collect();
+                return Ok(Some(CompletionResponse::Array(items)));
+            }
+        }
+
+        if let Some(mod_prefix) = import_module_prefix(line, pos.character as usize) {
+            let items = available_modules(&base_path)
+                .iter()
+                .filter(|n| n.starts_with(&mod_prefix))
+                .map(|n| CompletionItem {
+                    label: n.clone(),
+                    kind: Some(CompletionItemKind::MODULE),
+                    insert_text: Some(n.clone()),
+                    ..Default::default()
+                })
+                .collect();
+            return Ok(Some(CompletionResponse::Array(items)));
+        }
 
         let items = ALUM_KEYWORDS
             .iter()
@@ -128,7 +168,7 @@ fn analyze(source: &str, base_path: &str, out: &mut HashMap<String, Vec<Diagnost
     };
 
     let lexer = Lexer::new(&processed);
-    let mut parser = Parser::new(lexer);
+    let mut parser = Parser::new(lexer, base_path.to_string(), Vec::new());
     let (mut ast, parse_errors) = parser.parse_collect();
 
     if !parse_errors.is_empty() {
@@ -201,10 +241,116 @@ fn push_diag(
 }
 
 const ALUM_KEYWORDS: &[&str] = &[
-    "bool", "break", "continue", "cst", "else", "enum", "extern", "false", "float", "for", "fun",
-    "if", "in", "int", "match", "nil", "return", "string", "struct", "true", "typedef", "union",
-    "var", "void", "while",
+    "as", "bool", "break", "continue", "cst", "else", "enum", "extern", "false", "float", "for",
+    "fun", "if", "import", "in", "int", "match", "nil", "return", "string", "struct", "true",
+    "typedef", "union", "using", "var", "void", "while",
 ];
+
+fn split_at_utf16(line: &str, utf16_col: usize) -> (&str, &str) {
+    let mut units = 0;
+    for (i, c) in line.char_indices() {
+        if units >= utf16_col {
+            return (&line[..i], &line[i..]);
+        }
+        units += c.len_utf16();
+    }
+    (line, "")
+}
+
+fn module_member_context(line: &str, utf16_col: usize) -> Option<(String, String)> {
+    let (before, _) = split_at_utf16(line, utf16_col);
+    let idx = before.rfind("::")?;
+    let head = &before[..idx];
+    let mod_name = head
+        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .next_back()
+        .unwrap_or("")
+        .to_string();
+    if mod_name.is_empty() {
+        return None;
+    }
+
+    let prefix: String = before[idx + 2..]
+        .chars()
+        .skip_while(|c| *c == '{')
+        .take_while(|c| c.is_alphanumeric() || *c == '_')
+        .collect();
+    Some((mod_name, prefix))
+}
+
+fn import_module_prefix(line: &str, utf16_col: usize) -> Option<String> {
+    let (before, _) = split_at_utf16(line, utf16_col);
+    let words: Vec<&str> = before
+        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .filter(|w| !w.is_empty())
+        .collect();
+    let len = words.len();
+    if len >= 1 && (words[len - 1] == "import" || words[len - 1] == "using") {
+        Some(String::new())
+    } else if len >= 2 && (words[len - 2] == "import" || words[len - 2] == "using") {
+        Some(words[len - 1].to_string())
+    } else {
+        None
+    }
+}
+
+fn parse_loaded_modules(
+    source: &str,
+    base_path: &str,
+) -> Option<HashMap<String, Vec<(String, DeclKind)>>> {
+    let mut preprocessor = Preprocessor::new(source, base_path.to_string(), Vec::new());
+    let (processed, _) = preprocessor.preprocess().ok()?;
+    let lexer = Lexer::new(&processed);
+    let mut parser = Parser::new(lexer, base_path.to_string(), Vec::new());
+    let _ = parser.parse_collect();
+    let mut members = HashMap::new();
+    for name in parser.loaded_module_names() {
+        if let Some(m) = parser.module_members(&name) {
+            members.insert(name, m);
+        }
+    }
+    Some(members)
+}
+
+fn available_modules(base_path: &str) -> Vec<String> {
+    let mut dirs: Vec<String> = Vec::new();
+    if let Some(dir) = Path::new(base_path)
+        .parent()
+        .and_then(|p| p.to_str())
+        .filter(|s| !s.is_empty())
+    {
+        dirs.push(dir.to_string());
+    }
+    dirs.push("/usr/local/include/alum".to_string());
+    dirs.push("/usr/local/alum".to_string());
+
+    let mut names = Vec::new();
+    for dir in dirs {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                for ext in [".al", ".ah"] {
+                    if let Some(stem) = name.strip_suffix(ext) {
+                        names.push(stem.to_string());
+                    }
+                }
+            }
+        }
+    }
+    names.sort();
+    names.dedup();
+    names
+}
+
+fn item_kind(kind: DeclKind) -> CompletionItemKind {
+    match kind {
+        DeclKind::Fn | DeclKind::ExternFn => CompletionItemKind::FUNCTION,
+        DeclKind::Struct => CompletionItemKind::STRUCT,
+        DeclKind::Union => CompletionItemKind::STRUCT,
+        DeclKind::Enum => CompletionItemKind::ENUM,
+        DeclKind::Const | DeclKind::GlobalVar | DeclKind::ExternVar => CompletionItemKind::VARIABLE,
+    }
+}
 
 fn word_prefix(line: &str, utf16_col: usize) -> String {
     let mut units = 0;

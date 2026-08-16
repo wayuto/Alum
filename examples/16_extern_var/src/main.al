@@ -1,5 +1,6 @@
-$import "io.ah"
-$import "vars.ah"
+import vars
+import io
+using io::{write, println}
 
 // Alum reading and writing C extern global variables.
 // The C file `src/vars.c` defines `counter` and `ratio`.
@@ -28,3 +29,6 @@ fun main(): int {
 
     return 0
 }
+
+
+

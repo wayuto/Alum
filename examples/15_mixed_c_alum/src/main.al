@@ -1,6 +1,6 @@
-$import "io.ah"
-$import "convert.ah"
-$import "helper.ah"
+import helper
+import io
+using io::println
 
 // Alum/C Mixed Programming Example
 // Demonstrates calling C functions from Alum
@@ -17,3 +17,6 @@ fun main(): int {
     
     return 0
 }
+
+
+

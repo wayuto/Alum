@@ -1,6 +1,8 @@
 // Test: Function Pointer Assignment and call
-$import "io.ah"
-$import "convert.ah"
+import io
+using io::println
+import convert
+using convert::itoa
 
 fun add(a: int, b: int): int {
     return a + b
@@ -26,3 +28,6 @@ fun main(): int {
 
     return 0
 }
+
+
+

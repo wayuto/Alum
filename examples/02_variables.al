@@ -1,4 +1,4 @@
-$import "io.ah"
+using io::println
 
 // Variables Example
 // Demonstrates variable declarations with different types
@@ -27,3 +27,5 @@ fun main(): int {
     
     return 0
 }
+
+

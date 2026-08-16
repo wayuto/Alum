@@ -1,4 +1,5 @@
-$import "io.ah"
+import io
+using io::println
 
 // Compile-time constants: `cst NAME: T = expr`
 // - Global `cst` declarations must have compile-time constant initializers.
@@ -36,3 +37,7 @@ fun main(): int {
     println(f"area(3.0) = {area(3.0)}")
     return 0
 }
+
+
+
+

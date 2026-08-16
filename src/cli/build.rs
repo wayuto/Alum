@@ -24,7 +24,7 @@ pub fn build(
     if verbose {
         eprintln!("Preprocessing...");
     }
-    let mut preprocessor = Preprocessor::new(&src, input.clone(), include_paths);
+    let mut preprocessor = Preprocessor::new(&src, input.clone(), include_paths.clone());
     let (processed, source_map) = preprocessor
         .preprocess()
         .map_err(|e| CompilerError::new(e, SourceMap::new()))?;
@@ -38,7 +38,7 @@ pub fn build(
         eprintln!("Parsing...");
     }
     let lexer = Lexer::new(&processed);
-    let mut parser = Parser::new(lexer);
+    let mut parser = Parser::new(lexer, input.clone(), include_paths.clone());
     let (mut ast, parse_errors) = parser.parse_collect();
 
     if !parse_errors.is_empty() {

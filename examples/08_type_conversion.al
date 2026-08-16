@@ -1,5 +1,7 @@
-$import "io.ah"
-$import "convert.ah"
+import io
+using io::println
+import convert
+using convert::{itoa, atoi, atof, ftoa}
 
 // Type Conversion Example
 // Demonstrates type conversion functions
@@ -41,3 +43,6 @@ fun main(): int {
     
     return 0
 }
+
+
+

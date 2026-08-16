@@ -1,31 +1,19 @@
-use crate::{string::strlen, syscall};
+use crate::{string::strlen, sys};
 
 const BUFFER_SIZE: usize = 1024;
 
 #[inline(never)]
 #[unsafe(no_mangle)]
-pub extern "C" fn write(fd: usize, buf: *const u8, n: usize) -> isize {
-    syscall(1, fd as isize, buf as isize, n as isize)
-}
-
-#[inline(never)]
-#[unsafe(no_mangle)]
-pub extern "C" fn read(fd: usize, buf: *mut u8, n: usize) -> isize {
-    syscall(0, fd as isize, buf as isize, n as isize)
-}
-
-#[inline(never)]
-#[unsafe(no_mangle)]
 pub extern "C" fn print(fmt: *const u8) -> isize {
     let len = strlen(fmt);
-    write(1, fmt, len)
+    sys::write(1, fmt, len)
 }
 
 #[inline(never)]
 #[unsafe(no_mangle)]
 pub extern "C" fn println(fmt: *const u8) -> isize {
     let len = strlen(fmt);
-    write(1, fmt, len) + write(1, b"\n".as_ptr(), 1)
+    sys::write(1, fmt, len) + sys::write(1, b"\n".as_ptr(), 1)
 }
 
 static mut BUF: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
@@ -44,7 +32,7 @@ pub extern "C" fn input(prompt: *const u8) -> *const u8 {
         }
 
         if prompt_len > 0 {
-            write(1, prompt, prompt_len);
+            sys::write(1, prompt, prompt_len);
         }
     }
 
@@ -53,7 +41,7 @@ pub extern "C" fn input(prompt: *const u8) -> *const u8 {
     while total_read < unsafe { (*buf).len() } - 1 {
         let mut ch: u8 = 0;
 
-        let result = read(0, &mut ch as *mut u8, 1);
+        let result = sys::read(0, &mut ch as *mut u8, 1);
 
         if result <= 0 {
             break;
@@ -81,28 +69,23 @@ pub extern "C" fn input(prompt: *const u8) -> *const u8 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn fopen(filename: *const u8, flags: isize, mode: isize) -> isize {
-    syscall(2, filename as isize, flags, mode)
+    sys::open(filename, flags, mode)
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn fclose(fd: isize) -> isize {
-    syscall(3, fd, 0, 0)
+    sys::close(fd)
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn fread(fd: isize) -> *const u8 {
     let buf = &raw mut BUF;
 
-    syscall(0, fd, buf as isize, BUFFER_SIZE as isize);
+    sys::read(fd, buf.cast::<u8>(), BUFFER_SIZE);
     buf as *const u8
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn fwrite(fd: isize, buf: *const u8, n: usize) -> isize {
-    syscall(1, fd, buf as isize, n as isize)
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn lseek(fd: isize, off: isize, whence: isize) -> isize {
-    syscall(8, fd, off, whence)
+    sys::write(fd, buf, n)
 }

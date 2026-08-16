@@ -1,4 +1,5 @@
-$import "memory.ah"
+import memory
+using memory::{malloc, free}
 
 fun(pub) itoa(n: int): string {
     var buf: *void = malloc(64)
@@ -41,3 +42,34 @@ fun(pub) itoa(n: int): string {
     buf[idx] = pnz[8]
     return buf
 }
+
+fun(pure) atoi(s: string): int {
+    var p: *void = s
+    var i: int = 0
+    while true {
+        var b: int = p[i]
+        if b != 32 && b != 9 && b != 10 && b != 13 break
+        i = i + 1
+    }
+    var sign: int = 1
+    var b: int = p[i]
+    if b == 43 {
+        i = i + 1
+    } else {
+        if b == 45 {
+            sign = -1
+            i = i + 1
+        }
+    }
+    var result: int = 0
+    while true {
+        var d: int = p[i]
+        if d < 48 || d > 57 break
+        result = result * 10 + (d - 48)
+        i = i + 1
+    }
+    return result * sign
+}
+
+fun(extern) atof(string): float
+fun(extern) ftoa(float): string

@@ -1,4 +1,5 @@
-$import "io.ah"
+import io
+using io::println
 
 // Getting args from command-line Example
 
@@ -10,3 +11,6 @@ fun main(argc: int, argv: string[]): int {
     }
     return 0
 }
+
+
+

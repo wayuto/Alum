@@ -14,9 +14,10 @@ echo "Building alum-std (Alum standard library)..."
 cd "$LOCATION/alum-std/alum"
 almk build
 
-echo "Installing alum-std headers..."
+echo "Installing alum-std modules..."
 sudo mkdir -p /usr/local/include/alum
-sudo cp "$LOCATION/alum-std/alum/headers/"*.ah /usr/local/include/alum/
+sudo rm -f /usr/local/include/alum/*.ah
+sudo cp "$LOCATION/alum-std/alum/src/"*.al /usr/local/include/alum/
 
 echo "Building Rust runtime (libalum_std.a)..."
 cd "$LOCATION/alum-std"
@@ -52,7 +53,7 @@ if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
         }
     fi
 
-    if [ -d node_modules ] && npx vsce package --out alum-vscode-lsp.vsix; then
+    if [ -d node_modules ] && yes | npx vsce package --out alum-vscode-lsp.vsix; then
         echo "Extension packaged: $LOCATION/alum-vscode/alum-vscode-lsp.vsix"
         if command -v code >/dev/null 2>&1; then
             echo "Installing extension into VS Code..."

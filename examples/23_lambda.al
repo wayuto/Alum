@@ -1,4 +1,5 @@
-$import "io.ah"
+import io
+using io::println
 
 // Lambda function example
 
@@ -10,3 +11,6 @@ fun main(): int {
     println(f"{f(1)}")
     return 0
 }
+
+
+

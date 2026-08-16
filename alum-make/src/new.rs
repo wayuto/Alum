@@ -46,7 +46,7 @@ pub fn new(
         "alum" => {
             fs::write(
                 format!("{}/src/main.al", name),
-                "$import \"io.ah\"\n\nfun main(): int {\n    println(\"Hello, World!\");\n    return 0;\n}\n",
+                "import io\nusing io::{write, read, print, println, input, fopen, fclose, fread, fwrite, lseek, pipe, pipe2, dup, dup2, dup3}\n\nfun main(): int {\n    println(\"Hello, World!\");\n    return 0;\n}\n",
             )?;
         }
         _ => {

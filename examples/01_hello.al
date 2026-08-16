@@ -1,4 +1,4 @@
-$import "io.ah"
+using io::println
 
 // Hello World Example
 // This is the simplest Alum program
@@ -7,3 +7,5 @@ fun main(): int {
     println("Hello world!")
     return 0
 }
+
+

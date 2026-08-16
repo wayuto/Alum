@@ -1,4 +1,5 @@
-$import "io.ah"
+import io
+using io::println
 
 // Match Example
 
@@ -23,3 +24,6 @@ fun main(): int {
 
     return 0
 }
+
+
+

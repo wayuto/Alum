@@ -1,7 +1,5 @@
-$ifndef ALUM_VEC
-$define ALUM_VEC 1
-
-$import "maybe.ah"
+import maybe
+using maybe::{Maybe}
 
 struct Vec<T> {
     data: T[],
@@ -83,4 +81,3 @@ fun(pub) vec_new<T>(): Vec<T> {
 	}
 }
 
-$endif

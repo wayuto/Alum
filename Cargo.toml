@@ -1,6 +1,6 @@
 [package]
 name = "alc"
-version = "0.9.7"
+version = "0.9.8"
 edition = "2024"
 
 [dependencies]
@@ -19,7 +19,7 @@ path = "src/lsp/alum-lsp.rs"
 
 [profile.release]
 opt-level = 3
-lto = "fat"      
+lto = "fat"
 codegen-units = 1
-panic = "unwind"      # keep catch_unwind working in const-fold fallback (eval_const_vm)      
+panic = "unwind"
 strip = "symbols"

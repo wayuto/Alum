@@ -1,6 +1,9 @@
-$import "io.ah"
-$import "maybe.ah"
-$import "vec.ah"
+import io
+using io::println
+import maybe
+using maybe::Maybe
+import vec
+using vec::{Vec, vec_new}
 
 // Vector Example
 
@@ -20,3 +23,6 @@ fun main(): int {
 	}
 	return 0
 }
+
+
+

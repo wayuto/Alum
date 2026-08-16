@@ -1,4 +1,5 @@
-$import "io.ah"
+import io
+using io::{print, println}
 
 // Array Sort Example
 // Demonstrates bubble sort algorithm
@@ -39,3 +40,7 @@ fun main(): int {
 
     return 0
 }
+
+
+
+

@@ -1,6 +1,3 @@
-$ifndef ALUM_MATH
-$define ALUM_MATH 1
-
 fun(pure) abs(n: int): int {
     if n < 0 {
         return -n
@@ -57,4 +54,3 @@ fun(pure) fact(n: int): int {
     return n * fact(n - 1)
 }
 
-$endif

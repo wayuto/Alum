@@ -1,5 +1,7 @@
-$import "result.ah"
-$import "io.ah"
+import result
+using result::{ResultValue, Result}
+import io
+using io::{println, input}
 
 // Result Example
 
@@ -34,3 +36,6 @@ fun main(): int {
     }
     return 0    
 }
+
+
+

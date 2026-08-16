@@ -64,7 +64,7 @@ This will:
 1. Build and install the `alc` compiler
 2. Build the standard library
 3. Install `libalum_std.a` to `/usr/local/lib/`
-4. Install standard library headers to `/usr/local/include/alum/`
+4. Install standard library modules to `/usr/local/include/alum/`
 5. Install the build tool `almk`
 
 ## Quick Start
@@ -74,7 +74,8 @@ This will:
 Create a file `hello.al`:
 
 ```al
-$import "io.ah"
+import io
+using io::{write, read, print, println, input, fopen, fclose, fread, fwrite, lseek, pipe, pipe2, dup, dup2, dup3}
 
 fun main(): int {
     println("Hello, World!")
@@ -98,11 +99,18 @@ alc -r hello.al
 ### A Program Using All Features
 
 ```al
-$import "io.ah"
-$import "string.ah"
-$import "convert.ah"
-$import "vec.ah"
-$import "result.ah"
+import io
+using io::{write, read, print, println, input, fopen, fclose, fread, fwrite, lseek, pipe, pipe2, dup, dup2, dup3}
+import string
+using string::{strlen, strcpy, strcat, memcpy, memset, bcmp, memcmp}
+import convert
+using convert::{itoa, atoi, atof, ftoa}
+import vec
+using vec::{Vec, vec_new}
+import maybe
+using maybe::{MaybeTag, Maybe, is_some}
+import result
+using result::{ResultStatus, ResultValue, Result}
 
 // enum (C-style)
 enum Color {

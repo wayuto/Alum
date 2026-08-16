@@ -1,4 +1,4 @@
-use crate::syscall;
+use crate::sys;
 use core::ptr;
 
 const ALIGN: usize = 8;
@@ -9,10 +9,6 @@ const MIN_BLOCK_SIZE: usize = 32;
 static mut FREE_LIST: *mut u8 = ptr::null_mut();
 static mut HEAP_START: *mut u8 = ptr::null_mut();
 static mut HEAP_END: *mut u8 = ptr::null_mut();
-
-fn brk(addr: usize) -> usize {
-    syscall(12, addr as isize, 0, 0) as usize
-}
 
 fn align_up(n: usize) -> usize {
     (n + ALIGN - 1) & !(ALIGN - 1)
@@ -83,8 +79,8 @@ fn remove_free(b: *mut u8) {
 
 fn grow_heap(need: usize) -> *mut u8 {
     unsafe {
-        let cur = brk(0);
-        let end = brk(cur + need);
+        let cur = sys::brk(0);
+        let end = sys::brk(cur + need);
         if end < cur + need {
             return ptr::null_mut();
         }

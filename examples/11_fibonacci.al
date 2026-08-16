@@ -1,4 +1,5 @@
-$import "io.ah"
+import io
+using io::println
 
 // Fibonacci Sequence Example
 // Generates and displays Fibonacci numbers
@@ -38,3 +39,6 @@ fun fibonacci(n: int): int {
         return fibonacci(n - 1) + fibonacci(n - 2)
     }
 }
+
+
+

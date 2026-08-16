@@ -1,5 +1,7 @@
-$import "io.ah"
-$import "math.ah"
+import io
+using io::println
+import math
+using math::{abs, sqrt, max, min, pow, fact}
 
 // Math Operations Example
 // Demonstrates math module functions
@@ -44,3 +46,6 @@ fun main(): int {
     
     return 0
 }
+
+
+

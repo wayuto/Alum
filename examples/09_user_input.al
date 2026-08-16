@@ -1,6 +1,9 @@
-$import "io.ah"
-$import "convert.ah"
-$import "memory.ah"
+import io
+using io::{println, input}
+import convert
+using convert::atoi
+import memory
+using memory::malloc
 
 // User Input Example
 // Demonstrates reading user input
@@ -36,3 +39,6 @@ fun main(): int {
     
     return 0
 }
+
+
+

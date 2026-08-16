@@ -1,4 +1,4 @@
-$import "io.ah"
+using io::println
 
 // Functions Example
 // Demonstrates function definitions and calls
@@ -44,3 +44,5 @@ fun main(): int {
     
     return 0
 }
+
+
