@@ -7,10 +7,10 @@ pub fn link(
     verbose: bool,
     native_libs: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut cmd = Command::new("rust-lld");
+    let mut cmd = Command::new("lld");
 
     cmd.arg("-flavor").arg("gnu");
-
+    cmd.arg("-O2");
     cmd.arg("-o").arg(exe_path);
 
     for obj_file in &obj_files {
@@ -52,7 +52,7 @@ pub fn link(
     let output = match cmd.output() {
         Ok(output) => output,
         Err(e) => {
-            return Err(format!("rust-lld not found: {}. Please install rust-lld.", e).into());
+            return Err(format!("lld not found: {}. Please install lld.", e).into());
         }
     };
 
@@ -97,9 +97,10 @@ pub fn create_shared_library(
         eprintln!("Creating shared library: {}", output_path);
     }
 
-    let status = Command::new("rust-lld")
+    let status = Command::new("lld")
         .arg("-flavor")
         .arg("gnu")
+        .arg("-O2")
         .arg("-shared")
         .arg("-o")
         .arg(output_path)
@@ -107,7 +108,7 @@ pub fn create_shared_library(
         .status()?;
 
     if !status.success() {
-        return Err("Failed to create shared library with rust-lld".into());
+        return Err("Failed to create shared library with lld".into());
     }
 
     Ok(())

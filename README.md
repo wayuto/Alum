@@ -26,7 +26,7 @@ The official tutorial series (中文教程) walks through the language from scra
 
 ## Features
 
-- **Native AOT Compilation** — compiles directly to native x86_64 machine code through an optimizing IR pipeline, with a built-in register allocator, assembler, and ELF encoder; links with `rust-lld`
+- **Native AOT Compilation** — compiles directly to native x86_64 machine code through an optimizing IR pipeline, with a built-in register allocator, assembler, and ELF encoder; links with `lld`
 - **Strong Static Typing** — explicit type annotations on `var`/`cst`, full type inference, and compile-time type checking before code generation
 - **Rich Type System** — `int`, `float`, `bool`, `string`, arrays `T[]`, pointers `*T`, function pointers, structs, unions, C-style enums (bare references when unambiguous), and generics with monomorphic instantiation
 - **Tagged `Result`/`Maybe`** — `Result<T, E>` and `Maybe<T>` built on `struct` + `union` + `enum`, enabling error handling and null-safety
