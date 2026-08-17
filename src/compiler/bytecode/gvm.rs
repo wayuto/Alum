@@ -74,9 +74,17 @@ impl GVM {
     }
 
     pub fn run(&mut self) {
+        let mut steps: u64 = 0;
         loop {
             let code = self.read();
             let op = Op::try_from(code).expect("Bytecode: unknown opcode");
+            steps += 1;
+            if steps > 100_000_000 {
+                panic!(
+                    "GVM: execution step limit exceeded (ip={}, op={:?})",
+                    self.ip, op
+                );
+            }
             match op {
                 Op::LOADCONST => {
                     let idx = self.read() as usize;
@@ -524,6 +532,14 @@ impl GVM {
                                 panic!("IndexError: Array index out of bounds: {i}");
                             }
                             self.stack.push(a[*i as usize].clone());
+                        }
+                        (Value::Str(s), Value::Int(i)) => {
+                            if *i < 0 || *i as usize >= s.len() {
+                                self.stack.push(Value::Int(0));
+                            } else {
+                                self.stack
+                                    .push(Value::Int(s.as_bytes()[*i as usize] as i64));
+                            }
                         }
                         (Value::Void, _) | (_, Value::Void) => self.stack.push(Value::Void),
                         _ => panic!("TypeError: Wrong types for ARRAY_GET operation"),

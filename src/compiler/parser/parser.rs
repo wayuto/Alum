@@ -589,6 +589,7 @@ impl<'a> Parser<'a> {
         let own_decls = std::mem::take(&mut sub.own_decls);
         let names = ModuleLoader::build_names_map(mod_name, &own_decls);
         ModuleLoader::rename_module(&mut sub_program.body, &names);
+        ModuleLoader::strip_module_pub(&mut sub_program.body);
 
         let renamed = |n: &String| names.get(n).cloned().unwrap_or_else(|| n.clone());
         let mut structs = HashMap::new();

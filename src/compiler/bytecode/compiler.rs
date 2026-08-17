@@ -516,13 +516,17 @@ impl Compiler {
                 self.emit(Op::JUMPIFFALSE, &[0, 0]);
                 self.loop_targets.push((loop_pos, Vec::new()));
                 self.compile_expr(body);
+                let mut break_jumps = Vec::new();
+                if let Some((_, jumps)) = self.loop_targets.last_mut() {
+                    break_jumps = std::mem::take(jumps);
+                }
+                self.emit(Op::JUMP, &[((loop_pos >> 8) & 0xff), loop_pos & 0xFF]);
                 let break_pos = self.code.len() as u32;
-                let (_, break_jumps) = self.loop_targets.pop().unwrap();
                 for j in break_jumps {
                     self.patch_jump_addr(j + 1, break_pos);
                 }
-                self.emit(Op::JUMP, &[((loop_pos >> 8) & 0xff), loop_pos & 0xFF]);
                 self.patch_jump_addr(iff + 1, break_pos);
+                self.loop_targets.pop();
                 self.exit_scope();
             }
             Expr::Break(_) => {

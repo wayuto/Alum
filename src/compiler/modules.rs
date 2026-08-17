@@ -105,6 +105,17 @@ impl ModuleLoader {
             rename_expr(expr, map);
         }
     }
+
+    pub fn strip_module_pub(body: &mut Vec<Expr>) {
+        for expr in body.iter_mut() {
+            match expr {
+                Expr::FuncDecl(_, attrs, _, _, _, _, _) => attrs.is_pub = false,
+                Expr::ConstDecl(_, _, _, is_pub, _) => *is_pub = false,
+                Expr::GlobalVar(_, is_pub, _, _, _) => *is_pub = false,
+                _ => {}
+            }
+        }
+    }
 }
 
 fn rename_type(ty: &mut Type, map: &HashMap<String, String>) {
