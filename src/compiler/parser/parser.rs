@@ -110,6 +110,7 @@ impl<'a> Parser<'a> {
             alias_map: HashMap::new(),
             from_alias: HashMap::new(),
             own_decls: Vec::new(),
+            deferred_module_decls: Vec::new(),
             decl_pub: false,
         }
     }
@@ -136,6 +137,7 @@ impl<'a> Parser<'a> {
             alias_map: HashMap::new(),
             from_alias: HashMap::new(),
             own_decls: Vec::new(),
+            deferred_module_decls: Vec::new(),
             decl_pub: false,
         }
     }
@@ -154,6 +156,7 @@ impl<'a> Parser<'a> {
                 }
             }
         }
+        body.extend(std::mem::take(&mut self.deferred_module_decls));
         self.append_fstring_helpers(&mut body);
         Ok(Program { body })
     }
@@ -192,6 +195,7 @@ impl<'a> Parser<'a> {
                 },
             }
         }
+        body.extend(std::mem::take(&mut self.deferred_module_decls));
         self.append_fstring_helpers(&mut body);
         (Program { body }, errors)
     }
@@ -290,19 +294,99 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn parse_module_path(&mut self) -> Result<Vec<String>, ParserError> {
+        let (first, _) = self.parse_ident()?;
+        let mut segs = vec![first];
+        while matches!(self.peek(), Some(Ok((Token::COLONCOLON, _)))) {
+            if !matches!(self.peek_n(1), Some(Ok((Token::IDENT(_), _)))) {
+                break;
+            }
+            self.next()?;
+            let (seg, _) = self.parse_ident()?;
+            segs.push(seg);
+        }
+        Ok(segs)
+    }
+
+    fn register_path_alias(&mut self, alias: &str, mod_name: &str) -> Result<(), ParserError> {
+        if let Some(prev) = self.alias_map.get(alias) {
+            if prev != mod_name {
+                return Err(ParserError::ModuleError {
+                    message: format!(
+                        "conflicting import: '{alias}' already refers to module '{prev}'"
+                    ),
+                    span: Some(self.last_span),
+                });
+            }
+        } else {
+            self.alias_map
+                .insert(alias.to_string(), mod_name.to_string());
+        }
+        Ok(())
+    }
+
+    fn resolve_path_chain(&mut self, segs: &[String]) -> Result<String, ParserError> {
+        for i in (1..segs.len()).rev() {
+            let p = segs[0..=i].join("/");
+            let hit = self.modules.borrow().loaded.contains_key(&p)
+                || self
+                    .modules
+                    .borrow()
+                    .find_file(&p, &self.base_path)
+                    .is_some();
+            if hit {
+                if i + 1 >= segs.len() {
+                    return Err(ParserError::ModuleError {
+                        message: format!("'{p}' is a module, not a member"),
+                        span: Some(self.last_span),
+                    });
+                }
+                let decls = self.load_module(&p)?;
+                self.deferred_module_decls.extend(decls);
+                return self.resolve_module_name(&p, &segs[i + 1]);
+            }
+        }
+        for i in (1..segs.len()).rev() {
+            let p = segs[0..i].join("/");
+            if self.modules.borrow().loaded.contains_key(&p) {
+                return self.resolve_module_name(&p, &segs[i]);
+            }
+        }
+        Err(ParserError::ModuleError {
+            message: format!(
+                "'{}' has no member '{}' (module not imported?)",
+                segs[0],
+                segs.get(1).map(|s| s.as_str()).unwrap_or("?")
+            ),
+            span: Some(self.last_span),
+        })
+    }
+
     fn parse_import_stmt(&mut self, body: &mut Vec<Expr>) -> Result<(), ParserError> {
         self.next()?;
-        let (mod_name, _) = self.parse_ident()?;
-        let mut alias = None;
+        let mut segs = self.parse_module_path()?;
+        let mod_name = segs.join("/");
+        let multi = segs.len() > 1;
+        let last_seg = segs.pop().unwrap();
+        let decls = match self.load_module(&mod_name) {
+            Ok(d) => d,
+            Err(e) => {
+                let is_dir = self.modules.borrow().dir_exists(&mod_name, &self.base_path);
+                if is_dir {
+                    self.register_path_alias(&last_seg, &mod_name)?;
+                    Vec::new()
+                } else {
+                    return Err(e);
+                }
+            }
+        };
+        body.extend(decls);
         if matches!(self.peek(), Some(Ok((Token::AS, _)))) {
             self.next()?;
             let (a, _) = self.parse_ident()?;
-            alias = Some(a);
-        }
-        let decls = self.load_module(&mod_name)?;
-        body.extend(decls);
-        if let Some(a) = alias {
-            self.alias_map.insert(a, mod_name);
+            self.register_path_alias(&a, &mod_name)?;
+        } else if multi {
+            self.register_path_alias(&last_seg, &mod_name)?;
         }
         Ok(())
     }
@@ -329,7 +413,71 @@ impl<'a> Parser<'a> {
 
     fn parse_using_stmt(&mut self, body: &mut Vec<Expr>) -> Result<(), ParserError> {
         self.next()?;
-        let (mod_name, _) = self.parse_ident()?;
+        let segs = self.parse_module_path()?;
+        if segs.len() > 1 {
+            let path = segs.join("/");
+            let is_file = self
+                .modules
+                .borrow()
+                .find_file(&path, &self.base_path)
+                .is_some();
+            let mod_loaded = self.modules.borrow().loaded.contains_key(&path);
+            if is_file || mod_loaded {
+                let decls = self.load_module(&path)?;
+                body.extend(decls);
+                let last_seg = segs.last().unwrap().clone();
+                self.register_path_alias(&last_seg, &path)?;
+                return Ok(());
+            }
+            if segs.len() == 2 {
+                let mod_name = &segs[0];
+                let name = &segs[1];
+                let real_name = self
+                    .alias_map
+                    .get(mod_name)
+                    .cloned()
+                    .unwrap_or_else(|| mod_name.clone());
+                let decls = self.load_module(&real_name)?;
+                body.extend(decls);
+                let target = self.resolve_module_name(&real_name, name)?;
+                let kind = self.resolve_module_kind(&real_name, name);
+                if matches!(self.peek(), Some(Ok((Token::AS, _)))) {
+                    self.next()?;
+                    let (a, _) = self.parse_ident()?;
+                    self.insert_from_alias(a, target, kind)?;
+                } else {
+                    self.insert_from_alias(name.clone(), target, kind)?;
+                }
+                return Ok(());
+            }
+            let mod_path = segs[..segs.len() - 1].join("/");
+            let name = segs.last().unwrap();
+            let hit = self
+                .modules
+                .borrow()
+                .find_file(&mod_path, &self.base_path)
+                .is_some()
+                || self.modules.borrow().loaded.contains_key(&mod_path);
+            if hit {
+                let decls = self.load_module(&mod_path)?;
+                body.extend(decls);
+                let target = self.resolve_module_name(&mod_path, name)?;
+                let kind = self.resolve_module_kind(&mod_path, name);
+                if matches!(self.peek(), Some(Ok((Token::AS, _)))) {
+                    self.next()?;
+                    let (a, _) = self.parse_ident()?;
+                    self.insert_from_alias(a, target, kind)?;
+                } else {
+                    self.insert_from_alias(name.clone(), target, kind)?;
+                }
+                return Ok(());
+            }
+            return Err(ParserError::ModuleError {
+                message: format!("module '{}' not found", path),
+                span: Some(self.last_span),
+            });
+        }
+        let mod_name = segs[0].clone();
         self.expect(Token::COLONCOLON)?;
         let real_name = self
             .alias_map
@@ -568,7 +716,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_sub_expr(&self, src: &str, span: Span) -> Result<Expr, ParserError> {
+    fn parse_sub_expr(&mut self, src: &str, span: Span) -> Result<Expr, ParserError> {
         let src = src.trim();
         if src.is_empty() {
             return Err(ParserError::UnexpectedToken {
@@ -595,9 +743,12 @@ impl<'a> Parser<'a> {
             alias_map: self.alias_map.clone(),
             from_alias: self.from_alias.clone(),
             own_decls: Vec::new(),
+            deferred_module_decls: Vec::new(),
             decl_pub: false,
         };
-        sub.expr()
+        let r = sub.expr();
+        self.deferred_module_decls.extend(sub.deferred_module_decls);
+        r
     }
 
     fn expr(&mut self) -> Result<Expr, ParserError> {
@@ -1770,14 +1921,22 @@ impl<'a> Parser<'a> {
                     self.next()?;
 
                     if matches!(self.peek(), Some(Ok((Token::COLONCOLON, _)))) {
-                        self.next()?;
-                        let (member, _) = self.parse_ident()?;
-                        let mod_name = self
-                            .alias_map
-                            .get(&name)
-                            .cloned()
-                            .unwrap_or_else(|| name.clone());
-                        name = self.resolve_module_name(&mod_name, &member)?;
+                        let mut segs = vec![name.clone()];
+                        while matches!(self.peek(), Some(Ok((Token::COLONCOLON, _))))
+                            && matches!(self.peek_n(1), Some(Ok((Token::IDENT(_), _))))
+                        {
+                            self.next()?;
+                            let (s, _) = self.parse_ident()?;
+                            segs.push(s);
+                        }
+                        if segs.len() > 1 {
+                            if let Some(t) = self.alias_map.get(&segs[0]).cloned() {
+                                segs[0] = t;
+                            }
+                            name = self.resolve_path_chain(&segs)?;
+                        } else if let Some((target, _)) = self.from_alias.get(&name).cloned() {
+                            name = target;
+                        }
                     } else if let Some((target, _)) = self.from_alias.get(&name).cloned() {
                         name = target;
                     } else if is_type_kw {

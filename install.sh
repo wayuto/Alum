@@ -3,7 +3,7 @@ set -e
 
 export LOCATION="$PWD"
 
-echo "Installing alc (Alum compiler) and alc-lsp (Alum language server)..."
+echo "Installing alc (Alum compiler) and alum-lsp (Alum language server)..."
 cargo install --path "$LOCATION"
 
 echo "Installing almk (Alum build tool)..."

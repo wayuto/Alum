@@ -30,6 +30,7 @@ pub struct Parser<'a> {
     alias_map: HashMap<String, String>,
     from_alias: HashMap<String, (String, DeclKind)>,
     own_decls: Vec<(String, DeclKind, bool)>,
+    deferred_module_decls: Vec<Expr>,
 
     decl_pub: bool,
 }

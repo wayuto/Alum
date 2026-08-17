@@ -67,15 +67,33 @@ impl ModuleLoader {
         None
     }
 
+    pub fn dir_exists(&self, name: &str, base_path: &str) -> bool {
+        let mut dirs: Vec<String> = Vec::new();
+        if !base_path.is_empty() {
+            let dir = Path::new(base_path)
+                .parent()
+                .and_then(|p| p.to_str())
+                .filter(|s| !s.is_empty())
+                .unwrap_or(".");
+            dirs.push(dir.to_string());
+        }
+        dirs.extend(self.include_paths.iter().cloned());
+        dirs.push("/usr/local/include/alum".to_string());
+        dirs.push("/usr/local/alum".to_string());
+
+        dirs.iter().any(|d| Path::new(d).join(name).is_dir())
+    }
+
     pub fn build_names_map(
         mod_name: &str,
         own_decls: &[(String, DeclKind, bool)],
     ) -> HashMap<String, String> {
+        let sym_mod = mod_name.replace('/', "__");
         let mut map = HashMap::new();
         for (name, kind, _) in own_decls {
             let final_name = match kind {
                 DeclKind::ExternVar => name.clone(),
-                _ => format!("{}__{}", mod_name, name),
+                _ => format!("{}__{}", sym_mod, name),
             };
             map.insert(name.clone(), final_name);
         }
