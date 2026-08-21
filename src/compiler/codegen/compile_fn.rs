@@ -192,6 +192,10 @@ impl AsmCodeGen {
         if func.is_pub {
             self.push_text(Asm::Global(func.name.clone()));
         }
+        for alias in &func.aliases {
+            self.push_text(Asm::Global(alias.clone()));
+            self.push_text(Asm::Label(alias.clone()));
+        }
         self.push_text(Asm::Label(func.name.clone()));
         if !frame_less {
             self.push_text(Asm::Push(Reg::Rbp));

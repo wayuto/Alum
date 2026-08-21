@@ -30,11 +30,18 @@ impl IRGen {
         let const_decls: Vec<Expr> = program
             .body
             .iter()
-            .filter(|e| matches!(e, Expr::ConstDecl(..)))
+            .filter(|e| {
+                matches!(e, Expr::ConstDecl(_, _, init, _, _)
+                    if !matches!(init.as_ref(), Expr::FuncDecl(..)))
+            })
             .cloned()
             .collect();
         self.store_global_consts(&const_decls)?;
         self.store_global_vars(&program.body)?;
+
+        for (name, params, body) in take(&mut self.pending_fn_bodies) {
+            self.compile_fn(name, params, body)?;
+        }
 
         for expr in program.body {
             match expr {
@@ -97,6 +104,23 @@ impl IRGen {
                                 body.clone(),
                             ),
                         );
+                    }
+                }
+                Expr::GlobalVar(bind_name, _, _, Some(init), _)
+                | Expr::ConstDecl(bind_name, _, init, _, _)
+                    if matches!(**init, Expr::FuncDecl(..)) =>
+                {
+                    if let Expr::FuncDecl(name, attrs, type_params, params, ret_type, body, _) =
+                        (**init).clone()
+                    {
+                        if type_params.is_empty() {
+                            self.func_decl(name.clone(), attrs, params.clone(), ret_type.clone())?;
+                            let func = self.functions.last_mut().unwrap();
+                            func.aliases.push(bind_name.to_string());
+                            self.func_high_returns
+                                .insert(bind_name.to_string(), ret_type);
+                            self.pending_fn_bodies.push((name, params, *body));
+                        }
                     }
                 }
                 Expr::ExternVar(name, ty, _) => {

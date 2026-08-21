@@ -45,7 +45,8 @@ impl IRGen {
                 let operand = self.compile_expr(arg.clone(), ctx)?;
                 let operand_type = ctx.get_operand_type(&operand, &self.constants)?;
                 let type_matches = operand_type == param.1
-                    || (operand_type == IRType::Array && param.1 == IRType::Int);
+                    || (operand_type == IRType::Array && param.1 == IRType::Int)
+                    || (matches!(operand, Operand::Function(_)) && param.1 == IRType::Int);
                 if !type_matches {
                     return Err(CodeGenError::TypeError {
                         message: format!(
@@ -222,6 +223,7 @@ impl IRGen {
                 src1: Some(i_op),
                 src2: None,
             });
+            let v_result = v_op.clone();
             ctx.instructions.push(Instruction {
                 op: Op::Arg(2),
                 dst: None,
@@ -235,7 +237,7 @@ impl IRGen {
                 src1: Some(fn_ptr),
                 src2: None,
             });
-            return Ok(res_tmp);
+            return Ok(v_result);
         }
         let (elem_type, byte) = self.index_info(&arr, ctx);
         let arr_op = self.compile_expr(*arr, ctx)?;
@@ -263,7 +265,7 @@ impl IRGen {
         } else {
             val
         };
-        let res_tmp = ctx.new_tmp(IRType::Void);
+        let result = val.clone();
         ctx.instructions.push(Instruction {
             op: if byte {
                 Op::ByteAssign
@@ -274,6 +276,6 @@ impl IRGen {
             src1: Some(offset),
             src2: Some(val),
         });
-        Ok(res_tmp)
+        Ok(result)
     }
 }

@@ -386,6 +386,7 @@ impl Compiler {
                 };
                 self.compile_expr(&idx);
                 self.compile_expr(value);
+                self.emit(Op::DUP, &[]);
                 self.emit(Op::ARRAYSET, &[slot]);
             }
 
@@ -398,7 +399,6 @@ impl Compiler {
                 self.compile_expr(value);
                 let slot = self.decl_var(name);
                 self.emit(Op::STOREVAR, &[slot]);
-                self.emit(Op::POP, &[]);
             }
             Expr::ConstDecl(name, _, value, _, _) => {
                 if let Expr::StructLiteral(tname, _, _, _) | Expr::UnionLiteral(tname, _, _, _) =
@@ -409,7 +409,6 @@ impl Compiler {
                 self.compile_expr(value);
                 let slot = self.decl_var(name);
                 self.emit(Op::STOREVAR, &[slot]);
-                self.emit(Op::POP, &[]);
             }
             Expr::GlobalVar(name, _, _, init, _) => {
                 match init {
@@ -427,7 +426,6 @@ impl Compiler {
                 self.compile_expr(value);
                 let slot = self.mod_var(name);
                 self.emit(Op::STOREVAR, &[slot]);
-                self.emit(Op::POP, &[]);
             }
             Expr::AddAssign(name, value, _)
             | Expr::SubAssign(name, value, _)
@@ -457,7 +455,6 @@ impl Compiler {
                 };
                 self.emit(op, &[]);
                 self.emit(Op::STOREVAR, &[slot]);
-                self.emit(Op::POP, &[]);
             }
 
             Expr::Return(value, _) => {
@@ -860,6 +857,7 @@ impl Compiler {
                     let idx_const = self.add_const(Value::Int(idx as i64));
                     self.emit(Op::LOADCONST, &[idx_const]);
                     self.compile_expr(value);
+                    self.emit(Op::DUP, &[]);
                     self.emit(Op::ARRAYSET, &[slot]);
                 }
             }
@@ -909,7 +907,6 @@ impl Compiler {
         self.emit(Op::LOADVAR, &[slot]);
         self.emit(if inc { Op::INC } else { Op::DEC }, &[]);
         self.emit(Op::STOREVAR, &[slot]);
-        self.emit(Op::POP, &[]);
     }
 
     fn compile_func(

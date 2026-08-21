@@ -124,6 +124,7 @@ pub struct Instruction {
 #[derive(Debug, Clone)]
 pub struct IRFunction {
     pub name: String,
+    pub aliases: Vec<String>,
     pub params: Vec<(Operand, IRType)>,
     pub instructions: Vec<Instruction>,
     pub ret_type: IRType,

@@ -1009,7 +1009,7 @@ impl TypeChecker {
                         }
                     }
 
-                    Ok(Type::Primitive(Primitive::Void))
+                    Ok(value_type)
                 } else {
                     Err(CheckerError::InvalidOperation {
                         op: "index assignment".to_string(),
@@ -1093,11 +1093,14 @@ impl TypeChecker {
                     let resolved_params: Vec<Type> =
                         param_vars.iter().map(|t| self.resolve_type(t)).collect();
                     let resolved_ret = self.resolve_type(&ret_var);
-                    self.functions
-                        .insert(name.clone(), (Vec::new(), resolved_params, resolved_ret));
+                    self.functions.insert(
+                        name.clone(),
+                        (Vec::new(), resolved_params.clone(), resolved_ret.clone()),
+                    );
+                    Ok(Type::Function(resolved_params, Box::new(resolved_ret)))
+                } else {
+                    Ok(Type::Primitive(Primitive::Void))
                 }
-
-                Ok(Type::Primitive(Primitive::Void))
             }
             Expr::Break(_) | Expr::Continue(_) => Ok(Type::Primitive(Primitive::Void)),
             Expr::TypeDef(_) => Ok(Type::Primitive(Primitive::Void)),
@@ -1433,7 +1436,7 @@ impl TypeChecker {
                                 span: span,
                             });
                         }
-                        return Ok(Type::Primitive(Primitive::Void));
+                        return Ok(expected);
                     }
                 }
 
@@ -1530,7 +1533,7 @@ impl TypeChecker {
                                 span: span,
                             });
                         }
-                        Ok(Type::Primitive(Primitive::Void))
+                        Ok(*inner)
                     }
                     _ => Err(CheckerError::InvalidOperation {
                         op: "dereference assignment".to_string(),

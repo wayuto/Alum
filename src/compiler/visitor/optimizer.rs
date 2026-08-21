@@ -81,7 +81,9 @@ impl Optimizer {
                     fn_used.contains(name)
                 }
             }
-            Expr::ConstDecl(name, _, _, is_pub, _) => *is_pub || const_used.contains(name),
+            Expr::ConstDecl(name, _, init, is_pub, _) => {
+                *is_pub || const_used.contains(name) || matches!(init.as_ref(), Expr::FuncDecl(..))
+            }
             Expr::GlobalVar(_, _, _, _, _) => true,
             _ => true,
         });

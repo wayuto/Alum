@@ -147,14 +147,16 @@ impl IRGen {
             .map(|t| t.entries.clone())
             .unwrap_or_default();
 
+        let prev_hook = std::panic::take_hook();
+        std::panic::set_hook(std::boxed::Box::new(|_| {}));
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let bc = Compiler::new().compile(program);
             let mut vm = GVM::new(bc, natives);
             vm.run();
             vm.result()
-        }))
-        .ok()
-        .flatten()?;
+        }));
+        std::panic::set_hook(prev_hook);
+        let result = result.ok().flatten()?;
 
         match result {
             Value::Int(i) => Some((IRConst::Int(i), IRType::Int)),

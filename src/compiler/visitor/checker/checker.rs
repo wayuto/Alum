@@ -123,6 +123,11 @@ impl TypeChecker {
                 Expr::GlobalVar(name, _, ty, _, _) => {
                     self.globals.insert(name.clone(), ty.clone());
                 }
+                Expr::ConstDecl(name, ty, _, _, _) => {
+                    if !matches!(ty, Type::Unknown) {
+                        self.constants.insert(name.clone(), ty.clone());
+                    }
+                }
                 Expr::Struct(name, type_params, fields, _) => {
                     self.structs
                         .insert(name.clone(), (type_params.clone(), fields.clone()));

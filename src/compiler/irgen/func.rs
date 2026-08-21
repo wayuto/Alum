@@ -24,6 +24,7 @@ impl IRGen {
         let is_pub = attrs.is_pub || name == "main";
         self.functions.push(IRFunction {
             name,
+            aliases: Vec::new(),
             params: ir_params,
             ret_type: ir_ret_type,
             instructions: Vec::new(),
@@ -107,7 +108,7 @@ impl IRGen {
 
     pub(super) fn find_func(&self, name: &str) -> Result<IRFunction, CodeGenError> {
         for func in self.functions.iter().rev() {
-            if func.name == *name {
+            if func.name == *name || func.aliases.iter().any(|a| a == name) {
                 return Ok(func.to_owned());
             }
         }

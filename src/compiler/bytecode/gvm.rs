@@ -575,6 +575,11 @@ impl GVM {
                         _ => panic!("TypeError: ARRAYLEN on non-array"),
                     }
                 }
+                Op::DUP => {
+                    let v = self.pop();
+                    self.stack.push(v.clone());
+                    self.stack.push(v);
+                }
                 Op::HALT => return,
             }
         }

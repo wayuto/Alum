@@ -21,7 +21,6 @@ use crate::compiler::{
     parser::{Expr, Type},
 };
 use std::collections::HashMap;
-
 pub struct IRGen {
     pub(super) functions: Vec<IRFunction>,
     pub(super) constants: Vec<IRConst>,
@@ -35,6 +34,7 @@ pub struct IRGen {
     pub(super) generic_funcs: HashMap<String, (Vec<String>, Vec<(String, Type)>, Type, Box<Expr>)>,
     pub(super) func_high_returns: HashMap<String, Type>,
     pub(super) lambda_counter: u32,
+    pub(super) pending_fn_bodies: Vec<(String, Vec<(String, Type)>, Expr)>,
     pub(super) extern_vars: HashMap<String, Type>,
     pub(super) program_body: Vec<Expr>,
     pub(super) natives: Option<NativeTable>,
@@ -62,6 +62,7 @@ impl IRGen {
             generic_funcs: HashMap::new(),
             func_high_returns: HashMap::new(),
             lambda_counter: 0,
+            pending_fn_bodies: Vec::new(),
             extern_vars: HashMap::new(),
             program_body: Vec::new(),
             natives,

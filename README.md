@@ -27,6 +27,7 @@ The official tutorial series (中文教程) walks through the language from scra
 
 ## Features
 
+- **EiaE** - Everything is a expression
 - **Native AOT Compilation** — compiles directly to native x86_64 machine code through an optimizing IR pipeline, with a built-in register allocator, assembler, and ELF encoder; links with `lld`
 - **Strong Static Typing** — explicit type annotations on `var`/`cst`, full type inference, and compile-time type checking before code generation
 - **Rich Type System** — `int`, `float`, `bool`, `string`, arrays `T[]`, pointers `*T`, function pointers, structs, unions, C-style enums (bare references when unambiguous), and generics with monomorphic instantiation

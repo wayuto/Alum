@@ -1632,7 +1632,7 @@ impl<'a> Parser<'a> {
         let mut left = self.term()?;
 
         if let Some(Ok((Token::DOTDOT, span))) = self.peek().cloned() {
-            if span.line == 0 {
+            if span.line == 0 || span.line == left.span().line {
                 self.next()?;
                 let right = self.term()?;
                 let span = left.span();

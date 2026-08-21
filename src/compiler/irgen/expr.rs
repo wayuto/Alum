@@ -939,6 +939,7 @@ impl IRGen {
                 }
 
                 ctx.declare_var_with_type(name.clone(), var_ir_type.clone(), resolved_typ)?;
+                let result = value.clone();
                 match var_ir_type {
                     IRType::Float => ctx.instructions.push(Instruction {
                         op: Op::FStore,
@@ -953,7 +954,7 @@ impl IRGen {
                         src2: None,
                     }),
                 }
-                Ok(ctx.new_tmp(IRType::Void))
+                Ok(result)
             }
 
             Expr::ConstDecl(name, typ, value, _, _) => {
@@ -988,6 +989,7 @@ impl IRGen {
                 }
 
                 ctx.declare_var_with_type(name.clone(), var_ir_type.clone(), resolved_typ)?;
+                let result = value.clone();
                 match var_ir_type {
                     IRType::Float => ctx.instructions.push(Instruction {
                         op: Op::FStore,
@@ -1002,7 +1004,7 @@ impl IRGen {
                         src2: None,
                     }),
                 }
-                Ok(ctx.new_tmp(IRType::Void))
+                Ok(result)
             }
 
             Expr::GlobalVar(_, _, _, _, _) => Ok(ctx.new_tmp(IRType::Void)),
@@ -1020,13 +1022,14 @@ impl IRGen {
                         });
                     }
                     let dst = self.extern_op(&name).unwrap();
+                    let result = value.clone();
                     ctx.instructions.push(Instruction {
                         op: store_op,
                         dst: Some(dst),
                         src1: Some(value),
                         src2: None,
                     });
-                    return Ok(ctx.new_tmp(IRType::Void));
+                    return Ok(result);
                 }
                 let var_typ = ctx.get_var_type(&name)?;
                 if typ != var_typ {
@@ -1049,6 +1052,7 @@ impl IRGen {
                             Some(ty) => self.copy_resource(ctx, value, &ty)?,
                             None => value,
                         };
+                        let result = value.clone();
                         self.emit_var_free(ctx, &name)?;
                         match typ {
                             IRType::Float => ctx.instructions.push(Instruction {
@@ -1064,9 +1068,10 @@ impl IRGen {
                                 src2: None,
                             }),
                         }
-                        return Ok(ctx.new_tmp(IRType::Void));
+                        return Ok(result);
                     }
                 }
+                let result = value.clone();
                 match typ {
                     IRType::Float => ctx.instructions.push(Instruction {
                         op: Op::FStore,
@@ -1081,7 +1086,7 @@ impl IRGen {
                         src2: None,
                     }),
                 }
-                Ok(ctx.new_tmp(IRType::Void))
+                Ok(result)
             }
 
             Expr::Var(name, _) => {
@@ -1684,13 +1689,14 @@ impl IRGen {
                 } else {
                     val_op
                 };
+                let result = val_op.clone();
                 ctx.instructions.push(Instruction {
                     op: Op::StoreAt,
                     dst: Some(addr),
                     src1: Some(Operand::ConstIdx(zero_idx)),
                     src2: Some(val_op),
                 });
-                Ok(ctx.new_tmp(IRType::Void))
+                Ok(result)
             }
 
             Expr::AddressOf(inner, _) => {
@@ -1736,13 +1742,14 @@ impl IRGen {
             Expr::DerefAssign(ptr, val, _) => {
                 let ptr_op = self.compile_expr(*ptr, ctx)?;
                 let val_op = self.compile_expr(*val, ctx)?;
+                let result = val_op.clone();
                 ctx.instructions.push(Instruction {
                     op: Op::StoreAt,
                     dst: Some(ptr_op),
                     src1: Some(Operand::ConstIdx(self.get_const_index(IRConst::Int(0)))),
                     src2: Some(val_op),
                 });
-                Ok(ctx.new_tmp(IRType::Void))
+                Ok(result)
             }
 
             Expr::TypeDef(_)

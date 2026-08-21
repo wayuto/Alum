@@ -11,6 +11,9 @@ impl IRGen {
         for expr in body {
             match expr {
                 Expr::GlobalVar(name, is_pub, ty, init, _) => {
+                    if matches!(init.as_deref(), Some(Expr::FuncDecl(..))) {
+                        continue;
+                    }
                     let value = match init {
                         Some(init) => match self.eval_const(init) {
                             Some((cv, _)) => Some(cv),
