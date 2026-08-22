@@ -28,6 +28,12 @@ struct Func {
     param_count: u32,
 }
 
+#[derive(Default)]
+struct LoopTargets {
+    break_jumps: Vec<u32>,
+    continue_jumps: Vec<u32>,
+}
+
 pub struct Compiler {
     constants: Vec<Value>,
     code: Vec<u8>,
@@ -37,8 +43,8 @@ pub struct Compiler {
     current_func: Option<(String, u32)>,
     lambda_counter: u32,
     native_names: Vec<String>,
-    native_idx: HashMap<String, u16>,
-    loop_targets: Vec<(u32, Vec<u32>)>,
+    native_idx: HashMap<String, u32>,
+    loop_targets: Vec<LoopTargets>,
     structs: HashMap<String, Vec<(String, Type)>>,
     unions: HashMap<String, Vec<(String, Type)>>,
     var_types: Vec<HashMap<String, String>>,
@@ -66,7 +72,7 @@ impl Compiler {
     fn emit(&mut self, op: Op, args: &[u32]) -> () {
         self.code.push(op as u8);
         for arg in args {
-            self.code.push(*arg as u8);
+            self.code.extend_from_slice(&arg.to_le_bytes());
         }
     }
 
@@ -129,7 +135,11 @@ impl Compiler {
     }
 
     fn field_index(&self, type_name: &str, field_name: &str) -> Option<usize> {
-        self.lookup_struct_fields(type_name)?
+        if let Some(fields) = self.unions.get(type_name) {
+            return fields.iter().position(|(n, _)| n == field_name).map(|_| 0);
+        }
+        self.structs
+            .get(type_name)?
             .iter()
             .position(|(n, _)| n == field_name)
     }
@@ -162,7 +172,7 @@ impl Compiler {
                 Expr::FuncDecl(name, attrs, ..) if attrs.is_external => {
                     let idx = self.native_names.len();
                     self.native_names.push(name.clone());
-                    self.native_idx.insert(name.clone(), idx as u16);
+                    self.native_idx.insert(name.clone(), idx as u32);
                 }
                 Expr::Struct(name, _, fields, _) => {
                     self.structs.insert(name.clone(), fields.clone());
@@ -221,10 +231,7 @@ impl Compiler {
                         let func = self
                             .load_func(name)
                             .unwrap_or_else(|| panic!("Compiler: Variable {} not found", name));
-                        self.emit(
-                            Op::MAKEFUNC,
-                            &[(func.addr >> 8) & 0xFF, func.addr & 0xFF, func.param_count],
-                        );
+                        self.emit(Op::MAKEFUNC, &[func.addr, func.param_count]);
                     }
                 }
             }
@@ -464,10 +471,7 @@ impl Compiler {
                             self.compile_expr(arg);
                         }
                     }
-                    self.emit(
-                        Op::TAILCALL,
-                        &[((target >> 8) & 0xFF), (target & 0xFF), param_count as u32],
-                    );
+                    self.emit(Op::TAILCALL, &[target, param_count as u32]);
                 } else {
                     self.compile_expr(value);
                     self.emit(Op::RET, &[]);
@@ -487,14 +491,14 @@ impl Compiler {
             Expr::If(cond, then_branch, else_branch, _) => {
                 self.compile_expr(cond);
                 let then_addr = self.code.len() as u32;
-                self.emit(Op::JUMPIFFALSE, &[0, 0]);
+                self.emit(Op::JUMPIFFALSE, &[0]);
 
                 self.compile_expr(then_branch);
 
                 let mut else_addr: u32 = 1;
                 if else_branch.is_some() {
                     else_addr = self.code.len() as u32;
-                    self.emit(Op::JUMP, &[0, 0]);
+                    self.emit(Op::JUMP, &[0]);
                 }
                 let then_end = self.code.len() as u32;
                 self.patch_jump_addr(then_addr + 1, then_end);
@@ -510,37 +514,37 @@ impl Compiler {
                 let loop_pos = self.code.len() as u32;
                 self.compile_expr(cond);
                 let iff = self.code.len() as u32;
-                self.emit(Op::JUMPIFFALSE, &[0, 0]);
-                self.loop_targets.push((loop_pos, Vec::new()));
+                self.emit(Op::JUMPIFFALSE, &[0]);
+                self.loop_targets.push(LoopTargets::default());
                 self.compile_expr(body);
-                let mut break_jumps = Vec::new();
-                if let Some((_, jumps)) = self.loop_targets.last_mut() {
-                    break_jumps = std::mem::take(jumps);
-                }
-                self.emit(Op::JUMP, &[((loop_pos >> 8) & 0xff), loop_pos & 0xFF]);
+                self.emit(Op::POP, &[]);
+                let targets = self.loop_targets.pop().unwrap();
+                self.emit(Op::JUMP, &[loop_pos]);
                 let break_pos = self.code.len() as u32;
-                for j in break_jumps {
+                for j in targets.break_jumps {
                     self.patch_jump_addr(j + 1, break_pos);
                 }
+
+                for j in targets.continue_jumps {
+                    self.patch_jump_addr(j + 1, loop_pos);
+                }
                 self.patch_jump_addr(iff + 1, break_pos);
-                self.loop_targets.pop();
                 self.exit_scope();
             }
             Expr::Break(_) => {
-                if let Some((_, break_jumps)) = self.loop_targets.last_mut() {
+                if let Some(targets) = self.loop_targets.last_mut() {
                     let j = self.code.len() as u32;
-                    break_jumps.push(j);
-                    self.emit(Op::JUMP, &[0, 0]);
+                    targets.break_jumps.push(j);
+                    self.emit(Op::JUMP, &[0]);
                 } else {
                     panic!("Compiler: break outside loop for bytecode");
                 }
             }
             Expr::Continue(_) => {
-                if let Some(&(continue_target, _)) = self.loop_targets.last() {
-                    self.emit(
-                        Op::JUMP,
-                        &[((continue_target >> 8) & 0xff), continue_target & 0xFF],
-                    );
+                if let Some(targets) = self.loop_targets.last_mut() {
+                    let j = self.code.len() as u32;
+                    targets.continue_jumps.push(j);
+                    self.emit(Op::JUMP, &[0]);
                 } else {
                     panic!("Compiler: continue outside loop for bytecode");
                 }
@@ -574,32 +578,15 @@ impl Compiler {
                         for arg in args {
                             self.compile_expr(arg);
                         }
-                        self.emit(
-                            Op::CALL,
-                            &[
-                                ((func.addr >> 8) & 0xFF),
-                                func.addr & 0xFF,
-                                func.param_count,
-                            ],
-                        );
+                        self.emit(Op::CALL, &[func.addr, func.param_count]);
                     }
                     None => {
                         if let Expr::Var(name, _) = f.as_ref() {
                             if let Some(&idx) = self.native_idx.get(name) {
-                                if args.len() > 255 {
-                                    panic!("Compiler: too many arguments for native call");
-                                }
                                 for arg in args {
                                     self.compile_expr(arg);
                                 }
-                                self.emit(
-                                    Op::CALLNATIVE,
-                                    &[
-                                        ((idx >> 8) & 0xFF) as u32,
-                                        (idx & 0xFF) as u32,
-                                        args.len() as u32,
-                                    ],
-                                );
+                                self.emit(Op::CALLNATIVE, &[idx, args.len() as u32]);
                                 return;
                             }
                         }
@@ -617,7 +604,7 @@ impl Compiler {
                 self.lambda_counter += 1;
 
                 let jump_addr = self.code.len() as u32;
-                self.emit(Op::JUMP, &[0, 0]);
+                self.emit(Op::JUMP, &[0]);
                 let func_addr = self.code.len() as u32;
 
                 self.funcs.last_mut().unwrap().insert(
@@ -628,6 +615,8 @@ impl Compiler {
                     },
                 );
 
+                let saved_slot = self.next_slot;
+                self.next_slot = 0;
                 self.enter_scope();
                 for (param, _) in params {
                     self.decl_var(param);
@@ -641,16 +630,10 @@ impl Compiler {
                     _ => self.emit(Op::RET, &[]),
                 }
                 self.exit_scope();
+                self.next_slot = saved_slot;
 
                 self.patch_jump_addr(jump_addr + 1, self.code.len() as u32);
-                self.emit(
-                    Op::MAKEFUNC,
-                    &[
-                        (func_addr >> 8) & 0xFF,
-                        func_addr & 0xFF,
-                        params.len() as u32,
-                    ],
-                );
+                self.emit(Op::MAKEFUNC, &[func_addr, params.len() as u32]);
             }
 
             Expr::Range(start, end, _) => {
@@ -669,14 +652,7 @@ impl Compiler {
                 self.emit(Op::SUB, &[]);
                 let zero_const = self.add_const(Value::Int(0));
                 self.emit(Op::LOADCONST, &[zero_const]);
-                self.emit(Op::LT, &[]);
-                let skip_zero = self.code.len() as u32;
-                self.emit(Op::JUMPIFFALSE, &[0, 0]);
-                self.emit(Op::POP, &[]);
-                self.emit(Op::LOADCONST, &[zero_const]);
-                self.patch_jump_addr(skip_zero + 1, self.code.len() as u32);
-
-                self.emit(Op::NEWARRAY, &[1]);
+                self.emit(Op::ARRAYFILL, &[]);
 
                 let arr_slot = self.decl_var("_range_arr");
                 self.emit(Op::STOREVAR, &[arr_slot]);
@@ -694,9 +670,8 @@ impl Compiler {
                 self.emit(Op::SUB, &[]);
                 self.emit(Op::LT, &[]);
                 let exit_loop = self.code.len() as u32;
-                self.emit(Op::JUMPIFFALSE, &[0, 0]);
+                self.emit(Op::JUMPIFFALSE, &[0]);
 
-                self.emit(Op::LOADVAR, &[arr_slot]);
                 self.emit(Op::LOADVAR, &[idx_slot]);
                 self.emit(Op::LOADVAR, &[start_slot]);
                 self.emit(Op::LOADVAR, &[idx_slot]);
@@ -708,7 +683,7 @@ impl Compiler {
                 self.emit(Op::STOREVAR, &[idx_slot]);
                 self.emit(Op::POP, &[]);
 
-                self.emit(Op::JUMP, &[((loop_pos >> 8) & 0xff), loop_pos & 0xFF]);
+                self.emit(Op::JUMP, &[loop_pos]);
                 self.patch_jump_addr(exit_loop + 1, self.code.len() as u32);
 
                 self.emit(Op::LOADVAR, &[arr_slot]);
@@ -727,26 +702,30 @@ impl Compiler {
                     self.emit(Op::POP, &[]);
 
                     let loop_pos = self.code.len() as u32;
-                    self.loop_targets.push((loop_pos, Vec::new()));
+                    self.loop_targets.push(LoopTargets::default());
                     self.emit(Op::LOADVAR, &[var_slot]);
                     self.emit(Op::LOADVAR, &[end_slot]);
                     self.emit(Op::LT, &[]);
                     let exit_loop = self.code.len() as u32;
-                    self.emit(Op::JUMPIFFALSE, &[0, 0]);
+                    self.emit(Op::JUMPIFFALSE, &[0]);
 
                     self.compile_expr(body);
                     self.emit(Op::POP, &[]);
 
+                    let inc_pos = self.code.len() as u32;
                     self.emit(Op::LOADVAR, &[var_slot]);
                     self.emit(Op::INC, &[]);
                     self.emit(Op::STOREVAR, &[var_slot]);
                     self.emit(Op::POP, &[]);
 
-                    self.emit(Op::JUMP, &[((loop_pos >> 8) & 0xff), loop_pos & 0xFF]);
+                    self.emit(Op::JUMP, &[loop_pos]);
                     let break_pos = self.code.len() as u32;
-                    let (_, break_jumps) = self.loop_targets.pop().unwrap();
-                    for j in break_jumps {
+                    let targets = self.loop_targets.pop().unwrap();
+                    for j in targets.break_jumps {
                         self.patch_jump_addr(j + 1, break_pos);
+                    }
+                    for j in targets.continue_jumps {
+                        self.patch_jump_addr(j + 1, inc_pos);
                     }
                     self.patch_jump_addr(exit_loop + 1, break_pos);
                 } else {
@@ -770,13 +749,13 @@ impl Compiler {
                     let var_slot = self.decl_var(var);
 
                     let loop_pos = self.code.len() as u32;
-                    self.loop_targets.push((loop_pos, Vec::new()));
+                    self.loop_targets.push(LoopTargets::default());
 
                     self.emit(Op::LOADVAR, &[idx_slot]);
                     self.emit(Op::LOADVAR, &[len_slot]);
                     self.emit(Op::LT, &[]);
                     let exit_loop = self.code.len() as u32;
-                    self.emit(Op::JUMPIFFALSE, &[0, 0]);
+                    self.emit(Op::JUMPIFFALSE, &[0]);
 
                     self.emit(Op::LOADVAR, &[arr_slot]);
                     self.emit(Op::LOADVAR, &[idx_slot]);
@@ -787,16 +766,20 @@ impl Compiler {
                     self.compile_expr(body);
                     self.emit(Op::POP, &[]);
 
+                    let inc_pos = self.code.len() as u32;
                     self.emit(Op::LOADVAR, &[idx_slot]);
                     self.emit(Op::INC, &[]);
                     self.emit(Op::STOREVAR, &[idx_slot]);
                     self.emit(Op::POP, &[]);
 
-                    self.emit(Op::JUMP, &[((loop_pos >> 8) & 0xff), loop_pos & 0xFF]);
+                    self.emit(Op::JUMP, &[loop_pos]);
                     let break_pos = self.code.len() as u32;
-                    let (_, break_jumps) = self.loop_targets.pop().unwrap();
-                    for j in break_jumps {
+                    let targets = self.loop_targets.pop().unwrap();
+                    for j in targets.break_jumps {
                         self.patch_jump_addr(j + 1, break_pos);
+                    }
+                    for j in targets.continue_jumps {
+                        self.patch_jump_addr(j + 1, inc_pos);
                     }
                     self.patch_jump_addr(exit_loop + 1, break_pos);
                 }
@@ -808,11 +791,11 @@ impl Compiler {
                     .lookup_struct_fields(name)
                     .map(|f| f.clone())
                     .unwrap_or_default();
-                for (fname, _) in &field_order {
+                for (fname, fty) in &field_order {
                     if let Some((_, fval)) = fields.iter().find(|(n, _)| n == fname) {
                         self.compile_expr(fval);
                     } else {
-                        let zero = self.add_const(Value::Int(0));
+                        let zero = self.add_const(array_fill_zero(fty));
                         self.emit(Op::LOADCONST, &[zero]);
                     }
                 }
@@ -823,43 +806,54 @@ impl Compiler {
                     .lookup_struct_fields(name)
                     .map(|f| f.clone())
                     .unwrap_or_default();
+
+                let mut init: Option<&Expr> = None;
                 for (fname, _) in &field_order {
                     if let Some((_, fval)) = fields.iter().find(|(n, _)| n == fname) {
-                        self.compile_expr(fval);
-                    } else {
-                        let zero = self.add_const(Value::Int(0));
+                        init = Some(fval);
+                    }
+                }
+                match init {
+                    Some(fval) => self.compile_expr(fval),
+                    None => {
+                        let zero_ty = field_order
+                            .first()
+                            .map(|(_, t)| t)
+                            .unwrap_or(&Type::Primitive(Primitive::Int));
+                        let zero = self.add_const(array_fill_zero(zero_ty));
                         self.emit(Op::LOADCONST, &[zero]);
                     }
                 }
-                self.emit(Op::NEWARRAY, &[field_order.len() as u32]);
+                self.emit(Op::NEWARRAY, &[1]);
             }
             Expr::MemberAccess(obj, field_name, _) => {
-                let type_name = self.resolve_struct_type(obj);
-                let idx = if let Some(ref tname) = type_name {
-                    self.field_index(tname, field_name).unwrap_or(0)
-                } else {
-                    0
-                };
+                let type_name = self
+                    .resolve_struct_type(obj)
+                    .unwrap_or_else(|| panic!("unsupported member access in CTE"));
+                let idx = self.field_index(&type_name, field_name).unwrap_or_else(|| {
+                    panic!("Compiler: type {type_name} has no field {field_name} (CTE)")
+                });
                 self.compile_expr(obj);
                 let idx_const = self.add_const(Value::Int(idx as i64));
                 self.emit(Op::LOADCONST, &[idx_const]);
                 self.emit(Op::ARRAYGET, &[]);
             }
             Expr::MemberAssign(obj, field_name, value, _) => {
-                let type_name = self.resolve_struct_type(obj);
-                let idx = if let Some(ref tname) = type_name {
-                    self.field_index(tname, field_name).unwrap_or(0)
-                } else {
-                    0
+                let type_name = self
+                    .resolve_struct_type(obj)
+                    .unwrap_or_else(|| panic!("unsupported member access in CTE"));
+                let idx = self.field_index(&type_name, field_name).unwrap_or_else(|| {
+                    panic!("Compiler: type {type_name} has no field {field_name} (CTE)")
+                });
+                let Expr::Var(name, _) = obj.as_ref() else {
+                    panic!("Compiler: unsupported member assignment target in CTE");
                 };
-                if let Expr::Var(name, _) = obj.as_ref() {
-                    let slot = self.mod_var(name);
-                    let idx_const = self.add_const(Value::Int(idx as i64));
-                    self.emit(Op::LOADCONST, &[idx_const]);
-                    self.compile_expr(value);
-                    self.emit(Op::DUP, &[]);
-                    self.emit(Op::ARRAYSET, &[slot]);
-                }
+                let slot = self.mod_var(name);
+                let idx_const = self.add_const(Value::Int(idx as i64));
+                self.emit(Op::LOADCONST, &[idx_const]);
+                self.compile_expr(value);
+                self.emit(Op::DUP, &[]);
+                self.emit(Op::ARRAYSET, &[slot]);
             }
             Expr::Match(target, branches, default, _) => {
                 self.compile_expr(target);
@@ -873,12 +867,12 @@ impl Compiler {
                     self.compile_expr(case_expr);
                     self.emit(Op::EQ, &[]);
                     let skip_addr = self.code.len() as u32;
-                    self.emit(Op::JUMPIFFALSE, &[0, 0]);
+                    self.emit(Op::JUMPIFFALSE, &[0]);
 
                     self.compile_expr(result_expr);
 
                     end_jumps.push(self.code.len() as u32);
-                    self.emit(Op::JUMP, &[0, 0]);
+                    self.emit(Op::JUMP, &[0]);
 
                     let next_addr = self.code.len() as u32;
                     self.patch_jump_addr(skip_addr + 1, next_addr);
@@ -917,7 +911,7 @@ impl Compiler {
         body: &Expr,
     ) {
         let jump_addr = self.code.len() as u32;
-        self.emit(Op::JUMP, &[0, 0]);
+        self.emit(Op::JUMP, &[0]);
         let func_addr = self.code.len() as u32;
 
         let curr_func = self.funcs.last_mut().unwrap();
@@ -933,6 +927,9 @@ impl Compiler {
         );
 
         self.current_func = Some((name.to_string(), func_addr));
+
+        let saved_slot = self.next_slot;
+        self.next_slot = 0;
         self.enter_scope();
         for (param, ty) in params {
             self.decl_var(param);
@@ -947,14 +944,14 @@ impl Compiler {
             _ => self.emit(Op::RET, &[]),
         }
         self.exit_scope();
+        self.next_slot = saved_slot;
         self.current_func = None;
 
         self.patch_jump_addr(jump_addr + 1, self.code.len() as u32);
     }
 
     fn patch_jump_addr(&mut self, pos: u32, addr: u32) {
-        self.code[pos as usize] = ((addr >> 8) & 0xff) as u8;
-        self.code[(pos + 1) as usize] = (addr & 0xff) as u8;
+        self.code[pos as usize..pos as usize + 4].copy_from_slice(&addr.to_le_bytes());
     }
 
     fn tail_self_call(&self, value: &Expr) -> Option<(u32, usize)> {
@@ -969,6 +966,14 @@ impl Compiler {
         };
         if name != fname {
             return None;
+        }
+        let func = self.load_func(name)?;
+        if func.param_count as usize != args.len() {
+            panic!(
+                "Compiler: Function call expects {} arguments, got {}",
+                func.param_count,
+                args.len()
+            );
         }
         Some((*faddr, args.len()))
     }

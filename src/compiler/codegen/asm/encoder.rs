@@ -269,6 +269,9 @@ impl Assembler {
                 self.emit_slice(section, &[0x58 + (reg.reg_id() & 7)]);
             }
             Call(Operand::Reg(r)) => {
+                if r.rex_b() {
+                    self.emit_slice(section, &[0x41]);
+                }
                 self.emit_slice(section, &[0xff, self.modrm(3, 2, r.reg_id() & 7)]);
             }
             Call(Operand::Label(l)) => {
@@ -316,6 +319,9 @@ impl Assembler {
             Jbe(lbl) => {
                 self.emit_cond_jmp(0x0f86, lbl, section);
             }
+            Jp(lbl) => {
+                self.emit_cond_jmp(0x0f8a, lbl, section);
+            }
             Sete(reg) => {
                 self.emit_setcc(0x0f94, *reg, section);
             }
@@ -346,6 +352,12 @@ impl Assembler {
             Setbe(reg) => {
                 self.emit_setcc(0x0f96, *reg, section);
             }
+            Setp(reg) => {
+                self.emit_setcc(0x0f9a, *reg, section);
+            }
+            Setnp(reg) => {
+                self.emit_setcc(0x0f9b, *reg, section);
+            }
             Addsd(dst, src) => self.emit_fp_binop(0x58, dst, src, section, offset)?,
             Subsd(dst, src) => self.emit_fp_binop(0x5c, dst, src, section, offset)?,
             Mulsd(dst, src) => self.emit_fp_binop(0x59, dst, src, section, offset)?,
@@ -369,7 +381,7 @@ impl Assembler {
                         self.emit_modrm_sib(section, d.reg_id() & 7, m, offset)?;
                     }
                     Operand::DataLabel(l) => {
-                        self.emit_rex(section, false, false, false, d.rex_b());
+                        self.emit_rex(section, false, d.rex_b(), false, false);
                         self.emit_slice(section, &[0x0f, 0x57]);
                         self.emit_rm_disp32(section, d.reg_id() & 7);
                         self.emit_reloc(section, RelocKind::Pc32, l.clone(), -4);
@@ -632,7 +644,8 @@ impl Assembler {
             }
             (Operand::Reg(r), Operand::DataLabel(l)) => {
                 self.emit_slice(section, &[f2]);
-                self.emit_rex(section, false, false, false, r.rex_b());
+
+                self.emit_rex(section, false, r.rex_b(), false, false);
                 self.emit_slice(section, &[0x0f, 0x10]);
                 self.emit_rm_disp32(section, r.reg_id() & 7);
                 self.emit_reloc(section, RelocKind::Pc32, l.clone(), -4);
@@ -669,7 +682,8 @@ impl Assembler {
             }
             (Operand::Reg(r), Operand::DataLabel(l)) => {
                 self.emit_slice(section, &[f2]);
-                self.emit_rex(section, false, false, false, r.rex_b());
+
+                self.emit_rex(section, false, r.rex_b(), false, false);
                 self.emit_slice(section, &[0x0f, opcode]);
                 self.emit_rm_disp32(section, r.reg_id() & 7);
                 self.emit_reloc(section, RelocKind::Pc32, l.clone(), -4);
@@ -707,7 +721,11 @@ impl Assembler {
                     8 => 3,
                     _ => return Err("invalid scale".to_string()),
                 };
-                let mod_ = if m.disp == 0 {
+
+                let needs_disp8 = m.disp == 0 && (base == Reg::Rbp || base == Reg::R13);
+                let mod_ = if needs_disp8 {
+                    1u8
+                } else if m.disp == 0 {
                     0u8
                 } else if m.disp >= -128 && m.disp <= 127 {
                     1

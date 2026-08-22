@@ -41,6 +41,14 @@ impl GVM {
         b
     }
 
+    fn read_u32(&mut self) -> u32 {
+        let mut buf = [0u8; 4];
+        for b in &mut buf {
+            *b = self.read();
+        }
+        u32::from_le_bytes(buf)
+    }
+
     fn enter_frame(&mut self, target: usize, args: Vec<Value>, operand_base: usize) {
         let args_count = args.len();
         let key = (target, args.clone());
@@ -87,11 +95,11 @@ impl GVM {
             }
             match op {
                 Op::LOADCONST => {
-                    let idx = self.read() as usize;
+                    let idx = self.read_u32() as usize;
                     self.stack.push(self.bytecode.chunk.constants[idx].clone());
                 }
                 Op::LOADVAR => {
-                    let slot = self.read() as usize;
+                    let slot = self.read_u32() as usize;
                     let index = self.curr_base_slot + slot;
                     if index >= self.slots.len() {
                         self.slots.resize(index + 1, Value::Void);
@@ -99,12 +107,13 @@ impl GVM {
                     self.stack.push(self.slots[index].clone());
                 }
                 Op::STOREVAR => {
-                    let slot = self.read() as usize;
+                    let slot = self.read_u32() as usize;
                     let index = self.curr_base_slot + slot;
                     if index >= self.slots.len() {
                         self.slots.resize(index + 1, Value::Void);
                     }
-                    self.slots[index] = self.pop();
+
+                    self.slots[index] = self.stack.last().cloned().unwrap_or(Value::Void);
                 }
                 Op::ADD => {
                     let right = self.pop();
@@ -207,62 +216,102 @@ impl GVM {
                 Op::GT => {
                     let right = self.pop();
                     let left = self.pop();
-                    self.stack
-                        .push(Value::Bool(num_cmp(&left, &right, |a, b| a > b)));
+                    self.stack.push(Value::Bool(num_cmp(
+                        &left,
+                        &right,
+                        |a, b| a > b,
+                        |a, b| a > b,
+                    )));
                 }
                 Op::GE => {
                     let right = self.pop();
                     let left = self.pop();
-                    self.stack
-                        .push(Value::Bool(num_cmp(&left, &right, |a, b| a >= b)));
+                    self.stack.push(Value::Bool(num_cmp(
+                        &left,
+                        &right,
+                        |a, b| a >= b,
+                        |a, b| a >= b,
+                    )));
                 }
                 Op::LT => {
                     let right = self.pop();
                     let left = self.pop();
-                    self.stack
-                        .push(Value::Bool(num_cmp(&left, &right, |a, b| a < b)));
+                    self.stack.push(Value::Bool(num_cmp(
+                        &left,
+                        &right,
+                        |a, b| a < b,
+                        |a, b| a < b,
+                    )));
                 }
                 Op::LE => {
                     let right = self.pop();
                     let left = self.pop();
-                    self.stack
-                        .push(Value::Bool(num_cmp(&left, &right, |a, b| a <= b)));
+                    self.stack.push(Value::Bool(num_cmp(
+                        &left,
+                        &right,
+                        |a, b| a <= b,
+                        |a, b| a <= b,
+                    )));
                 }
                 Op::FEQ => {
                     let right = self.pop();
                     let left = self.pop();
-                    self.stack
-                        .push(Value::Bool(num_cmp(&left, &right, |a, b| a == b)));
+                    self.stack.push(Value::Bool(num_cmp(
+                        &left,
+                        &right,
+                        |a, b| a == b,
+                        |a, b| a == b,
+                    )));
                 }
                 Op::FNE => {
                     let right = self.pop();
                     let left = self.pop();
-                    self.stack
-                        .push(Value::Bool(num_cmp(&left, &right, |a, b| a != b)));
+                    self.stack.push(Value::Bool(num_cmp(
+                        &left,
+                        &right,
+                        |a, b| a != b,
+                        |a, b| a != b,
+                    )));
                 }
                 Op::FGT => {
                     let right = self.pop();
                     let left = self.pop();
-                    self.stack
-                        .push(Value::Bool(num_cmp(&left, &right, |a, b| a > b)));
+                    self.stack.push(Value::Bool(num_cmp(
+                        &left,
+                        &right,
+                        |a, b| a > b,
+                        |a, b| a > b,
+                    )));
                 }
                 Op::FGE => {
                     let right = self.pop();
                     let left = self.pop();
-                    self.stack
-                        .push(Value::Bool(num_cmp(&left, &right, |a, b| a >= b)));
+                    self.stack.push(Value::Bool(num_cmp(
+                        &left,
+                        &right,
+                        |a, b| a >= b,
+                        |a, b| a >= b,
+                    )));
                 }
                 Op::FLT => {
                     let right = self.pop();
                     let left = self.pop();
-                    self.stack
-                        .push(Value::Bool(num_cmp(&left, &right, |a, b| a < b)));
+                    self.stack.push(Value::Bool(num_cmp(
+                        &left,
+                        &right,
+                        |a, b| a < b,
+                        |a, b| a < b,
+                    )));
                 }
                 Op::FLE => {
                     let right = self.pop();
                     let left = self.pop();
-                    self.stack
-                        .push(Value::Bool(num_cmp(&left, &right, |a, b| a <= b)));
+                    self.stack.push(Value::Bool(num_cmp(
+                        &left,
+                        &right,
+                        |a, b| a <= b,
+                        |a, b| a <= b,
+                    )));
                 }
                 Op::POP => {
                     if self.stack.len() > self.curr_operand_base {
@@ -384,25 +433,21 @@ impl GVM {
                     });
                 }
                 Op::JUMP => {
-                    let high = self.read() as usize;
-                    let low = self.read() as usize;
-                    self.ip = (high << 8) | low;
+                    self.ip = self.read_u32() as usize;
                 }
                 Op::JUMPIFFALSE => {
-                    let high = self.read() as usize;
-                    let low = self.read() as usize;
-                    let target = (high << 8) | low;
+                    let target = self.read_u32() as usize;
                     match self.pop() {
                         Value::Bool(false) => self.ip = target,
-                        Value::Bool(true) | Value::Void => {}
+                        Value::Bool(true) => {}
+
+                        Value::Void => panic!("TypeError: Void condition for JUMP_IF_FALSE"),
                         _ => panic!("TypeError: Wrong type for JUMP_IF_FALSE operation"),
                     }
                 }
                 Op::CALL => {
-                    let high = self.read() as usize;
-                    let low = self.read() as usize;
-                    let args_count = self.read() as usize;
-                    let target = (high << 8) | low;
+                    let target = self.read_u32() as usize;
+                    let args_count = self.read_u32() as usize;
 
                     let operand_base = self.stack.len() - args_count;
                     let args: Vec<Value> = (0..args_count).map(|_| self.pop()).collect();
@@ -410,7 +455,7 @@ impl GVM {
                     self.enter_frame(target, args, operand_base);
                 }
                 Op::CALLVALUE => {
-                    let args_count = self.read() as usize;
+                    let args_count = self.read_u32() as usize;
                     let operand_base = self.stack.len() - (args_count + 1);
                     let args: Vec<Value> = (0..args_count).map(|_| self.pop()).collect();
                     match self.pop() {
@@ -428,10 +473,8 @@ impl GVM {
                     }
                 }
                 Op::CALLNATIVE => {
-                    let hi = self.read() as usize;
-                    let lo = self.read() as usize;
-                    let argc = self.read() as usize;
-                    let idx = (hi << 8) | lo;
+                    let idx = self.read_u32() as usize;
+                    let argc = self.read_u32() as usize;
                     let entry = self
                         .bytecode
                         .chunk
@@ -455,17 +498,13 @@ impl GVM {
                     self.stack.push(result);
                 }
                 Op::MAKEFUNC => {
-                    let high = self.read() as usize;
-                    let low = self.read() as usize;
-                    let arity = self.read() as usize;
-                    self.stack
-                        .push(Value::Fn(((high << 8) | low) as u32, arity as u32));
+                    let addr = self.read_u32();
+                    let arity = self.read_u32();
+                    self.stack.push(Value::Fn(addr, arity));
                 }
                 Op::TAILCALL => {
-                    let high = self.read() as usize;
-                    let low = self.read() as usize;
-                    let args_count = self.read() as usize;
-                    let target = (high << 8) | low;
+                    let target = self.read_u32() as usize;
+                    let args_count = self.read_u32() as usize;
 
                     let operand_base = self.stack.len() - args_count;
                     let args: Vec<Value> = (0..args_count).map(|_| self.pop()).collect();
@@ -506,7 +545,7 @@ impl GVM {
                     }
                 }
                 Op::NEWARRAY => {
-                    let n = self.read() as usize;
+                    let n = self.read_u32() as usize;
                     let mut elems = Vec::with_capacity(n);
                     for _ in 0..n {
                         elems.push(self.pop());
@@ -546,7 +585,7 @@ impl GVM {
                     }
                 }
                 Op::ARRAYSET => {
-                    let slot = self.read() as usize;
+                    let slot = self.read_u32() as usize;
                     let index = self.curr_base_slot + slot;
                     let value = self.pop();
                     let idx = self.pop();
@@ -586,10 +625,15 @@ impl GVM {
     }
 }
 
-fn num_cmp(left: &Value, right: &Value, f: impl Fn(f64, f64) -> bool) -> bool {
+fn num_cmp(
+    left: &Value,
+    right: &Value,
+    int_cmp: impl Fn(i64, i64) -> bool,
+    float_cmp: impl Fn(f64, f64) -> bool,
+) -> bool {
     match (left, right) {
-        (Value::Int(a), Value::Int(b)) => f(*a as f64, *b as f64),
-        (Value::Float(a), Value::Float(b)) => f(*a, *b),
+        (Value::Int(a), Value::Int(b)) => int_cmp(*a, *b),
+        (Value::Float(a), Value::Float(b)) => float_cmp(*a, *b),
         _ => panic!("TypeError: Wrong types for comparison operation"),
     }
 }

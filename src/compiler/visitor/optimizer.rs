@@ -139,6 +139,14 @@ impl Optimizer {
             | Expr::VarAssign(_, v, _)
             | Expr::AddAssign(_, v, _)
             | Expr::SubAssign(_, v, _)
+            | Expr::MulAssign(_, v, _)
+            | Expr::DivAssign(_, v, _)
+            | Expr::ModAssign(_, v, _)
+            | Expr::AndAssign(_, v, _)
+            | Expr::OrAssign(_, v, _)
+            | Expr::XorAssign(_, v, _)
+            | Expr::ShlAssign(_, v, _)
+            | Expr::ShrAssign(_, v, _)
             | Expr::Return(v, _) => self.prune_locals(v, used, pure_fns),
             Expr::Call(f, _, args, _) => {
                 self.prune_locals(f, used, pure_fns);
@@ -255,7 +263,15 @@ impl Optimizer {
             Expr::Var(name, _) | Expr::Inc(name, _) | Expr::Dec(name, _) => f(name),
             Expr::VarAssign(name, v, _)
             | Expr::AddAssign(name, v, _)
-            | Expr::SubAssign(name, v, _) => {
+            | Expr::SubAssign(name, v, _)
+            | Expr::MulAssign(name, v, _)
+            | Expr::DivAssign(name, v, _)
+            | Expr::ModAssign(name, v, _)
+            | Expr::AndAssign(name, v, _)
+            | Expr::OrAssign(name, v, _)
+            | Expr::XorAssign(name, v, _)
+            | Expr::ShlAssign(name, v, _)
+            | Expr::ShrAssign(name, v, _) => {
                 f(name);
                 self.for_each_name(v, f);
             }
@@ -464,7 +480,15 @@ impl Optimizer {
             | Expr::VarAssign(_, v, _)
             | Expr::Return(v, _)
             | Expr::AddAssign(_, v, _)
-            | Expr::SubAssign(_, v, _) => self.optimize_expr(v),
+            | Expr::SubAssign(_, v, _)
+            | Expr::MulAssign(_, v, _)
+            | Expr::DivAssign(_, v, _)
+            | Expr::ModAssign(_, v, _)
+            | Expr::AndAssign(_, v, _)
+            | Expr::OrAssign(_, v, _)
+            | Expr::XorAssign(_, v, _)
+            | Expr::ShlAssign(_, v, _)
+            | Expr::ShrAssign(_, v, _) => self.optimize_expr(v),
             Expr::GlobalVar(_, _, _, v, _) => {
                 if let Some(v) = v {
                     self.optimize_expr(v);
@@ -533,20 +557,117 @@ impl Optimizer {
         }
     }
 
+    fn is_effect_free(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Call(..)
+            | Expr::VarAssign(..)
+            | Expr::AddAssign(..)
+            | Expr::SubAssign(..)
+            | Expr::MulAssign(..)
+            | Expr::DivAssign(..)
+            | Expr::ModAssign(..)
+            | Expr::AndAssign(..)
+            | Expr::OrAssign(..)
+            | Expr::XorAssign(..)
+            | Expr::ShlAssign(..)
+            | Expr::ShrAssign(..)
+            | Expr::IndexAssign(..)
+            | Expr::MemberAssign(..)
+            | Expr::DerefAssign(..)
+            | Expr::Inc(..)
+            | Expr::Dec(..)
+            | Expr::While(..)
+            | Expr::For(..)
+            | Expr::FuncDecl(..)
+            | Expr::GlobalVar(..)
+            | Expr::ExternVar(..)
+            | Expr::Break(_)
+            | Expr::Continue(_) => false,
+            Expr::Int(_, _)
+            | Expr::Float(_, _)
+            | Expr::Bool(_, _)
+            | Expr::String(_, _)
+            | Expr::Nil(_)
+            | Expr::Var(_, _) => true,
+            Expr::Block(body, _) => body.iter().all(|e| self.is_effect_free(e)),
+            Expr::If(c, t, e, _) => {
+                self.is_effect_free(c)
+                    && self.is_effect_free(t)
+                    && e.as_ref().map(|e| self.is_effect_free(e)).unwrap_or(true)
+            }
+            Expr::Lambda(_, b, _, _) => self.is_effect_free(b),
+            Expr::VarDecl(_, _, v, _) | Expr::ConstDecl(_, _, v, _, _) | Expr::Return(v, _) => {
+                self.is_effect_free(v)
+            }
+            Expr::ArrayLiteral(es, _) => es.iter().all(|e| self.is_effect_free(e)),
+            Expr::ArrayFill(_, len, _) => self.is_effect_free(len),
+            Expr::Range(s, e, _) => self.is_effect_free(s) && self.is_effect_free(e),
+            Expr::Match(t, br, d, _) => {
+                self.is_effect_free(t)
+                    && br
+                        .iter()
+                        .all(|(c, r)| self.is_effect_free(c) && self.is_effect_free(r))
+                    && d.as_ref().map(|d| self.is_effect_free(d)).unwrap_or(true)
+            }
+            Expr::StructLiteral(_, _, fs, _) | Expr::UnionLiteral(_, _, fs, _) => {
+                fs.iter().all(|(_, v)| self.is_effect_free(v))
+            }
+            Expr::FString(segs, _) => segs.iter().all(|s| self.is_effect_free(s)),
+            Expr::Index(a, i, _) => self.is_effect_free(a) && self.is_effect_free(i),
+            Expr::MemberAccess(a, _, _)
+            | Expr::AddressOf(a, _)
+            | Expr::Deref(a, _)
+            | Expr::Cast(a, _, _)
+            | Expr::Not(a, _)
+            | Expr::Neg(a, _)
+            | Expr::FNeg(a, _) => self.is_effect_free(a),
+            Expr::Add(l, r, _)
+            | Expr::Sub(l, r, _)
+            | Expr::Mul(l, r, _)
+            | Expr::Div(l, r, _)
+            | Expr::Mod(l, r, _)
+            | Expr::Xor(l, r, _)
+            | Expr::Shl(l, r, _)
+            | Expr::Shr(l, r, _)
+            | Expr::FAdd(l, r, _)
+            | Expr::FSub(l, r, _)
+            | Expr::FMul(l, r, _)
+            | Expr::FDiv(l, r, _)
+            | Expr::Eq(l, r, _)
+            | Expr::Ne(l, r, _)
+            | Expr::Lt(l, r, _)
+            | Expr::Le(l, r, _)
+            | Expr::Gt(l, r, _)
+            | Expr::Ge(l, r, _)
+            | Expr::FEq(l, r, _)
+            | Expr::FNe(l, r, _)
+            | Expr::FLt(l, r, _)
+            | Expr::FLe(l, r, _)
+            | Expr::FGt(l, r, _)
+            | Expr::FGe(l, r, _)
+            | Expr::LAnd(l, r, _)
+            | Expr::LOr(l, r, _)
+            | Expr::StrCat(l, r, _) => self.is_effect_free(l) && self.is_effect_free(r),
+            _ => false,
+        }
+    }
+
     fn fold(&self, expr: &Expr) -> Option<Expr> {
         match expr {
             Expr::Add(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Int(a, _), Expr::Int(b, _)) => Some(Expr::Int(a + b, Span::new(0, 0))),
+                (Expr::Int(a, _), Expr::Int(b, _)) => {
+                    Some(Expr::Int(a.wrapping_add(*b), Span::new(0, 0)))
+                }
                 (Expr::Float(a, _), Expr::Float(b, _)) => Some(Expr::Float(a + b, Span::new(0, 0))),
 
                 (Expr::Int(0, _), _) => Some(*r.clone()),
                 (_, Expr::Int(0, _)) => Some(*l.clone()),
-                (Expr::Float(0.0, _), _) => Some(*r.clone()),
-                (_, Expr::Float(0.0, _)) => Some(*l.clone()),
                 _ => None,
             },
             Expr::Sub(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Int(a, _), Expr::Int(b, _)) => Some(Expr::Int(a - b, Span::new(0, 0))),
+                (Expr::Int(a, _), Expr::Int(b, _)) => {
+                    Some(Expr::Int(a.wrapping_sub(*b), Span::new(0, 0)))
+                }
                 (Expr::Float(a, _), Expr::Float(b, _)) => Some(Expr::Float(a - b, Span::new(0, 0))),
 
                 (_, Expr::Int(0, _)) => Some(*l.clone()),
@@ -554,13 +675,23 @@ impl Optimizer {
                 _ => None,
             },
             Expr::Mul(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Int(a, _), Expr::Int(b, _)) => Some(Expr::Int(a * b, Span::new(0, 0))),
+                (Expr::Int(a, _), Expr::Int(b, _)) => {
+                    Some(Expr::Int(a.wrapping_mul(*b), Span::new(0, 0)))
+                }
                 (Expr::Float(a, _), Expr::Float(b, _)) => Some(Expr::Float(a * b, Span::new(0, 0))),
 
-                (Expr::Int(0, _), _) => Some(Expr::Int(0, Span::new(0, 0))),
-                (_, Expr::Int(0, _)) => Some(Expr::Int(0, Span::new(0, 0))),
-                (Expr::Float(0.0, _), _) => Some(Expr::Float(0.0, Span::new(0, 0))),
-                (_, Expr::Float(0.0, _)) => Some(Expr::Float(0.0, Span::new(0, 0))),
+                (Expr::Int(0, _), _) if self.is_effect_free(r) => {
+                    Some(Expr::Int(0, Span::new(0, 0)))
+                }
+                (_, Expr::Int(0, _)) if self.is_effect_free(l) => {
+                    Some(Expr::Int(0, Span::new(0, 0)))
+                }
+                (Expr::Float(0.0, _), _) if self.is_effect_free(r) => {
+                    Some(Expr::Float(0.0, Span::new(0, 0)))
+                }
+                (_, Expr::Float(0.0, _)) if self.is_effect_free(l) => {
+                    Some(Expr::Float(0.0, Span::new(0, 0)))
+                }
                 (Expr::Int(1, _), _) => Some(*r.clone()),
                 (_, Expr::Int(1, _)) => Some(*l.clone()),
                 (Expr::Float(1.0, _), _) => Some(*r.clone()),
@@ -568,7 +699,13 @@ impl Optimizer {
                 _ => None,
             },
             Expr::Div(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Int(a, _), Expr::Int(b, _)) => Some(Expr::Int(a / b, Span::new(0, 0))),
+                (Expr::Int(a, _), Expr::Int(b, _)) => {
+                    if *b == 0 || (*a == isize::MIN && *b == -1) {
+                        None
+                    } else {
+                        Some(Expr::Int(a.wrapping_div(*b), Span::new(0, 0)))
+                    }
+                }
                 (Expr::Float(a, _), Expr::Float(b, _)) => Some(Expr::Float(a / b, Span::new(0, 0))),
 
                 (_, Expr::Int(1, _)) => Some(*l.clone()),
@@ -576,7 +713,13 @@ impl Optimizer {
                 _ => None,
             },
             Expr::Mod(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Int(a, _), Expr::Int(b, _)) => Some(Expr::Int(a % b, Span::new(0, 0))),
+                (Expr::Int(a, _), Expr::Int(b, _)) => {
+                    if *b == 0 || (*a == isize::MIN && *b == -1) {
+                        None
+                    } else {
+                        Some(Expr::Int(a.wrapping_rem(*b), Span::new(0, 0)))
+                    }
+                }
                 _ => None,
             },
             Expr::Xor(l, r, _) => match (l.as_ref(), r.as_ref()) {
@@ -587,8 +730,6 @@ impl Optimizer {
             },
             Expr::FAdd(l, r, _) => match (l.as_ref(), r.as_ref()) {
                 (Expr::Float(a, _), Expr::Float(b, _)) => Some(Expr::Float(a + b, Span::new(0, 0))),
-                (Expr::Float(0.0, _), _) => Some(*r.clone()),
-                (_, Expr::Float(0.0, _)) => Some(*l.clone()),
                 _ => None,
             },
             Expr::FSub(l, r, _) => match (l.as_ref(), r.as_ref()) {
@@ -598,8 +739,12 @@ impl Optimizer {
             },
             Expr::FMul(l, r, _) => match (l.as_ref(), r.as_ref()) {
                 (Expr::Float(a, _), Expr::Float(b, _)) => Some(Expr::Float(a * b, Span::new(0, 0))),
-                (Expr::Float(0.0, _), _) => Some(Expr::Float(0.0, Span::new(0, 0))),
-                (_, Expr::Float(0.0, _)) => Some(Expr::Float(0.0, Span::new(0, 0))),
+                (Expr::Float(0.0, _), _) if self.is_effect_free(r) => {
+                    Some(Expr::Float(0.0, Span::new(0, 0)))
+                }
+                (_, Expr::Float(0.0, _)) if self.is_effect_free(l) => {
+                    Some(Expr::Float(0.0, Span::new(0, 0)))
+                }
                 (Expr::Float(1.0, _), _) => Some(*r.clone()),
                 (_, Expr::Float(1.0, _)) => Some(*l.clone()),
                 _ => None,
@@ -661,15 +806,23 @@ impl Optimizer {
             },
             Expr::LAnd(l, r, _) => match (l.as_ref(), r.as_ref()) {
                 (Expr::Bool(true, _), e) => Some(e.clone()),
-                (Expr::Bool(false, _), _) => Some(Expr::Bool(false, Span::new(0, 0))),
+                (Expr::Bool(false, _), e) if self.is_effect_free(e) => {
+                    Some(Expr::Bool(false, Span::new(0, 0)))
+                }
                 (e, Expr::Bool(true, _)) => Some(e.clone()),
-                (_, Expr::Bool(false, _)) => Some(Expr::Bool(false, Span::new(0, 0))),
+                (e, Expr::Bool(false, _)) if self.is_effect_free(e) => {
+                    Some(Expr::Bool(false, Span::new(0, 0)))
+                }
                 _ => None,
             },
             Expr::LOr(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Bool(true, _), _) => Some(Expr::Bool(true, Span::new(0, 0))),
+                (Expr::Bool(true, _), e) if self.is_effect_free(e) => {
+                    Some(Expr::Bool(true, Span::new(0, 0)))
+                }
                 (Expr::Bool(false, _), e) => Some(e.clone()),
-                (_, Expr::Bool(true, _)) => Some(Expr::Bool(true, Span::new(0, 0))),
+                (e, Expr::Bool(true, _)) if self.is_effect_free(e) => {
+                    Some(Expr::Bool(true, Span::new(0, 0)))
+                }
                 (e, Expr::Bool(false, _)) => Some(e.clone()),
                 _ => None,
             },
@@ -678,7 +831,7 @@ impl Optimizer {
                 _ => None,
             },
             Expr::Neg(e, _) => match e.as_ref() {
-                Expr::Int(n, _) => Some(Expr::Int(-n, Span::new(0, 0))),
+                Expr::Int(n, _) => Some(Expr::Int(n.wrapping_neg(), Span::new(0, 0))),
                 _ => None,
             },
             Expr::FNeg(e, _) => match e.as_ref() {
@@ -740,9 +893,17 @@ impl Optimizer {
                     self.dce(v, pure_fns);
                 }
             }
-            Expr::VarAssign(_, v, _) | Expr::AddAssign(_, v, _) | Expr::SubAssign(_, v, _) => {
-                self.dce(v, pure_fns)
-            }
+            Expr::VarAssign(_, v, _)
+            | Expr::AddAssign(_, v, _)
+            | Expr::SubAssign(_, v, _)
+            | Expr::MulAssign(_, v, _)
+            | Expr::DivAssign(_, v, _)
+            | Expr::ModAssign(_, v, _)
+            | Expr::AndAssign(_, v, _)
+            | Expr::OrAssign(_, v, _)
+            | Expr::XorAssign(_, v, _)
+            | Expr::ShlAssign(_, v, _)
+            | Expr::ShrAssign(_, v, _) => self.dce(v, pure_fns),
             Expr::Return(v, _) => self.dce(v, pure_fns),
             Expr::Inc(_, _) | Expr::Dec(_, _) => {}
             Expr::Call(f, _, args, _) => {
@@ -902,6 +1063,14 @@ impl Optimizer {
                     | Expr::GlobalVar(_, _, _, _, _)
                     | Expr::AddAssign(_, _, _)
                     | Expr::SubAssign(_, _, _)
+                    | Expr::MulAssign(_, _, _)
+                    | Expr::DivAssign(_, _, _)
+                    | Expr::ModAssign(_, _, _)
+                    | Expr::AndAssign(_, _, _)
+                    | Expr::OrAssign(_, _, _)
+                    | Expr::XorAssign(_, _, _)
+                    | Expr::ShlAssign(_, _, _)
+                    | Expr::ShrAssign(_, _, _)
                     | Expr::Inc(_, _)
                     | Expr::Dec(_, _)
                     | Expr::IndexAssign(_, _, _)

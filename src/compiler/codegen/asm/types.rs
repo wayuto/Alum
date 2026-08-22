@@ -211,6 +211,7 @@ pub enum Asm {
     Jae(String),
     Jb(String),
     Jbe(String),
+    Jp(String),
 
     Sete(Reg),
     Setne(Reg),
@@ -220,8 +221,13 @@ pub enum Asm {
     Setle(Reg),
     Seta(Reg),
     Setae(Reg),
+
+    #[allow(dead_code)]
     Setb(Reg),
+    #[allow(dead_code)]
     Setbe(Reg),
+    Setp(Reg),
+    Setnp(Reg),
 
     Movsd(Operand, Operand),
     Addsd(Operand, Operand),
@@ -247,7 +253,8 @@ impl Asm {
             | Asm::Ja(l)
             | Asm::Jae(l)
             | Asm::Jb(l)
-            | Asm::Jbe(l) => Some(l),
+            | Asm::Jbe(l)
+            | Asm::Jp(l) => Some(l),
             _ => None,
         }
     }

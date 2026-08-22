@@ -102,7 +102,7 @@ impl ModuleLoader {
 
     pub fn rename_module(body: &mut Vec<Expr>, map: &HashMap<String, String>) {
         for expr in body.iter_mut() {
-            rename_expr(expr, map);
+            rename_expr(expr, map, &mut Vec::new());
         }
     }
 
@@ -148,15 +148,18 @@ fn rename_type(ty: &mut Type, map: &HashMap<String, String>) {
     }
 }
 
-fn rename_expr(e: &mut Expr, map: &HashMap<String, String>) {
-    fn ren(name: &mut String, map: &HashMap<String, String>) {
+fn rename_expr(e: &mut Expr, map: &HashMap<String, String>, locals: &mut Vec<String>) {
+    fn ren(name: &mut String, map: &HashMap<String, String>, locals: &[String]) {
+        if locals.iter().any(|l| l == name) {
+            return;
+        }
         if let Some(n) = map.get(name) {
             *name = n.clone();
         }
     }
     match e {
-        Expr::Var(name, _) => ren(name, map),
-        Expr::Inc(name, _) | Expr::Dec(name, _) => ren(name, map),
+        Expr::Var(name, _) => ren(name, map, locals),
+        Expr::Inc(name, _) | Expr::Dec(name, _) => ren(name, map, locals),
         Expr::VarAssign(name, v, _)
         | Expr::AddAssign(name, v, _)
         | Expr::SubAssign(name, v, _)
@@ -168,138 +171,155 @@ fn rename_expr(e: &mut Expr, map: &HashMap<String, String>) {
         | Expr::XorAssign(name, v, _)
         | Expr::ShlAssign(name, v, _)
         | Expr::ShrAssign(name, v, _) => {
-            ren(name, map);
-            rename_expr(v, map);
+            ren(name, map, locals);
+            rename_expr(v, map, locals);
         }
-        Expr::VarDecl(_, ty, v, _) => {
+        Expr::VarDecl(name, ty, v, _) => {
             rename_type(ty, map);
-            rename_expr(v, map);
+            rename_expr(v, map, locals);
+
+            locals.push(name.clone());
         }
         Expr::ConstDecl(name, ty, v, _, _) => {
-            ren(name, map);
             rename_type(ty, map);
-            rename_expr(v, map);
+            rename_expr(v, map, locals);
+            if locals.is_empty() {
+                ren(name, map, locals);
+            } else {
+                locals.push(name.clone());
+            }
         }
         Expr::GlobalVar(name, _, ty, v, _) => {
-            ren(name, map);
+            ren(name, map, locals);
             rename_type(ty, map);
             if let Some(v) = v {
-                rename_expr(v, map);
+                rename_expr(v, map, locals);
             }
         }
         Expr::FuncDecl(name, _, _, params, ret, body, _) => {
-            ren(name, map);
-            for (_, t) in params {
+            ren(name, map, locals);
+            let mark = locals.len();
+            for (p, t) in params.iter_mut() {
                 rename_type(t, map);
+                locals.push(p.clone());
             }
             rename_type(ret, map);
-            rename_expr(body, map);
+            rename_expr(body, map, locals);
+            locals.truncate(mark);
         }
         Expr::ExternVar(_, ty, _) => rename_type(ty, map),
         Expr::Struct(name, _, fields, _) => {
-            ren(name, map);
+            ren(name, map, locals);
             for (_, t) in fields {
                 rename_type(t, map);
             }
         }
         Expr::Union(name, _, fields, _) => {
-            ren(name, map);
+            ren(name, map, locals);
             for (_, t) in fields {
                 rename_type(t, map);
             }
         }
-        Expr::Enum(name, _, _) => ren(name, map),
+        Expr::Enum(name, _, _) => ren(name, map, locals),
         Expr::StructLiteral(name, args, fields, _) | Expr::UnionLiteral(name, args, fields, _) => {
-            ren(name, map);
+            ren(name, map, locals);
             for a in args {
                 rename_type(a, map);
             }
             for (_, v) in fields {
-                rename_expr(v, map);
+                rename_expr(v, map, locals);
             }
         }
         Expr::Call(callee, targs, args, _) => {
-            rename_expr(callee, map);
+            rename_expr(callee, map, locals);
             for t in targs {
                 rename_type(t, map);
             }
             for a in args {
-                rename_expr(a, map);
+                rename_expr(a, map, locals);
             }
         }
-        Expr::Return(v, _) => rename_expr(v, map),
+        Expr::Return(v, _) => rename_expr(v, map, locals),
         Expr::If(c, t, e, _) => {
-            rename_expr(c, map);
-            rename_expr(t, map);
+            rename_expr(c, map, locals);
+            rename_expr(t, map, locals);
             if let Some(e) = e {
-                rename_expr(e, map);
+                rename_expr(e, map, locals);
             }
         }
         Expr::While(c, b, _) => {
-            rename_expr(c, map);
-            rename_expr(b, map);
+            rename_expr(c, map, locals);
+            rename_expr(b, map, locals);
         }
         Expr::Block(body, _) => {
+            let mark = locals.len();
             for b in body {
-                rename_expr(b, map);
+                rename_expr(b, map, locals);
             }
+            locals.truncate(mark);
         }
         Expr::Index(a, i, _) | Expr::IndexAssign(a, i, _) => {
-            rename_expr(a, map);
-            rename_expr(i, map);
+            rename_expr(a, map, locals);
+            rename_expr(i, map, locals);
         }
         Expr::ArrayLiteral(es, _) => {
             for e in es {
-                rename_expr(e, map);
+                rename_expr(e, map, locals);
             }
         }
         Expr::ArrayFill(ty, len, _) => {
             rename_type(ty, map);
-            rename_expr(len, map);
+            rename_expr(len, map, locals);
         }
         Expr::Range(s, e, _) => {
-            rename_expr(s, map);
-            rename_expr(e, map);
+            rename_expr(s, map, locals);
+            rename_expr(e, map, locals);
         }
-        Expr::For(_, arr, body, _) => {
-            rename_expr(arr, map);
-            rename_expr(body, map);
+        Expr::For(var, arr, body, _) => {
+            rename_expr(arr, map, locals);
+            let mark = locals.len();
+            locals.push(var.clone());
+            rename_expr(body, map, locals);
+            locals.truncate(mark);
         }
         Expr::TypeDef(_) => {}
         Expr::Match(t, br, default, _) => {
-            rename_expr(t, map);
+            rename_expr(t, map, locals);
             for (c, r) in br {
-                rename_expr(c, map);
-                rename_expr(r, map);
+                rename_expr(c, map, locals);
+                rename_expr(r, map, locals);
             }
             if let Some(d) = default {
-                rename_expr(d, map);
+                rename_expr(d, map, locals);
             }
         }
-        Expr::MemberAccess(o, _, _) => rename_expr(o, map),
+        Expr::MemberAccess(o, _, _) => rename_expr(o, map, locals),
         Expr::MemberAssign(o, _, v, _) => {
-            rename_expr(o, map);
-            rename_expr(v, map);
+            rename_expr(o, map, locals);
+            rename_expr(v, map, locals);
         }
         Expr::Lambda(params, body, ret, _) => {
-            for (_, t) in params {
+            let mark = locals.len();
+            for (p, t) in params.iter_mut() {
                 rename_type(t, map);
+                locals.push(p.clone());
             }
-            rename_expr(body, map);
             rename_type(ret, map);
+            rename_expr(body, map, locals);
+            locals.truncate(mark);
         }
-        Expr::AddressOf(x, _) | Expr::Deref(x, _) | Expr::BNot(x, _) => rename_expr(x, map),
+        Expr::AddressOf(x, _) | Expr::Deref(x, _) | Expr::BNot(x, _) => rename_expr(x, map, locals),
         Expr::DerefAssign(p, v, _) => {
-            rename_expr(p, map);
-            rename_expr(v, map);
+            rename_expr(p, map, locals);
+            rename_expr(v, map, locals);
         }
         Expr::Cast(x, ty, _) => {
-            rename_expr(x, map);
+            rename_expr(x, map, locals);
             rename_type(ty, map);
         }
         Expr::FString(segs, _) => {
             for s in segs {
-                rename_expr(s, map);
+                rename_expr(s, map, locals);
             }
         }
         Expr::Add(l, r, _)
@@ -329,10 +349,10 @@ fn rename_expr(e: &mut Expr, map: &HashMap<String, String>) {
         | Expr::FGt(l, r, _)
         | Expr::FGe(l, r, _)
         | Expr::StrCat(l, r, _) => {
-            rename_expr(l, map);
-            rename_expr(r, map);
+            rename_expr(l, map, locals);
+            rename_expr(r, map, locals);
         }
-        Expr::Neg(x, _) | Expr::FNeg(x, _) | Expr::Not(x, _) => rename_expr(x, map),
+        Expr::Neg(x, _) | Expr::FNeg(x, _) | Expr::Not(x, _) => rename_expr(x, map, locals),
         Expr::Int(_, _)
         | Expr::Float(_, _)
         | Expr::Bool(_, _)

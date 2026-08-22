@@ -54,10 +54,24 @@ pub extern "C" fn ftoa(n: f64) -> *const u8 {
             return buf as *const u8;
         }
 
+        if n.is_infinite() {
+            let mut idx = 0;
+            if n.is_sign_negative() {
+                (*buf)[idx] = b'-';
+                idx += 1;
+            }
+            (*buf)[idx] = b'i';
+            (*buf)[idx + 1] = b'n';
+            (*buf)[idx + 2] = b'f';
+            (*buf)[idx + 3] = 0;
+            return buf as *const u8;
+        }
+
         let mut num = n;
         let mut idx = 0;
 
-        if num < 0.0 {
+        // is_sign_negative keeps the sign of -0.0 (num < 0.0 would drop it)
+        if num.is_sign_negative() {
             (*buf)[idx] = b'-';
             idx += 1;
             num = -num;

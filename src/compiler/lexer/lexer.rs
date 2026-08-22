@@ -15,7 +15,7 @@ impl<'a> Lexer<'a> {
             if c.is_whitespace() {
                 if c == '\n' {
                     self.line += 1;
-                    self.col = 1;
+                    self.col = 0;
                 }
                 self.bump()
             } else {
@@ -115,7 +115,7 @@ impl<'a> Lexer<'a> {
     fn lex_string(&mut self, quote: char) -> Result<String, LexerError> {
         let mut s = String::new();
         while self.current != Some(quote) {
-            if self.current == Some('\0') {
+            if self.current.is_none() || self.current == Some('\0') {
                 return Err(LexerError::UnclosedQuote {
                     line: self.line,
                     col: self.col,
@@ -130,8 +130,16 @@ impl<'a> Lexer<'a> {
                     Some(c) => s.push(c),
                     None => {}
                 }
+                if self.current == Some('\n') {
+                    self.line += 1;
+                    self.col = 0;
+                }
                 self.bump();
                 continue;
+            }
+            if self.current == Some('\n') {
+                self.line += 1;
+                self.col = 0;
             }
             s.push(self.current.unwrap());
             self.bump();
@@ -141,7 +149,17 @@ impl<'a> Lexer<'a> {
     }
 
     fn next_tok(&mut self) -> Result<(Token, Span), LexerError> {
-        self.sw();
+        loop {
+            self.sw();
+            if self.current == Some('/') && self.chars.clone().next() == Some('/') {
+                self.bump();
+                while self.current != Some('\n') && self.current.is_some() {
+                    self.bump();
+                }
+                continue;
+            }
+            break;
+        }
         let line = self.line;
         let col = self.col;
         let c = match self.current {
@@ -185,12 +203,6 @@ impl<'a> Lexer<'a> {
             }
             '/' => {
                 self.bump();
-                if self.current == Some('/') {
-                    while self.current != Some('\n') && self.current.is_some() {
-                        self.bump();
-                    }
-                    return self.next_tok();
-                }
                 if self.current == Some('=') {
                     self.bump();
                     Token::SLASHEQ
@@ -479,6 +491,10 @@ impl<'a> Lexer<'a> {
                         Some(c) => lit.push(c),
                         None => {}
                     }
+                    if self.current == Some('\n') {
+                        self.line += 1;
+                        self.col = 0;
+                    }
                     self.bump();
                 }
                 Some('{') => {
@@ -510,6 +526,10 @@ impl<'a> Lexer<'a> {
                     }
                 }
                 Some(c) => {
+                    if c == '\n' {
+                        self.line += 1;
+                        self.col = 0;
+                    }
                     lit.push(c);
                     self.bump();
                 }

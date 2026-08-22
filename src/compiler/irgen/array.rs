@@ -46,8 +46,9 @@ impl IRGen {
         ctx: &mut Context,
     ) -> Result<Operand, CodeGenError> {
         let len_op = self.compile_expr(*len, ctx)?;
+
         let elem_size = match &typ {
-            Type::Primitive(Primitive::Boolean) => 1i64,
+            Type::Primitive(Primitive::Boolean) => 8i64,
             _ => 8i64,
         };
         let ptr_tmp = ctx.new_tmp(IRType::Int);
@@ -101,9 +102,87 @@ impl IRGen {
                 op: Op::StoreAt,
                 dst: Some(ptr_tmp.clone()),
                 src1: Some(Operand::ConstIdx(zero_idx)),
-                src2: Some(len_op),
+                src2: Some(len_op.clone()),
             });
         }
+
+        let idx_name = ctx.new_label("afill_idx");
+        let idx_var = Operand::Var(idx_name.clone());
+        ctx.declare_var(idx_name, IRType::Int)?;
+        let zero_idx = self.get_const_index(IRConst::Int(0));
+        ctx.instructions.push(Instruction {
+            op: Op::Store,
+            dst: Some(idx_var.clone()),
+            src1: Some(Operand::ConstIdx(zero_idx)),
+            src2: None,
+        });
+        let label_cond = ctx.new_label("afill_cond");
+        let label_end = ctx.new_label("afill_end");
+        ctx.instructions.push(Instruction {
+            op: Op::Label(label_cond.clone()),
+            dst: None,
+            src1: None,
+            src2: None,
+        });
+        let curr = ctx.new_tmp(IRType::Int);
+        ctx.instructions.push(Instruction {
+            op: Op::Load,
+            dst: Some(curr.clone()),
+            src1: Some(idx_var.clone()),
+            src2: None,
+        });
+        let cond = ctx.new_tmp(IRType::Bool);
+        ctx.instructions.push(Instruction {
+            op: Op::Lt,
+            dst: Some(cond.clone()),
+            src1: Some(curr.clone()),
+            src2: Some(len_op),
+        });
+        ctx.instructions.push(Instruction {
+            op: Op::JumpIfFalse,
+            dst: None,
+            src1: Some(cond),
+            src2: Some(Operand::Label(label_end.clone())),
+        });
+        ctx.instructions.push(Instruction {
+            op: Op::ArrayAssign,
+            dst: Some(ptr_tmp.clone()),
+            src1: Some(curr),
+            src2: Some(Operand::ConstIdx(zero_idx)),
+        });
+        let one_idx = self.get_const_index(IRConst::Int(1));
+        let curr2 = ctx.new_tmp(IRType::Int);
+        ctx.instructions.push(Instruction {
+            op: Op::Load,
+            dst: Some(curr2.clone()),
+            src1: Some(idx_var.clone()),
+            src2: None,
+        });
+        let next = ctx.new_tmp(IRType::Int);
+        ctx.instructions.push(Instruction {
+            op: Op::Add,
+            dst: Some(next.clone()),
+            src1: Some(curr2),
+            src2: Some(Operand::ConstIdx(one_idx)),
+        });
+        ctx.instructions.push(Instruction {
+            op: Op::Store,
+            dst: Some(idx_var),
+            src1: Some(next),
+            src2: None,
+        });
+        ctx.instructions.push(Instruction {
+            op: Op::Jump,
+            dst: None,
+            src1: Some(Operand::Label(label_cond)),
+            src2: None,
+        });
+        ctx.instructions.push(Instruction {
+            op: Op::Label(label_end),
+            dst: None,
+            src1: None,
+            src2: None,
+        });
         Ok(ptr_tmp)
     }
 

@@ -77,11 +77,17 @@ pub extern "C" fn fclose(fd: isize) -> isize {
     sys::close(fd)
 }
 
+static mut BUF_READ: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
+
 #[unsafe(no_mangle)]
 pub extern "C" fn fread(fd: isize) -> *const u8 {
-    let buf = &raw mut BUF;
+    let buf = &raw mut BUF_READ;
 
-    sys::read(fd, buf.cast::<u8>(), BUFFER_SIZE);
+    let n = sys::read(fd, buf.cast::<u8>(), BUFFER_SIZE - 1);
+    let n = if n <= 0 { 0 } else { n as usize };
+    unsafe {
+        (*buf)[n] = 0;
+    }
     buf as *const u8
 }
 

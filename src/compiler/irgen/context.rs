@@ -27,6 +27,10 @@ pub(super) struct Context {
     pub func_name: String,
     pub borrowed: HashSet<String>,
     pub(super) var_slots: HashMap<String, Vec<String>>,
+
+    pub(super) var_type_history: HashMap<String, Vec<Option<Type>>>,
+    pub(super) array_len_history: HashMap<String, Vec<Option<usize>>>,
+    pub(super) borrow_history: HashMap<String, Vec<bool>>,
 }
 
 impl Context {
@@ -44,6 +48,9 @@ impl Context {
             func_name,
             borrowed: HashSet::new(),
             var_slots: HashMap::new(),
+            var_type_history: HashMap::new(),
+            array_len_history: HashMap::new(),
+            borrow_history: HashMap::new(),
         }
     }
 
@@ -79,6 +86,48 @@ impl Context {
                 slots.pop();
                 if slots.is_empty() {
                     self.var_slots.remove(name);
+                }
+            }
+            if let Some(history) = self.var_type_history.get_mut(name) {
+                if let Some(prev) = history.pop() {
+                    match prev {
+                        Some(t) => {
+                            self.var_types.insert(name.clone(), t);
+                        }
+                        None => {
+                            self.var_types.remove(name);
+                        }
+                    }
+                }
+                if history.is_empty() {
+                    self.var_type_history.remove(name);
+                }
+            }
+            if let Some(history) = self.array_len_history.get_mut(name) {
+                if let Some(prev) = history.pop() {
+                    match prev {
+                        Some(l) => {
+                            self.array_lengths.insert(name.clone(), l);
+                        }
+                        None => {
+                            self.array_lengths.remove(name);
+                        }
+                    }
+                }
+                if history.is_empty() {
+                    self.array_len_history.remove(name);
+                }
+            }
+            if let Some(history) = self.borrow_history.get_mut(name) {
+                if let Some(was_borrowed) = history.pop() {
+                    if was_borrowed {
+                        self.borrowed.insert(name.clone());
+                    } else {
+                        self.borrowed.remove(name);
+                    }
+                }
+                if history.is_empty() {
+                    self.borrow_history.remove(name);
                 }
             }
         }
@@ -157,6 +206,19 @@ impl Context {
             .entry(name.clone())
             .or_insert_with(Vec::new)
             .push(slot.clone());
+
+        self.var_type_history
+            .entry(name.clone())
+            .or_default()
+            .push(self.var_types.get(&name).cloned());
+        self.array_len_history
+            .entry(name.clone())
+            .or_default()
+            .push(self.array_lengths.get(&name).copied());
+        self.borrow_history
+            .entry(name.clone())
+            .or_default()
+            .push(self.borrowed.contains(&name));
         current_scope.insert(name.clone(), Symbol { ir_type, slot });
         Ok(())
     }

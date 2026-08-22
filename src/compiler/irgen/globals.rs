@@ -15,7 +15,7 @@ impl IRGen {
                         continue;
                     }
                     let value = match init {
-                        Some(init) => match self.eval_const(init) {
+                        Some(init) => match self.eval_const(init, None) {
                             Some((cv, _)) => Some(cv),
                             None => {
                                 return Err(CodeGenError::TypeError {
@@ -29,13 +29,19 @@ impl IRGen {
                         None => None,
                     };
                     let ir_type = if matches!(ty, Type::Unknown) {
-                        value
-                            .as_ref()
-                            .map(|cv| match cv {
-                                IRConst::Float(_) => IRType::Float,
-                                _ => IRType::Int,
-                            })
-                            .unwrap_or(IRType::Int)
+                        match value.as_ref() {
+                            Some(IRConst::Float(_)) => IRType::Float,
+
+                            Some(IRConst::Str(_)) | Some(IRConst::Array(_)) => {
+                                return Err(CodeGenError::TypeError {
+                                    message: format!(
+                                        "unsupported type for global variable '{}' (only int/float/bool)",
+                                        name
+                                    ),
+                                });
+                            }
+                            _ => IRType::Int,
+                        }
                     } else {
                         Context::type_to_ir_type(ty)
                     };
@@ -95,7 +101,7 @@ impl IRGen {
             progressed = false;
             let mut next = Vec::new();
             for (name, value) in pending {
-                if let Some(cv) = self.eval_const(&value) {
+                if let Some(cv) = self.eval_const(&value, None) {
                     self.globals.insert(name, cv);
                     progressed = true;
                 } else {

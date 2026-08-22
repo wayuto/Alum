@@ -13,20 +13,27 @@ impl IRGen {
         let target = self.compile_expr(*target, ctx)?;
         let end_label = ctx.new_label("end_match");
         let mut case_labels: Vec<String> = Vec::new();
-        let mut case_cnt = 0usize;
         let res_tmp = ctx.new_tmp(IRType::Void);
 
         for _ in branches.clone() {
-            case_labels.push(format!("case{}", case_cnt));
-            case_cnt += 1;
+            case_labels.push(ctx.new_label("case"));
         }
 
-        case_cnt = 0;
+        let mut case_cnt = 0usize;
+        // String targets compare by content (strcmp), mirroring how `==` is rewritten.
+        let cmp_op = if matches!(
+            ctx.get_operand_type(&target, &self.constants)?,
+            IRType::String
+        ) {
+            Op::StrEq
+        } else {
+            Op::Eq
+        };
         for (case, _) in branches.clone() {
             let cond = ctx.new_tmp(IRType::Bool);
             let case = self.compile_expr(case, ctx)?;
             ctx.instructions.push(Instruction {
-                op: Op::Eq,
+                op: cmp_op.clone(),
                 dst: Some(cond.clone()),
                 src1: Some(target.clone()),
                 src2: Some(case),

@@ -689,15 +689,37 @@ fn hoist_loop(insts: &mut Vec<Instruction>, header: usize, back: usize) -> bool 
         }
     }
 
+    // A temp may only be hoisted if it is defined exactly once inside the
+    // loop; hoisting one of several definitions (e.g. both arms of an `if`
+    // assigning the same temp) would let the wrong value escape.
+    let mut def_count: HashMap<usize, usize> = HashMap::new();
+    for inst in insts[header + 1..back].iter() {
+        if let Some(Operand::Temp(id, _)) = &inst.dst {
+            *def_count.entry(*id).or_insert(0) += 1;
+        }
+    }
+
     let mut to_hoist: Vec<(usize, Instruction)> = Vec::new();
     let mut back = back;
     let mut progress = true;
     while progress {
         progress = false;
         let mut k = header + 1;
+        // Number of control-flow barriers (labels/jumps) in (header, k).
+        // Instructions beyond a barrier are not guaranteed to execute on
+        // every iteration, so they stay in the loop.
+        let mut barriers = 0usize;
         while k < back {
             let inst = &insts[k];
-            if is_hoistable(&inst.op) && operands_available(inst, &available) {
+            let unique_def = match &inst.dst {
+                Some(Operand::Temp(id, _)) => def_count.get(id) == Some(&1),
+                _ => false,
+            };
+            if is_hoistable(&inst.op)
+                && unique_def
+                && operands_available(inst, &available)
+                && barriers == 0
+            {
                 let cloned = inst.clone();
                 if let Some(Operand::Temp(id, _)) = &cloned.dst {
                     available.insert(*id);
@@ -707,6 +729,12 @@ fn hoist_loop(insts: &mut Vec<Instruction>, header: usize, back: usize) -> bool 
                 back -= 1;
                 progress = true;
             } else {
+                if matches!(
+                    insts[k].op,
+                    Op::Label(_) | Op::Jump | Op::JumpIfFalse | Op::JumpIfTrue
+                ) {
+                    barriers += 1;
+                }
                 k += 1;
             }
         }

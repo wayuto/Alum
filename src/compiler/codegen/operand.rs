@@ -117,6 +117,7 @@ impl AsmCodeGen {
                             self.push_text(Asm::Movsd(Operand::Reg(dst_reg), rel(lbl)));
                         } else {
                             self.push_text(Asm::Mov(Operand::Reg(dst_reg), rel(lbl)));
+                            self.push_text(Asm::Mov(Operand::Reg(dst_reg), m_base(dst_reg)));
                         }
                     }
                     IRConst::Str(s) => {
@@ -340,24 +341,32 @@ impl AsmCodeGen {
         reg: Reg,
     ) -> Result<(), CodeGenError> {
         let size = (len * 8 + 15) & !15;
+
+        self.push_text(Asm::Push(Reg::Rdi));
         self.push_text(Asm::Mov(
             Operand::Reg(Reg::Rdi),
             Operand::Imm((size + 8) as i64),
         ));
+
+        self.push_text(Asm::Sub(Operand::Reg(Reg::Rsp), Operand::Imm(8)));
         self.push_text(Asm::Call(Operand::PLT("malloc".to_string())));
+        self.push_text(Asm::Add(Operand::Reg(Reg::Rsp), Operand::Imm(8)));
+        self.push_text(Asm::Pop(Reg::Rdi));
         self.invalidate_volatile_registers();
         self.push_text(Asm::Mov(m_base_disp(Reg::Rax, 0), Operand::Imm(len as i64)));
         self.push_text(Asm::Push(Reg::Rax));
+
+        self.push_text(Asm::Sub(Operand::Reg(Reg::Rsp), Operand::Imm(8)));
         for (i, op) in arr.iter().enumerate() {
             self.load(op, Reg::Rax)?;
-            self.push_text(Asm::Mov(Operand::Reg(Reg::R11), m_base_disp(Reg::Rsp, 0)));
+            self.push_text(Asm::Mov(Operand::Reg(Reg::R11), m_base_disp(Reg::Rsp, 8)));
             self.push_text(Asm::Mov(
                 m_base_disp(Reg::R11, ((i + 1) * 8) as i32),
                 Operand::Reg(Reg::Rax),
             ));
         }
-        self.push_text(Asm::Mov(Operand::Reg(reg), m_base_disp(Reg::Rsp, 0)));
-        self.push_text(Asm::Add(Operand::Reg(Reg::Rsp), Operand::Imm(8)));
+        self.push_text(Asm::Mov(Operand::Reg(reg), m_base_disp(Reg::Rsp, 8)));
+        self.push_text(Asm::Add(Operand::Reg(Reg::Rsp), Operand::Imm(16)));
         self.regs.clear();
         Ok(())
     }

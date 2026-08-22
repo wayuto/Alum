@@ -343,7 +343,7 @@ cargo build --release
 
 - **[Standard Library](./alum-std/README.md)** - Comprehensive standard library documentation
 - **[Build Tool](./alum-make/README.md)** - almk build tool documentation
-- **[Tutorial Series](https://cr0.dpdns.org)** - 18-part Chinese tutorial covering the language from scratch
+- **[Tutorial Series](https://cr0.dpdns.org)** - 19-part Chinese tutorial covering the language from scratch
 
 ## License
 

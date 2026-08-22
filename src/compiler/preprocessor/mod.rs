@@ -19,6 +19,7 @@ pub struct Preprocessor<'a> {
     defines: HashMap<String, MacroDefinition>,
     condition_stack: Vec<bool>,
     skipping: bool,
+    import_chain: Vec<String>,
 }
 
 impl<'a> Preprocessor<'a> {
@@ -40,6 +41,7 @@ impl<'a> Preprocessor<'a> {
             defines: HashMap::new(),
             condition_stack: Vec::new(),
             skipping: false,
+            import_chain: Vec::new(),
         }
     }
 }

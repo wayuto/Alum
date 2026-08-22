@@ -19,12 +19,22 @@ fun(pub) itoa(n: int): string {
             num = -num
         }
         var start: int = idx
-        while num > 0 {
-            var d: int[] = [48 + num % 10]
-            var pd: *void = d
-            buf[idx] = pd[8]
-            num = num / 10
-            idx = idx + 1
+        if num > 0 {
+            while num > 0 {
+                var d: int[] = [48 + num % 10]
+                var pd: *void = d
+                buf[idx] = pd[8]
+                num = num / 10
+                idx = idx + 1
+            }
+        } else {
+            while num < 0 {
+                var d: int[] = [48 - num % 10]
+                var pd: *void = d
+                buf[idx] = pd[8]
+                num = num / 10
+                idx = idx + 1
+            }
         }
         var end: int = idx - 1
         while start < end {
@@ -65,7 +75,17 @@ fun(pub, pure) atoi(s: string): int {
     while true {
         var d: int = p[i]
         if d < 48 || d > 57 break
-        result = result * 10 + (d - 48)
+        var dgt: int = d - 48
+        
+        
+        var limit: int = (9223372036854775807 - dgt) / 10
+        if result - limit > 0 {
+            if sign < 0 {
+                return 0 - 9223372036854775807 - 1
+            }
+            return 9223372036854775807
+        }
+        result = result * 10 + dgt
         i = i + 1
     }
     return result * sign

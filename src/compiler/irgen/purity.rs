@@ -264,21 +264,22 @@ fn classify(
         | TypeDef(_) | Struct(..) | Union(..) | Enum(..) => Ok(()),
 
         Call(callee, _, args, _) => {
-            if let Some(name) = callee_name(callee) {
-                if let Some(target) = bound.get(name) {
-                    if let Some(lambda_name) = target.strip_prefix(IMPURE_LAMBDA_MARKER) {
-                        return Err(format!("call to impure lambda '{lambda_name}'"));
-                    }
-                    if target != LAMBDA_MARKER
-                        && !is_pure(target, decls, globals, in_progress, memo)
-                    {
-                        return Err(format!("call to '{target}'"));
-                    }
-                } else if !is_pure(name, decls, globals, in_progress, memo) {
-                    return Err(format!("call to '{name}'"));
+            // Only direct calls to a named function can be verified; anything
+            // else (struct function field `s.f(...)`, computed callee, ...)
+            // is an indirect call and conservatively impure.
+            let Some(name) = callee_name(callee) else {
+                return Err("indirect call (callee is not a function name)".to_string());
+            };
+            if let Some(target) = bound.get(name) {
+                if let Some(lambda_name) = target.strip_prefix(IMPURE_LAMBDA_MARKER) {
+                    return Err(format!("call to impure lambda '{lambda_name}'"));
                 }
+                if target != LAMBDA_MARKER && !is_pure(target, decls, globals, in_progress, memo) {
+                    return Err(format!("call to '{target}'"));
+                }
+            } else if !is_pure(name, decls, globals, in_progress, memo) {
+                return Err(format!("call to '{name}'"));
             }
-            classify(fn_name, callee, decls, globals, in_progress, memo, bound)?;
             for arg in args {
                 classify(fn_name, arg, decls, globals, in_progress, memo, bound)?;
             }
@@ -483,13 +484,15 @@ fn is_pure(
     if in_progress.contains(name) {
         return true;
     }
-    let Some((_, is_external, func_body)) = decls.get(name) else {
+    let Some((declared_pure, is_external, func_body)) = decls.get(name) else {
         memo.insert(name.to_string(), false);
         return false;
     };
     if *is_external {
-        memo.insert(name.to_string(), false);
-        return false;
+        // Trust the `fun(extern, pure)` declaration: const_eval and vm_safety
+        // honor the same marker, so rejecting here would contradict them.
+        memo.insert(name.to_string(), *declared_pure);
+        return *declared_pure;
     }
     in_progress.insert(name.to_string());
     let mut bound: HashMap<String, String> = HashMap::new();

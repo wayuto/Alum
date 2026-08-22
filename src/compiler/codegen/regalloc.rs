@@ -141,12 +141,13 @@ fn arg_reg_bit(n: usize) -> u32 {
         1 => R_RSI,
         2 => R_RDX,
         3 => R_RCX,
-        _ => R_R8,
+        4 => R_R8,
+        _ => R_R9,
     }
 }
 
-fn op_clobbers(op: &Op) -> u32 {
-    match op {
+fn op_clobbers(inst: &Instruction, constants: &[IRConst]) -> u32 {
+    let base = match &inst.op {
         Op::Move | Op::Load | Op::Store | Op::GlobLoad | Op::GlobStore => R_RAX | R_R10,
         Op::FMove | Op::FLoad | Op::FStore | Op::FGlobLoad | Op::FGlobStore => R_R10,
         Op::Add | Op::Sub | Op::Mul | Op::LAnd | Op::LOr | Op::Xor => R_RAX | R_RBX | R_R10,
@@ -155,7 +156,8 @@ fn op_clobbers(op: &Op) -> u32 {
         Op::Div | Op::Mod => R_RAX | R_RDX | R_RBX | R_R10,
         Op::FAdd | Op::FSub | Op::FMul | Op::FDiv => R_R10,
         Op::Eq | Op::Ne | Op::Gt | Op::Ge | Op::Lt | Op::Le => R_RAX | R_RBX | R_R10,
-        Op::FEq | Op::FNe | Op::FGt | Op::FGe | Op::FLt | Op::FLe => R_RAX | R_R10,
+        Op::FEq | Op::FNe => R_RAX | R_RCX | R_R10,
+        Op::FGt | Op::FGe | Op::FLt | Op::FLe => R_RAX | R_R10,
         Op::StrEq | Op::StrNe | Op::StrLt | Op::StrLe | Op::StrGt | Op::StrGe => ALL_VOLATILE,
         Op::Neg | Op::Inc | Op::Dec | Op::SizeOf | Op::Not => R_RAX | R_R10,
         Op::FNeg => R_R10,
@@ -185,7 +187,14 @@ fn op_clobbers(op: &Op) -> u32 {
         Op::StoreAt | Op::LoadAt => R_RAX | R_R10 | R_R11,
         Op::IntToFloat | Op::FloatToInt => R_RAX | R_R10,
         Op::Return(_) | Op::Label(_) => 0,
+    };
+
+    if let Some(Operand::ConstIdx(idx)) = &inst.src1 {
+        if matches!(constants[*idx], IRConst::Array(_)) {
+            return base | ALL_VOLATILE;
+        }
     }
+    base
 }
 
 fn compute_liveness(
@@ -336,7 +345,7 @@ fn compute_intervals(
             let mut range_mask = 0u32;
             for j in (start + 1)..=end {
                 if j < instructions.len() {
-                    range_mask |= op_clobbers(&instructions[j].op);
+                    range_mask |= op_clobbers(&instructions[j], constants);
                 }
             }
             let is_float = match op {
@@ -362,7 +371,7 @@ fn compute_intervals(
             let mut range_mask = 0u32;
             for j in (start + 1)..=end {
                 if j < instructions.len() {
-                    range_mask |= op_clobbers(&instructions[j].op);
+                    range_mask |= op_clobbers(&instructions[j], constants);
                 }
             }
             intervals.push(Interval {
@@ -494,15 +503,12 @@ pub fn allocate_registers(func: &IRFunction, program_constants: &[IRConst]) -> A
         Reg::Rsi,
         Reg::Rdi,
     ];
-    let volatile_pool: Vec<Reg> = if is_leaf {
-        VOLATILE_GPR
-            .iter()
-            .copied()
-            .filter(|r| *r != Reg::R15)
-            .collect()
-    } else {
-        VOLATILE_GPR.to_vec()
-    };
+
+    let volatile_pool: Vec<Reg> = VOLATILE_GPR
+        .iter()
+        .copied()
+        .filter(|r| *r != Reg::R15)
+        .collect();
     const CALLEE_GPR: [Reg; 3] = [Reg::R12, Reg::R13, Reg::R14];
     const FLOAT_POOL: [Reg; 8] = [
         Reg::Xmm8,
@@ -549,12 +555,28 @@ pub fn allocate_registers(func: &IRFunction, program_constants: &[IRConst]) -> A
         .copied()
         .filter(|r| !r.is_xmm() && r.reg_id() >= 12)
         .collect();
+
+    let writes_rbx = func.instructions.iter().any(|i| match i.op {
+        Op::Div | Op::Mod | Op::StrCat | Op::Eq | Op::Ne | Op::Gt | Op::Ge | Op::Lt | Op::Le => {
+            true
+        }
+        Op::Add | Op::Sub | Op::Mul | Op::LAnd | Op::LOr | Op::Xor => match &i.src2 {
+            Some(Operand::ConstIdx(idx)) => !matches!(program_constants[*idx], IRConst::Int(_)),
+            Some(Operand::Var(_) | Operand::Temp(_, _)) => false,
+            _ => true,
+        },
+        _ => false,
+    });
+    if writes_rbx {
+        used_callee_saved.push(Reg::Rbx);
+    }
+
     if func
         .instructions
         .iter()
-        .any(|i| matches!(i.op, Op::Div | Op::Mod | Op::StrCat))
+        .any(|i| matches!(i.op, Op::StrCat | Op::StrByte))
     {
-        used_callee_saved.push(Reg::Rbx);
+        used_callee_saved.push(Reg::R15);
     }
     used_callee_saved.sort_by_key(|r| r.reg_id());
     used_callee_saved.dedup();

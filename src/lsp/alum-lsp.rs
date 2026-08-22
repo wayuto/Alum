@@ -44,7 +44,7 @@ impl LanguageServer for Backend {
         let pos = params.text_document_position.position;
 
         let source = {
-            let docs = self.docs.lock().unwrap();
+            let docs = lock_docs(&self.docs);
             docs.get(&uri).cloned()
         };
         let Some(source) = source else {
@@ -109,17 +109,14 @@ impl LanguageServer for Backend {
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri;
         let text = params.text_document.text;
-        self.docs.lock().unwrap().insert(uri.clone(), text);
+        lock_docs(&self.docs).insert(uri.clone(), text);
         self.publish_diagnostics(&uri).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri;
         if let Some(change) = params.content_changes.last() {
-            self.docs
-                .lock()
-                .unwrap()
-                .insert(uri.clone(), change.text.clone());
+            lock_docs(&self.docs).insert(uri.clone(), change.text.clone());
         }
         self.publish_diagnostics(&uri).await;
     }
@@ -133,7 +130,7 @@ impl LanguageServer for Backend {
 impl Backend {
     async fn publish_diagnostics(&self, uri: &Url) {
         let source = {
-            let docs = self.docs.lock().unwrap();
+            let docs = lock_docs(&self.docs);
             docs.get(uri).cloned()
         };
         let Some(source) = source else {
@@ -148,22 +145,52 @@ impl Backend {
         let mut by_file: HashMap<String, Vec<Diagnostic>> = HashMap::new();
         analyze(&source, &base_path, &mut by_file);
 
-        let diagnostics = by_file.remove(&base_path).unwrap_or_default();
+        let mut published_current = false;
+        for (file, diagnostics) in by_file {
+            if let Ok(file_url) = Url::from_file_path(&file) {
+                if &file_url == uri {
+                    published_current = true;
+                }
+                self.client
+                    .publish_diagnostics(file_url, diagnostics, None)
+                    .await;
+            }
+        }
 
-        self.client
-            .publish_diagnostics(uri.clone(), diagnostics, None)
-            .await;
+        if !published_current {
+            self.client
+                .publish_diagnostics(uri.clone(), Vec::new(), None)
+                .await;
+        }
     }
 }
 
+fn lock_docs(
+    docs: &Mutex<HashMap<Url, String>>,
+) -> std::sync::MutexGuard<'_, HashMap<Url, String>> {
+    docs.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 fn analyze(source: &str, base_path: &str, out: &mut HashMap<String, Vec<Diagnostic>>) {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        analyze_inner(source, base_path)
+    }));
+    if let Ok(by_file) = result {
+        for (file, diags) in by_file {
+            out.entry(file).or_default().extend(diags);
+        }
+    }
+}
+
+fn analyze_inner(source: &str, base_path: &str) -> HashMap<String, Vec<Diagnostic>> {
+    let mut out: HashMap<String, Vec<Diagnostic>> = HashMap::new();
     let mut preprocessor = Preprocessor::new(source, base_path.to_string(), Vec::new());
 
     let (processed, source_map) = match preprocessor.preprocess() {
         Ok(res) => res,
         Err(e) => {
-            push_diag(source, None, base_path, e.span(), e.to_string(), out);
-            return;
+            push_diag(source, None, base_path, e.span(), e.to_string(), &mut out);
+            return out;
         }
     };
 
@@ -180,11 +207,11 @@ fn analyze(source: &str, base_path: &str, out: &mut HashMap<String, Vec<Diagnost
                     base_path,
                     span,
                     e.to_string(),
-                    out,
+                    &mut out,
                 );
             }
         }
-        return;
+        return out;
     }
 
     let checker = TypeChecker::new();
@@ -196,9 +223,10 @@ fn analyze(source: &str, base_path: &str, out: &mut HashMap<String, Vec<Diagnost
             base_path,
             e.span(),
             e.to_string(),
-            out,
+            &mut out,
         );
     }
+    out
 }
 
 fn push_diag(
@@ -213,10 +241,6 @@ fn push_diag(
         Some((f, line, src)) => (f.to_string(), line, src.to_string()),
         None => (base_path.to_string(), span.line, base_source.to_string()),
     };
-
-    if file != base_path {
-        return;
-    }
 
     let line_text = source_text
         .lines()

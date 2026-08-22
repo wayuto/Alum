@@ -36,7 +36,11 @@ fn pass_mov_imm_to_mem_merge(asms: &mut Vec<Asm>) -> bool {
             (
                 Asm::Mov(Operand::Reg(r1), Operand::Imm(v)),
                 Asm::Mov(Operand::Mem(m), Operand::Reg(r2)),
-            ) if r1 == r2 && !register_is_used_after(asms, i + 2, r1) => {
+            ) if r1 == r2
+                && !register_is_used_after(asms, i + 2, r1)
+                && v >= i32::MIN as i64
+                && v <= i32::MAX as i64 =>
+            {
                 asms.splice(i..i + 2, once(Asm::Mov(Operand::Mem(m), Operand::Imm(v))));
                 changed = true;
                 continue;
@@ -98,10 +102,20 @@ fn operand_writes(asm: &Asm, reg: Reg) -> bool {
         Asm::Mov(dst, _) | Asm::Movsd(dst, _) => {
             matches!(dst, Operand::Reg(r) if *r == reg)
         }
+
+        Asm::Add(Operand::Reg(r), _)
+        | Asm::Sub(Operand::Reg(r), _)
+        | Asm::Imul(Operand::Reg(r), _)
+        | Asm::Xor(Operand::Reg(r), _)
+        | Asm::Or(Operand::Reg(r), _)
+        | Asm::And(Operand::Reg(r), _) => *r == reg,
         Asm::Movzx(dst, _) => *dst == reg,
         Asm::Lea(dst, _) => matches!(dst, Operand::Reg(r) if *r == reg),
         Asm::Pop(r)
         | Asm::Not(r)
+        | Asm::Neg(r)
+        | Asm::Inc(r)
+        | Asm::Dec(r)
         | Asm::Shl(r)
         | Asm::Sar(r)
         | Asm::Sete(r)
@@ -113,7 +127,13 @@ fn operand_writes(asm: &Asm, reg: Reg) -> bool {
         | Asm::Seta(r)
         | Asm::Setae(r)
         | Asm::Setb(r)
-        | Asm::Setbe(r) => *r == reg,
+        | Asm::Setbe(r)
+        | Asm::Setp(r)
+        | Asm::Setnp(r) => *r == reg,
+
+        Asm::Cqo => reg == Reg::Rdx,
+        Asm::Cdqe => reg == Reg::Rax,
+        Asm::Idiv(_) => reg == Reg::Rax || reg == Reg::Rdx,
         _ => false,
     }
 }
@@ -268,7 +288,7 @@ fn pass_const_test_jcc(asms: &mut Vec<Asm>) -> bool {
             j += 1;
         }
         if let Some(j) = test_at {
-            if let Asm::Je(l) = &asms[j + 1] {
+            if let Some(Asm::Je(l)) = asms.get(j + 1) {
                 let l = l.clone();
                 if val == 0 {
                     asms[j + 1] = Asm::Jmp(l);
@@ -400,7 +420,8 @@ fn set_jump_target(asm: &mut Asm, label: &str) {
         | Asm::Ja(l)
         | Asm::Jae(l)
         | Asm::Jb(l)
-        | Asm::Jbe(l) => *l = label.to_string(),
+        | Asm::Jbe(l)
+        | Asm::Jp(l) => *l = label.to_string(),
         Asm::Call(Operand::Label(l)) => *l = label.to_string(),
         _ => {}
     }

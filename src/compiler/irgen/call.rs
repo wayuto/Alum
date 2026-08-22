@@ -64,20 +64,28 @@ impl IRGen {
                 evaluated.push((operand, param.1.clone()));
                 n += 1;
             }
-            for (n, (operand, ir_type)) in evaluated.iter().enumerate() {
+            let mut int_idx = 0usize;
+            let mut flt_idx = 0usize;
+            for (operand, ir_type) in evaluated.iter() {
                 match ir_type {
-                    IRType::Float => ctx.instructions.push(Instruction {
-                        op: Op::FArg(n),
-                        dst: None,
-                        src1: Some(operand.clone()),
-                        src2: None,
-                    }),
-                    _ => ctx.instructions.push(Instruction {
-                        op: Op::Arg(n),
-                        dst: None,
-                        src1: Some(operand.clone()),
-                        src2: None,
-                    }),
+                    IRType::Float => {
+                        ctx.instructions.push(Instruction {
+                            op: Op::FArg(flt_idx),
+                            dst: None,
+                            src1: Some(operand.clone()),
+                            src2: None,
+                        });
+                        flt_idx += 1;
+                    }
+                    _ => {
+                        ctx.instructions.push(Instruction {
+                            op: Op::Arg(int_idx),
+                            dst: None,
+                            src1: Some(operand.clone()),
+                            src2: None,
+                        });
+                        int_idx += 1;
+                    }
                 }
             }
             let res_tmp = ctx.new_tmp(func.ret_type);
@@ -100,9 +108,21 @@ impl IRGen {
                 };
                 evaluated.push(operand);
             }
-            for (n, operand) in evaluated.iter().enumerate() {
+            let mut int_idx = 0usize;
+            let mut flt_idx = 0usize;
+            for operand in evaluated.iter() {
+                let op = if matches!(
+                    ctx.get_operand_type(operand, &self.constants)?,
+                    IRType::Float
+                ) {
+                    flt_idx += 1;
+                    Op::FArg(flt_idx - 1)
+                } else {
+                    int_idx += 1;
+                    Op::Arg(int_idx - 1)
+                };
                 ctx.instructions.push(Instruction {
-                    op: Op::Arg(n as usize),
+                    op,
                     dst: None,
                     src1: Some(operand.clone()),
                     src2: None,

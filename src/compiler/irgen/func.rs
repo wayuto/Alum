@@ -123,6 +123,26 @@ impl IRGen {
         name: &str,
         type_args: &[Type],
     ) -> Result<String, CodeGenError> {
+        const MAX_MONO_DEPTH: usize = 64;
+        if self.mono_depth >= MAX_MONO_DEPTH {
+            return Err(CodeGenError::TypeError {
+                message: format!(
+                    "generic instantiation of '{}' exceeds maximum depth {} (recursive generic instantiation?)",
+                    name, MAX_MONO_DEPTH
+                ),
+            });
+        }
+        self.mono_depth += 1;
+        let result = self.monomorphize_inner(name, type_args);
+        self.mono_depth -= 1;
+        result
+    }
+
+    fn monomorphize_inner(
+        &mut self,
+        name: &str,
+        type_args: &[Type],
+    ) -> Result<String, CodeGenError> {
         let mangled = format!(
             "{}_{}",
             name,

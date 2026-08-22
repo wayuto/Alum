@@ -476,6 +476,20 @@ impl TypeChecker {
                 self.resolve_call_type_args(array);
                 self.resolve_call_type_args(body);
             }
+            Expr::Match(target, branches, default, _) => {
+                self.resolve_call_type_args(target);
+                for (case, result) in branches.iter_mut() {
+                    self.resolve_call_type_args(case);
+                    self.resolve_call_type_args(result);
+                }
+                if let Some(d) = default {
+                    self.resolve_call_type_args(d);
+                }
+            }
+            Expr::Range(start, end, _) => {
+                self.resolve_call_type_args(start);
+                self.resolve_call_type_args(end);
+            }
             Expr::VarDecl(_, _, value, _)
             | Expr::ConstDecl(_, _, value, _, _)
             | Expr::VarAssign(_, value, _)
@@ -678,7 +692,10 @@ impl TypeChecker {
         let found = self.resolve_type(found);
 
         match (&expected, &found) {
-            (_, Type::Primitive(Primitive::Void)) => true,
+            (Type::Primitive(Primitive::Void), Type::Primitive(Primitive::Void)) => true,
+            (Type::Pointer(_), Type::Primitive(Primitive::Void)) => true,
+            (Type::TypeVar(_), Type::Primitive(Primitive::Void)) => true,
+            (Type::Param(_), Type::Primitive(Primitive::Void)) => true,
             (Type::TypeVar(_), _) => true,
             (_, Type::TypeVar(_)) => true,
             (Type::Param(a), Type::Param(b)) => a == b,

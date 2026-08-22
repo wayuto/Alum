@@ -24,7 +24,12 @@ enum CompoundOp {
     Shr,
 }
 
-fn make_compound_assign(target: Expr, op: CompoundOp, rhs: Expr, span: Span) -> Expr {
+fn make_compound_assign(
+    target: Expr,
+    op: CompoundOp,
+    rhs: Expr,
+    span: Span,
+) -> Result<Expr, ParserError> {
     let bin = |l: Expr, r: Expr| {
         let sp = Span::new(0, 0);
         match op {
@@ -44,27 +49,34 @@ fn make_compound_assign(target: Expr, op: CompoundOp, rhs: Expr, span: Span) -> 
         Expr::Index(arr, idx, _) => {
             let t = Expr::Index(arr.clone(), idx.clone(), Span::new(0, 0));
             let v = bin(t.clone(), rhs);
-            Expr::IndexAssign(Box::new(t), Box::new(v), span)
+            Ok(Expr::IndexAssign(Box::new(t), Box::new(v), span))
         }
         Expr::MemberAccess(obj, field, _) => {
             let t = Expr::MemberAccess(obj.clone(), field.clone(), Span::new(0, 0));
             let v = bin(t, rhs);
-            Expr::MemberAssign(obj.clone(), field.clone(), Box::new(v), span)
+            Ok(Expr::MemberAssign(
+                obj.clone(),
+                field.clone(),
+                Box::new(v),
+                span,
+            ))
         }
         Expr::Deref(ptr, _) => {
             let t = Expr::Deref(ptr.clone(), Span::new(0, 0));
             let v = bin(t, rhs);
-            Expr::DerefAssign(ptr.clone(), Box::new(v), span)
+            Ok(Expr::DerefAssign(ptr.clone(), Box::new(v), span))
         }
-        _ => {
-            let t = target.clone();
-            let v = bin(t.clone(), rhs);
-            Expr::IndexAssign(Box::new(t), Box::new(v), span)
-        }
+        _ => Err(ParserError::UnexpectedToken {
+            expected: Some(Token::IDENT(
+                "assignable target (variable, index, member or deref)".to_string(),
+            )),
+            found: Token::EQ,
+            span,
+        }),
     }
 }
 
-fn make_inc_dec(target: Expr, is_inc: bool, span: Span) -> Expr {
+fn make_inc_dec(target: Expr, is_inc: bool, span: Span) -> Result<Expr, ParserError> {
     let one = Expr::Int(1, Span::new(0, 0));
     make_compound_assign(
         target,
@@ -736,6 +748,7 @@ impl<'a> Parser<'a> {
         };
         let r = sub.expr();
         self.deferred_module_decls.extend(sub.deferred_module_decls);
+        self.has_fstring |= sub.has_fstring;
         r
     }
 
@@ -906,25 +919,11 @@ impl<'a> Parser<'a> {
                     if !type_params.is_empty() {
                         self.push_type_params(&type_params);
                     }
-                    self.expect(Token::LPAREN)?;
-                    let params = self.get_params_list()?;
-                    self.expect(Token::RPAREN)?;
-                    self.expect(Token::COLON)?;
-                    let ret_type = self.parse_type()?;
-                    let body = if attrs.is_external {
-                        if !type_params.is_empty() {
-                            self.type_param_scopes.pop();
-                        }
-                        Box::new(Expr::Nil(Span::new(0, 0)))
-                    } else {
-                        self.scope_depth += 1;
-                        let body = self.expr()?;
-                        self.scope_depth -= 1;
-                        if !type_params.is_empty() {
-                            self.type_param_scopes.pop();
-                        }
-                        Box::new(body)
-                    };
+                    let signature = self.parse_fun_signature(attrs.is_external);
+                    if !type_params.is_empty() {
+                        self.type_param_scopes.pop();
+                    }
+                    let (params, ret_type, body) = signature?;
                     Ok(Expr::FuncDecl(
                         name,
                         attrs,
@@ -1127,48 +1126,11 @@ impl<'a> Parser<'a> {
                     if !type_params.is_empty() {
                         self.push_type_params(&type_params);
                     }
-                    self.expect(Token::LBRACE)?;
-                    let mut fields = Vec::new();
-                    loop {
-                        match self.peek().cloned() {
-                            Some(Ok((Token::RBRACE, _))) => {
-                                self.next()?;
-                                break;
-                            }
-                            Some(Ok((Token::IDENT(field_name), _))) => {
-                                self.next()?;
-                                self.expect(Token::COLON)?;
-                                let field_type = self.parse_type()?;
-                                fields.push((field_name, field_type));
-                                match self.peek().cloned() {
-                                    Some(Ok((Token::COMMA, _))) => {
-                                        self.next()?;
-                                    }
-                                    Some(Ok((Token::RBRACE, _))) => {
-                                        self.next()?;
-                                        break;
-                                    }
-                                    _ => {
-                                        return Err(ParserError::UnexpectedToken {
-                                            expected: Some(Token::COMMA),
-                                            found: Token::EOF,
-                                            span: self.last_span,
-                                        });
-                                    }
-                                }
-                            }
-                            _ => {
-                                return Err(ParserError::UnexpectedToken {
-                                    expected: Some(Token::IDENT("FIELD NAME".to_string())),
-                                    found: Token::EOF,
-                                    span: self.last_span,
-                                });
-                            }
-                        }
-                    }
+                    let parsed_fields = self.parse_field_list();
                     if !type_params.is_empty() {
                         self.type_param_scopes.pop();
                     }
+                    let fields = parsed_fields?;
                     self.structs
                         .insert(name.clone(), (type_params.clone(), fields.clone()));
                     Ok(Expr::Struct(name, type_params, fields, span))
@@ -1199,48 +1161,11 @@ impl<'a> Parser<'a> {
                     if !type_params.is_empty() {
                         self.push_type_params(&type_params);
                     }
-                    self.expect(Token::LBRACE)?;
-                    let mut fields = Vec::new();
-                    loop {
-                        match self.peek().cloned() {
-                            Some(Ok((Token::RBRACE, _))) => {
-                                self.next()?;
-                                break;
-                            }
-                            Some(Ok((Token::IDENT(field_name), _))) => {
-                                self.next()?;
-                                self.expect(Token::COLON)?;
-                                let field_type = self.parse_type()?;
-                                fields.push((field_name, field_type));
-                                match self.peek().cloned() {
-                                    Some(Ok((Token::COMMA, _))) => {
-                                        self.next()?;
-                                    }
-                                    Some(Ok((Token::RBRACE, _))) => {
-                                        self.next()?;
-                                        break;
-                                    }
-                                    _ => {
-                                        return Err(ParserError::UnexpectedToken {
-                                            expected: Some(Token::COMMA),
-                                            found: Token::EOF,
-                                            span: self.last_span,
-                                        });
-                                    }
-                                }
-                            }
-                            _ => {
-                                return Err(ParserError::UnexpectedToken {
-                                    expected: Some(Token::IDENT("FIELD NAME".to_string())),
-                                    found: Token::EOF,
-                                    span: self.last_span,
-                                });
-                            }
-                        }
-                    }
+                    let parsed_fields = self.parse_field_list();
                     if !type_params.is_empty() {
                         self.type_param_scopes.pop();
                     }
+                    let fields = parsed_fields?;
                     self.unions
                         .insert(name.clone(), (type_params.clone(), fields.clone()));
                     Ok(Expr::Union(name, type_params, fields, span))
@@ -1300,7 +1225,12 @@ impl<'a> Parser<'a> {
                                 } else {
                                     next_value
                                 };
-                                next_value = value + 1;
+                                next_value =
+                                    value.checked_add(1).ok_or(ParserError::UnexpectedToken {
+                                        expected: None,
+                                        found: Token::INT(value),
+                                        span: self.last_span,
+                                    })?;
                                 members.push((member_name, value));
                                 match self.peek().cloned() {
                                     Some(Ok((Token::COMMA, _))) => {
@@ -1368,11 +1298,14 @@ impl<'a> Parser<'a> {
                                     unreachable!()
                                 }
                             }
-                            _ => Ok(Expr::IndexAssign(
-                                Box::new(expr),
-                                Box::new(val),
-                                Span::new(0, 0),
-                            )),
+                            _ => Err(ParserError::UnexpectedToken {
+                                expected: Some(Token::IDENT(
+                                    "assignable target (variable, index, member or deref)"
+                                        .to_string(),
+                                )),
+                                found: Token::EQ,
+                                span,
+                            }),
                         };
                     }
                     if let Some(e) = self.try_compound_assign(&expr, span)? {
@@ -1385,6 +1318,105 @@ impl<'a> Parser<'a> {
         } else {
             unreachable!()
         }
+    }
+
+    fn parse_fun_signature(
+        &mut self,
+        is_external: bool,
+    ) -> Result<(Vec<(String, Type)>, Type, Box<Expr>), ParserError> {
+        self.expect(Token::LPAREN)?;
+        let params = self.get_params_list()?;
+        self.expect(Token::RPAREN)?;
+        self.expect(Token::COLON)?;
+        let ret_type = self.parse_type()?;
+        let body = if is_external {
+            Box::new(Expr::Nil(Span::new(0, 0)))
+        } else {
+            self.scope_depth += 1;
+            let body = self.expr();
+            self.scope_depth -= 1;
+            Box::new(body?)
+        };
+        Ok((params, ret_type, body))
+    }
+
+    fn parse_field_list(&mut self) -> Result<Vec<(String, Type)>, ParserError> {
+        self.expect(Token::LBRACE)?;
+        let mut fields = Vec::new();
+        loop {
+            match self.peek().cloned() {
+                Some(Ok((Token::RBRACE, _))) => {
+                    self.next()?;
+                    break;
+                }
+                Some(Ok((Token::IDENT(field_name), _))) => {
+                    self.next()?;
+                    self.expect(Token::COLON)?;
+                    let field_type = self.parse_type()?;
+                    fields.push((field_name, field_type));
+                    match self.peek().cloned() {
+                        Some(Ok((Token::COMMA, _))) => {
+                            self.next()?;
+                        }
+                        Some(Ok((Token::RBRACE, _))) => {
+                            self.next()?;
+                            break;
+                        }
+                        _ => {
+                            return Err(ParserError::UnexpectedToken {
+                                expected: Some(Token::COMMA),
+                                found: Token::EOF,
+                                span: self.last_span,
+                            });
+                        }
+                    }
+                }
+                _ => {
+                    return Err(ParserError::UnexpectedToken {
+                        expected: Some(Token::IDENT("FIELD NAME".to_string())),
+                        found: Token::EOF,
+                        span: self.last_span,
+                    });
+                }
+            }
+        }
+        Ok(fields)
+    }
+
+    fn parse_block_stmts(&mut self, span: Span) -> Result<Expr, ParserError> {
+        let mut exprs: Vec<Expr> = Vec::new();
+        let last_span = self.last_span;
+        loop {
+            match self.peek().ok_or(ParserError::UnexpectedToken {
+                expected: Some(Token::RBRACE),
+                found: Token::EOF,
+                span: last_span,
+            })? {
+                Ok((Token::RBRACE, _)) => {
+                    self.next()?;
+                    break;
+                }
+                Ok((Token::SEMICOLON, _)) => {
+                    self.next()?;
+                    continue;
+                }
+                Ok((Token::EOF, _)) => {
+                    return Err(ParserError::UnexpectedToken {
+                        expected: Some(Token::RBRACE),
+                        found: Token::EOF,
+                        span: self.last_span,
+                    });
+                }
+                Err(e) => return Err(ParserError::LexerError(e.to_owned())),
+                _ => {
+                    exprs.push(self.expr()?);
+                    if let Some(Ok((Token::SEMICOLON, _))) = self.peek() {
+                        self.next()?;
+                    }
+                }
+            }
+        }
+        Ok(Expr::Block(exprs, span))
     }
 
     fn compound_op_for_token(tok: &Token) -> Option<CompoundOp> {
@@ -1415,7 +1447,7 @@ impl<'a> Parser<'a> {
         if let Some(op) = op {
             self.next()?;
             let val = self.expr()?;
-            return Ok(Some(make_compound_assign(expr.clone(), op, val, span)));
+            return Ok(Some(make_compound_assign(expr.clone(), op, val, span)?));
         }
         Ok(None)
     }
@@ -1449,21 +1481,35 @@ impl<'a> Parser<'a> {
         Ok(None)
     }
 
+    fn op_continues_line(&self, op_span_line: usize) -> bool {
+        op_span_line == self.last_span.line || op_span_line == 0 || self.last_span.line == 0
+    }
+
     fn logical(&mut self) -> Result<Expr, ParserError> {
-        let mut left = self.bitwise()?;
-        while let Some(Ok((op, _))) = self.peek().cloned() {
+        let mut left = self.logical_and()?;
+        while let Some(Ok((op, op_span))) = self.peek().cloned() {
             match op {
-                Token::AND | Token::OR | Token::LAND | Token::LOR => {
+                Token::OR | Token::LOR if self.op_continues_line(op_span.line) => {
                     self.next()?;
-                    let right = self.bitwise()?;
+                    let right = self.logical_and()?;
                     let span = left.span();
-                    left = match op {
-                        Token::AND | Token::LAND => {
-                            Expr::LAnd(Box::new(left), Box::new(right), span)
-                        }
-                        Token::OR | Token::LOR => Expr::LOr(Box::new(left), Box::new(right), span),
-                        _ => unreachable!(),
-                    };
+                    left = Expr::LOr(Box::new(left), Box::new(right), span);
+                }
+                _ => break,
+            }
+        }
+        Ok(left)
+    }
+
+    fn logical_and(&mut self) -> Result<Expr, ParserError> {
+        let mut left = self.comparison()?;
+        while let Some(Ok((op, op_span))) = self.peek().cloned() {
+            match op {
+                Token::AND | Token::LAND if self.op_continues_line(op_span.line) => {
+                    self.next()?;
+                    let right = self.comparison()?;
+                    let span = left.span();
+                    left = Expr::LAnd(Box::new(left), Box::new(right), span);
                 }
                 _ => break,
             }
@@ -1472,12 +1518,12 @@ impl<'a> Parser<'a> {
     }
 
     fn bitwise(&mut self) -> Result<Expr, ParserError> {
-        let mut left = self.comparison()?;
-        while let Some(Ok((op, _))) = self.peek().cloned() {
+        let mut left = self.shift()?;
+        while let Some(Ok((op, op_span))) = self.peek().cloned() {
             match op {
-                Token::XOR => {
+                Token::XOR if self.op_continues_line(op_span.line) => {
                     self.next()?;
-                    let right = self.comparison()?;
+                    let right = self.shift()?;
                     let span = left.span();
                     left = Expr::Xor(Box::new(left), Box::new(right), span);
                 }
@@ -1567,14 +1613,14 @@ impl<'a> Parser<'a> {
                     self.next()?;
                     callee = match callee {
                         Expr::Var(name, _) => Expr::Inc(name, span),
-                        other => make_inc_dec(other, true, span),
+                        other => make_inc_dec(other, true, span)?,
                     };
                 }
                 Some(Ok((Token::MINUSMINUS, span))) => {
                     self.next()?;
                     callee = match callee {
                         Expr::Var(name, _) => Expr::Dec(name, span),
-                        other => make_inc_dec(other, false, span),
+                        other => make_inc_dec(other, false, span)?,
                     };
                 }
                 _ => break,
@@ -1585,12 +1631,14 @@ impl<'a> Parser<'a> {
     }
 
     fn comparison(&mut self) -> Result<Expr, ParserError> {
-        let mut left = self.shift()?;
-        while let Some(Ok((op, _))) = self.peek().cloned() {
+        let mut left = self.bitwise()?;
+        while let Some(Ok((op, op_span))) = self.peek().cloned() {
             match op {
-                Token::CEQ | Token::NE | Token::LT | Token::LE | Token::GT | Token::GE => {
+                Token::CEQ | Token::NE | Token::LT | Token::LE | Token::GT | Token::GE
+                    if self.op_continues_line(op_span.line) =>
+                {
                     self.next()?;
-                    let right = self.shift()?;
+                    let right = self.bitwise()?;
                     let span = left.span();
                     left = match op {
                         Token::CEQ => Expr::Eq(Box::new(left), Box::new(right), span),
@@ -1610,9 +1658,9 @@ impl<'a> Parser<'a> {
 
     fn shift(&mut self) -> Result<Expr, ParserError> {
         let mut left = self.additive()?;
-        while let Some(Ok((op, _))) = self.peek().cloned() {
+        while let Some(Ok((op, op_span))) = self.peek().cloned() {
             match op {
-                Token::SHL | Token::SHR => {
+                Token::SHL | Token::SHR if self.op_continues_line(op_span.line) => {
                     self.next()?;
                     let right = self.additive()?;
                     let span = left.span();
@@ -1640,9 +1688,9 @@ impl<'a> Parser<'a> {
             }
         }
 
-        while let Some(Ok((op, _))) = self.peek().cloned() {
+        while let Some(Ok((op, op_span))) = self.peek().cloned() {
             match op {
-                Token::PLUS | Token::MINUS => {
+                Token::PLUS | Token::MINUS if self.op_continues_line(op_span.line) => {
                     self.next()?;
                     let right = self.term()?;
                     let span = left.span();
@@ -1660,9 +1708,11 @@ impl<'a> Parser<'a> {
 
     fn term(&mut self) -> Result<Expr, ParserError> {
         let mut left = self.prefix()?;
-        while let Some(Ok((op, _))) = self.peek().cloned() {
+        while let Some(Ok((op, op_span))) = self.peek().cloned() {
             match op {
-                Token::STAR | Token::SLASH | Token::PERCENT => {
+                Token::STAR | Token::SLASH | Token::PERCENT
+                    if self.op_continues_line(op_span.line) =>
+                {
                     self.next()?;
                     let right = self.prefix()?;
                     let span = left.span();
@@ -1742,9 +1792,9 @@ impl<'a> Parser<'a> {
                     self.expect(Token::COLON)?;
                     let ret_type = self.parse_type()?;
                     self.scope_depth += 1;
-                    let body = self.expr()?;
+                    let body = self.expr();
                     self.scope_depth -= 1;
-                    return Ok(Expr::Lambda(params, Box::new(body), ret_type, span));
+                    return Ok(Expr::Lambda(params, Box::new(body?), ret_type, span));
                 }
                 Ok((Token::LPAREN, _)) => {
                     self.next()?;
@@ -1772,42 +1822,11 @@ impl<'a> Parser<'a> {
                     }
                 }
                 Ok((Token::LBRACE, span)) => {
-                    let mut exprs: Vec<Expr> = Vec::new();
                     self.next()?;
                     self.scope_depth += 1;
-                    let last_span = self.last_span;
-                    loop {
-                        match self.peek().ok_or(ParserError::UnexpectedToken {
-                            expected: Some(Token::RBRACE),
-                            found: Token::EOF,
-                            span: last_span,
-                        })? {
-                            Ok((Token::RBRACE, _)) => {
-                                self.next()?;
-                                break;
-                            }
-                            Ok((Token::SEMICOLON, _)) => {
-                                self.next()?;
-                                continue;
-                            }
-                            Ok((Token::EOF, _)) => {
-                                return Err(ParserError::UnexpectedToken {
-                                    expected: Some(Token::RBRACE),
-                                    found: Token::EOF,
-                                    span: self.last_span,
-                                });
-                            }
-                            Err(e) => return Err(ParserError::LexerError(e.to_owned())),
-                            _ => {
-                                exprs.push(self.expr()?);
-                                if let Some(Ok((Token::SEMICOLON, _))) = self.peek() {
-                                    self.next()?;
-                                }
-                            }
-                        }
-                    }
+                    let block = self.parse_block_stmts(span);
                     self.scope_depth -= 1;
-                    return Ok(Expr::Block(exprs, span));
+                    return block;
                 }
                 Ok((Token::LBRACKET, span)) => {
                     self.next()?;
@@ -2019,20 +2038,20 @@ impl<'a> Parser<'a> {
                 }
                 Ok((Token::MINUS, span)) => {
                     self.next()?;
-                    let operand = self.factor()?;
-                    return Ok(Expr::Neg(Box::new(operand), span));
+                    let operand = self.call();
+                    return Ok(Expr::Neg(Box::new(operand?), span));
                 }
                 Ok((Token::PLUS, _span)) => {
                     self.next()?;
-                    let operand = self.factor()?;
-                    return Ok(operand);
+                    let operand = self.call();
+                    return Ok(operand?);
                 }
                 Ok((Token::PLUSPLUS, span)) => {
                     self.next()?;
                     let operand = self.prefix()?;
                     return Ok(match operand {
                         Expr::Var(name, _) => Expr::Inc(name, span),
-                        other => make_inc_dec(other, true, span),
+                        other => make_inc_dec(other, true, span)?,
                     });
                 }
                 Ok((Token::MINUSMINUS, span)) => {
@@ -2040,18 +2059,18 @@ impl<'a> Parser<'a> {
                     let operand = self.prefix()?;
                     return Ok(match operand {
                         Expr::Var(name, _) => Expr::Dec(name, span),
-                        other => make_inc_dec(other, false, span),
+                        other => make_inc_dec(other, false, span)?,
                     });
                 }
                 Ok((Token::NOT, span)) => {
                     self.next()?;
-                    let operand = self.factor()?;
-                    return Ok(Expr::Not(Box::new(operand), span));
+                    let operand = self.call();
+                    return Ok(Expr::Not(Box::new(operand?), span));
                 }
                 Ok((Token::BNOT, span)) => {
                     self.next()?;
-                    let operand = self.factor()?;
-                    return Ok(Expr::BNot(Box::new(operand), span));
+                    let operand = self.call();
+                    return Ok(Expr::BNot(Box::new(operand?), span));
                 }
                 Ok((token, span)) => {
                     return Err(ParserError::UnexpectedToken {

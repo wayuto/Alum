@@ -1,3 +1,4 @@
+use super::context::Context;
 use super::ir::{IRConst, IRType, Operand};
 use super::vm_safety::VmSafety;
 use crate::compiler::{
@@ -9,19 +10,30 @@ use ordered_float::OrderedFloat;
 use std::collections::{HashMap, HashSet};
 
 impl IRGen {
-    pub(super) fn eval_const(&mut self, expr: &Expr) -> Option<(IRConst, IRType)> {
+    pub(super) fn eval_const(
+        &mut self,
+        expr: &Expr,
+        ctx: Option<&Context>,
+    ) -> Option<(IRConst, IRType)> {
         match expr {
             Expr::Int(n, _) => Some((IRConst::Int(*n as i64), IRType::Int)),
             Expr::Float(f, _) => Some((IRConst::Float(OrderedFloat(*f)), IRType::Float)),
             Expr::String(s, _) => Some((IRConst::Str(s.clone()), IRType::String)),
             Expr::Bool(b, _) => Some((IRConst::Int(if *b { 1 } else { 0 }), IRType::Bool)),
             Expr::Nil(_) => Some((IRConst::Int(0), IRType::Int)),
-            Expr::Var(name, _) => self.globals.get(name).cloned(),
-            Expr::Neg(e, _) => match self.eval_const(e)? {
-                (IRConst::Int(v), IRType::Int) => Some((IRConst::Int(-v), IRType::Int)),
+            Expr::Var(name, _) => {
+                if ctx.map(|c| c.get_var_type(name).is_ok()).unwrap_or(false) {
+                    return None;
+                }
+                self.globals.get(name).cloned()
+            }
+            Expr::Neg(e, _) => match self.eval_const(e, ctx)? {
+                (IRConst::Int(v), IRType::Int) => {
+                    Some((IRConst::Int(v.wrapping_neg()), IRType::Int))
+                }
                 _ => None,
             },
-            Expr::FNeg(e, _) => match self.eval_const(e)? {
+            Expr::FNeg(e, _) => match self.eval_const(e, ctx)? {
                 (IRConst::Float(v), IRType::Float) => Some((IRConst::Float(-v), IRType::Float)),
                 _ => None,
             },
@@ -34,8 +46,8 @@ impl IRGen {
             | Expr::FSub(l, r, _)
             | Expr::FMul(l, r, _)
             | Expr::FDiv(l, r, _) => {
-                let (lc, lt) = self.eval_const(l)?;
-                let (rc, rt) = self.eval_const(r)?;
+                let (lc, lt) = self.eval_const(l, ctx)?;
+                let (rc, rt) = self.eval_const(r, ctx)?;
                 if matches!(lt, IRType::Float) || matches!(rt, IRType::Float) {
                     let (a, b) = match (lc, rc) {
                         (IRConst::Float(a), IRConst::Float(b)) => (a.into_inner(), b.into_inner()),

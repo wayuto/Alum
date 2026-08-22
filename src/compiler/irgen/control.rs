@@ -100,6 +100,8 @@ impl IRGen {
         ctx.loop_end_labels.push(label_end.clone());
         ctx.loop_inc_labels.push(label_cont.clone());
 
+        ctx.loop_scope_depths.push(ctx.scope.len());
+
         ctx.instructions.push(Instruction {
             op: Op::Label(label_start.clone()),
             dst: None,
@@ -122,7 +124,6 @@ impl IRGen {
             src2: None,
         });
 
-        ctx.loop_scope_depths.push(ctx.scope.len());
         ctx.enter_scope();
         self.compile_expr(*body, ctx)?;
         self.emit_scope_frees(ctx)?;

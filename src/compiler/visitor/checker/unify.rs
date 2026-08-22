@@ -69,8 +69,11 @@ impl TypeChecker {
         let t2 = self.resolve_type_var(t2);
 
         match (&t1, &t2) {
-            (Type::Primitive(Primitive::Void), _) => Ok(()),
-            (_, Type::Primitive(Primitive::Void)) => Ok(()),
+            (Type::Primitive(Primitive::Void), Type::Primitive(Primitive::Void)) => Ok(()),
+            (Type::Pointer(_), Type::Primitive(Primitive::Void)) => Ok(()),
+            (Type::TypeVar(_), Type::Primitive(Primitive::Void)) => Ok(()),
+            (Type::Param(_), Type::Primitive(Primitive::Void)) => Ok(()),
+            (Type::Primitive(Primitive::Void), Type::TypeVar(_)) => Ok(()),
             (Type::TypeVar(id), _) => {
                 self.bind_type_var(*id, &t2);
                 Ok(())
@@ -81,8 +84,21 @@ impl TypeChecker {
             }
             (Type::Param(p1), Type::Param(p2)) if p1 == p2 => Ok(()),
             (Type::Primitive(p1), Type::Primitive(p2)) if p1 == p2 => Ok(()),
-            (Type::Pointer(p), Type::Array(a)) => self.unify_types(p, a),
-            (Type::Array(a), Type::Pointer(p)) => self.unify_types(p, a),
+
+            (Type::Pointer(p), Type::Array(a)) => {
+                if matches!(p.as_ref(), Type::Primitive(Primitive::Void)) {
+                    Ok(())
+                } else {
+                    self.unify_types(p, a)
+                }
+            }
+            (Type::Array(a), Type::Pointer(p)) => {
+                if matches!(p.as_ref(), Type::Primitive(Primitive::Void)) {
+                    Ok(())
+                } else {
+                    self.unify_types(p, a)
+                }
+            }
             (Type::Pointer(inner), Type::Primitive(Primitive::String))
                 if matches!(inner.as_ref(), Type::Primitive(Primitive::Void)) =>
             {

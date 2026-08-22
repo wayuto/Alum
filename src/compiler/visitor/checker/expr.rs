@@ -237,11 +237,18 @@ impl TypeChecker {
                         });
                     }
 
+                    if !matches!(expr, Expr::Add(..)) {
+                        return Err(CheckerError::InvalidOperation {
+                            op: "arithmetic".to_string(),
+                            type_name: format!(
+                                "{:?} and {:?} (only '+' is valid for strings)",
+                                lhs_type, rhs_type
+                            ),
+                            span: span,
+                        });
+                    }
                     let (l, r) = match expr {
                         Expr::Add(l, r, _) => (l.clone(), r.clone()),
-                        Expr::Sub(_, _, _) => unreachable!(),
-                        Expr::Mul(_, _, _) => unreachable!(),
-                        Expr::Div(_, _, _) => unreachable!(),
                         _ => unreachable!(),
                     };
                     *expr = Expr::StrCat(l, r, Span::new(0, 0));
@@ -297,11 +304,22 @@ impl TypeChecker {
                         Expr::Div(l, r, _) => (l.clone(), r.clone()),
                         _ => unreachable!(),
                     };
+
+                    let l = if matches!(lhs_type, Type::Primitive(Primitive::Int)) {
+                        Expr::Cast(l, Type::Primitive(Primitive::Float), Span::new(0, 0))
+                    } else {
+                        *l
+                    };
+                    let r = if matches!(rhs_type, Type::Primitive(Primitive::Int)) {
+                        Expr::Cast(r, Type::Primitive(Primitive::Float), Span::new(0, 0))
+                    } else {
+                        *r
+                    };
                     *expr = match expr {
-                        Expr::Add(_, _, _) => Expr::FAdd(l, r, Span::new(0, 0)),
-                        Expr::Sub(_, _, _) => Expr::FSub(l, r, Span::new(0, 0)),
-                        Expr::Mul(_, _, _) => Expr::FMul(l, r, Span::new(0, 0)),
-                        Expr::Div(_, _, _) => Expr::FDiv(l, r, Span::new(0, 0)),
+                        Expr::Add(_, _, _) => Expr::FAdd(Box::new(l), Box::new(r), Span::new(0, 0)),
+                        Expr::Sub(_, _, _) => Expr::FSub(Box::new(l), Box::new(r), Span::new(0, 0)),
+                        Expr::Mul(_, _, _) => Expr::FMul(Box::new(l), Box::new(r), Span::new(0, 0)),
+                        Expr::Div(_, _, _) => Expr::FDiv(Box::new(l), Box::new(r), Span::new(0, 0)),
                         _ => unreachable!(),
                     };
                     return Ok(Type::Primitive(Primitive::Float));
@@ -576,13 +594,24 @@ impl TypeChecker {
                         Expr::Ge(l, r, _) => (l.clone(), r.clone()),
                         _ => unreachable!(),
                     };
+
+                    let l = if matches!(lhs_type, Type::Primitive(Primitive::Int)) {
+                        Expr::Cast(l, Type::Primitive(Primitive::Float), Span::new(0, 0))
+                    } else {
+                        *l
+                    };
+                    let r = if matches!(rhs_type, Type::Primitive(Primitive::Int)) {
+                        Expr::Cast(r, Type::Primitive(Primitive::Float), Span::new(0, 0))
+                    } else {
+                        *r
+                    };
                     *expr = match expr {
-                        Expr::Eq(_, _, _) => Expr::FEq(l, r, Span::new(0, 0)),
-                        Expr::Ne(_, _, _) => Expr::FNe(l, r, Span::new(0, 0)),
-                        Expr::Lt(_, _, _) => Expr::FLt(l, r, Span::new(0, 0)),
-                        Expr::Le(_, _, _) => Expr::FLe(l, r, Span::new(0, 0)),
-                        Expr::Gt(_, _, _) => Expr::FGt(l, r, Span::new(0, 0)),
-                        Expr::Ge(_, _, _) => Expr::FGe(l, r, Span::new(0, 0)),
+                        Expr::Eq(_, _, _) => Expr::FEq(Box::new(l), Box::new(r), Span::new(0, 0)),
+                        Expr::Ne(_, _, _) => Expr::FNe(Box::new(l), Box::new(r), Span::new(0, 0)),
+                        Expr::Lt(_, _, _) => Expr::FLt(Box::new(l), Box::new(r), Span::new(0, 0)),
+                        Expr::Le(_, _, _) => Expr::FLe(Box::new(l), Box::new(r), Span::new(0, 0)),
+                        Expr::Gt(_, _, _) => Expr::FGt(Box::new(l), Box::new(r), Span::new(0, 0)),
+                        Expr::Ge(_, _, _) => Expr::FGe(Box::new(l), Box::new(r), Span::new(0, 0)),
                         _ => unreachable!(),
                     };
                 } else if lhs_type.is_string() || rhs_type.is_string() {
@@ -899,6 +928,12 @@ impl TypeChecker {
                 match array_type {
                     Type::Array(inner) => Ok(*inner),
                     Type::Primitive(Primitive::String) => Ok(Type::Primitive(Primitive::String)),
+
+                    Type::Pointer(inner)
+                        if matches!(inner.as_ref(), Type::Primitive(Primitive::Void)) =>
+                    {
+                        Ok(self.new_type_var())
+                    }
                     Type::Pointer(inner) => Ok(*inner),
                     Type::Struct(struct_name, args) => self
                         .struct_method_return(&struct_name, &args, "nth")

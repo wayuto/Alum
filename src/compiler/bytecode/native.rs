@@ -92,7 +92,7 @@ struct Ffi {
     prep_cif:
         unsafe extern "C" fn(*mut u8, c_int, u32, *const c_void, *const *const c_void) -> c_int,
     call: unsafe extern "C" fn(*const u8, *const c_void, *mut c_void, *const *const c_void),
-    t_sint32: *const c_void,
+    t_sint64: *const c_void,
     t_double: *const c_void,
     t_pointer: *const c_void,
 }
@@ -120,7 +120,7 @@ fn load_ffi() -> Option<Ffi> {
         >(handle, "ffi_call") else {
             continue;
         };
-        let Some(t_sint32) = f_sym(handle, "ffi_type_sint32") else {
+        let Some(t_sint64) = f_sym(handle, "ffi_type_sint64") else {
             continue;
         };
         let Some(t_double) = f_sym(handle, "ffi_type_double") else {
@@ -132,7 +132,7 @@ fn load_ffi() -> Option<Ffi> {
         return Some(Ffi {
             prep_cif,
             call,
-            t_sint32: t_sint32 as *const c_void,
+            t_sint64: t_sint64 as *const c_void,
             t_double: t_double as *const c_void,
             t_pointer: t_pointer as *const c_void,
         });
@@ -142,7 +142,7 @@ fn load_ffi() -> Option<Ffi> {
 
 fn ffi_type_of(kind: NativeKind, f: &Ffi) -> *const c_void {
     match kind {
-        NativeKind::Int | NativeKind::Bool => f.t_sint32,
+        NativeKind::Int | NativeKind::Bool => f.t_sint64,
         NativeKind::Float => f.t_double,
         NativeKind::Str => f.t_pointer,
     }
@@ -221,11 +221,8 @@ pub fn call_native(entry: &NativeEntry, args: &[Value]) -> Option<Value> {
     }
 
     let result = match entry.sig.ret {
-        NativeKind::Int => {
-            let v = rvalue as i32;
-            Value::Int(v as i64)
-        }
-        NativeKind::Bool => Value::Bool((rvalue as i32) != 0),
+        NativeKind::Int => Value::Int(rvalue as i64),
+        NativeKind::Bool => Value::Bool(rvalue != 0),
         NativeKind::Float => Value::Float(f64::from_bits(rvalue)),
         NativeKind::Str => {
             let p = rvalue as *const c_char;

@@ -11,11 +11,15 @@ pub struct Config {
     pub dependencies: Option<HashMap<String, Dependency>>,
 }
 
+fn default_shared() -> bool {
+    true
+}
+
 #[derive(Deserialize, Serialize)]
 pub struct Native {
     #[serde(default)]
     pub sources: Vec<String>,
-    #[serde(default)]
+    #[serde(default = "default_shared")]
     pub shared: bool,
     #[serde(default)]
     pub name: Option<String>,

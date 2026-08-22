@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-export LOCATION="$PWD"
+export LOCATION="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
 echo "Installing alc (Alum compiler) and alum-lsp (Alum language server)..."
 cargo install --path "$LOCATION"
@@ -16,7 +16,7 @@ almk build
 
 echo "Installing alum-std modules..."
 sudo mkdir -p /usr/local/include/alum
-sudo rm -f /usr/local/include/alum/*.ah
+sudo rm -f /usr/local/include/alum/*.ah /usr/local/include/alum/*.al
 sudo cp "$LOCATION/alum-std/alum/src/"*.al /usr/local/include/alum/
 
 echo "Building Rust runtime (libalum_std.a)..."
@@ -25,7 +25,8 @@ cargo build --release
 
 echo "Merging static libraries..."
 cd "$LOCATION/alum-std/target/release"
-mkdir -p merged_objs
+rm -rf merged_objs
+mkdir merged_objs
 cd merged_objs
 ar x ../libalum_std.a
 
@@ -43,28 +44,28 @@ sudo cp libalum.a /usr/local/lib/libalum.a
 
 echo "Packaging VS Code extension..."
 if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
-    cd "$LOCATION/alum-vscode" || {
-        echo "WARNING: cannot enter $LOCATION/alum-vscode; skipping extension." >&2
-    }
+    if cd "$LOCATION/alum-vscode"; then
+        if [ ! -d node_modules ]; then
+            echo "Installing extension dependencies..."
+            npm install || {
+                echo "WARNING: npm install failed; skipping extension packaging." >&2
+            }
+        fi
 
-    if [ ! -d node_modules ]; then
-        echo "Installing extension dependencies..."
-        npm install || {
-            echo "WARNING: npm install failed; skipping extension packaging." >&2
-        }
-    fi
-
-    if [ -d node_modules ] && yes | npx vsce package --out alum-vscode-lsp.vsix; then
-        echo "Extension packaged: $LOCATION/alum-vscode/alum-vscode-lsp.vsix"
-        if command -v code >/dev/null 2>&1; then
-            echo "Installing extension into VS Code..."
-            code --install-extension alum-vscode-lsp.vsix
+        if [ -d node_modules ] && yes | npx vsce package --out alum-vscode-lsp.vsix; then
+            echo "Extension packaged: $LOCATION/alum-vscode/alum-vscode-lsp.vsix"
+            if command -v code >/dev/null 2>&1; then
+                echo "Installing extension into VS Code..."
+                code --install-extension alum-vscode-lsp.vsix
+            else
+                echo "VS Code CLI ('code') not found; install the vsix manually with:"
+                echo "  code --install-extension $LOCATION/alum-vscode/alum-vscode-lsp.vsix"
+            fi
         else
-            echo "VS Code CLI ('code') not found; install the vsix manually with:"
-            echo "  code --install-extension $LOCATION/alum-vscode/alum-vscode-lsp.vsix"
+            echo "WARNING: vsce package failed; skipping extension packaging." >&2
         fi
     else
-        echo "WARNING: vsce package failed; skipping extension packaging." >&2
+        echo "WARNING: cannot enter $LOCATION/alum-vscode; skipping extension." >&2
     fi
 else
     echo "WARNING: node/npm not found; skipping VS Code extension packaging." >&2

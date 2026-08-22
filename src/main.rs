@@ -29,6 +29,14 @@ fn default_exe_path(input: &str) -> String {
     name.to_string()
 }
 
+fn default_obj_path(input: &str) -> String {
+    let stem = std::path::Path::new(input)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("output");
+    format!("{}.o", stem)
+}
+
 fn run() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
 
@@ -37,12 +45,21 @@ fn run() -> Result<(), Box<dyn Error>> {
     };
 
     if cli.run {
+        if cli.input.len() > 1 {
+            return Err("'-r' accepts a single input file".into());
+        }
         return exec_run(
             first_input.clone(),
+            cli.output.clone(),
+            cli.nostdlib,
             cli.include_paths,
             cli.verbose,
             cli.cte_lib.clone(),
         );
+    }
+
+    if cli.compile_only && cli.input.len() > 1 && cli.output.is_some() {
+        return Err("cannot specify '-o' with '-c' and multiple input files".into());
     }
 
     let all_obj_files = cli.input.iter().all(|input| is_object_file(input));
@@ -57,7 +74,10 @@ fn run() -> Result<(), Box<dyn Error>> {
         }
 
         let obj_output = if cli.compile_only {
-            cli.output.clone()
+            match cli.output.clone() {
+                Some(o) => Some(o),
+                None => Some(default_obj_path(input)),
+            }
         } else {
             None
         };
@@ -73,6 +93,9 @@ fn run() -> Result<(), Box<dyn Error>> {
         )?;
 
         if !obj_file.is_empty() {
+            if cli.compile_only && cli.output.is_none() {
+                println!("{}", obj_file);
+            }
             obj_files.push(obj_file.clone());
             generated_objs.push(obj_file);
         }

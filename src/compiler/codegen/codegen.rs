@@ -115,6 +115,10 @@ pub struct AsmCodeGen {
     pub(super) internals: HashSet<String>,
     pub(super) extern_link: HashMap<String, String>,
     pub(super) used_callee_saved: Vec<Reg>,
+
+    pub(super) stack_arg_plan: HashMap<usize, (usize, usize)>,
+    pub(super) cur_inst_idx: usize,
+    pub(super) call_stack_bytes: usize,
 }
 
 impl AsmCodeGen {
@@ -174,6 +178,9 @@ impl AsmCodeGen {
             internals,
             extern_link,
             used_callee_saved: Vec::new(),
+            stack_arg_plan: HashMap::new(),
+            cur_inst_idx: 0,
+            call_stack_bytes: 0,
         }
     }
 

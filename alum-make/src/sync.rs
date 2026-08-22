@@ -4,8 +4,9 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
     fs::{File, metadata, read_to_string},
-    path::Path,
+    path::{Path, PathBuf},
 };
+use walkdir::WalkDir;
 use zip::ZipArchive;
 
 fn extract_zip(zip_path: &str, extract_path: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -17,11 +18,52 @@ fn extract_zip(zip_path: &str, extract_path: &str) -> Result<(), Box<dyn std::er
 }
 
 fn get_hash(path: &str) -> Result<String, Box<dyn std::error::Error>> {
-    let content = std::fs::read(path)?;
     let mut hasher = Sha256::new();
-    hasher.update(&content);
+    let p = Path::new(path);
+    if p.is_dir() {
+        let mut files: Vec<PathBuf> = WalkDir::new(p)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file())
+            .map(|e| e.path().to_path_buf())
+            .collect();
+        files.sort();
+        for file in files {
+            hasher.update(file.to_string_lossy().as_bytes());
+            hasher.update(&std::fs::read(&file)?);
+        }
+    } else {
+        hasher.update(&std::fs::read(p)?);
+    }
     let result = hasher.finalize();
     Ok(format!("{:x}", result))
+}
+
+fn copy_dir(src: &Path, dst: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let file_name = entry.file_name();
+        let src_path = entry.path();
+        let dst_path = dst.join(&file_name);
+        if file_type.is_dir() {
+            copy_dir(&src_path, &dst_path)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path)?;
+        }
+    }
+    Ok(())
+}
+
+fn checkout_tag(repo: &Repository, tag: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let (object, reference) = repo.revparse_ext(tag)?;
+    repo.checkout_tree(&object, None)?;
+    match reference {
+        Some(gref) => repo.set_head(gref.name().unwrap())?,
+        None => repo.set_head_detached(object.id())?,
+    }
+    Ok(())
 }
 
 pub fn sync() -> Result<(), Box<dyn std::error::Error>> {
@@ -35,27 +77,26 @@ pub fn sync() -> Result<(), Box<dyn std::error::Error>> {
         for (name, info) in deps {
             if let Some(url) = info.url {
                 if info.git {
-                    match Repository::clone(&url, Path::new(&format!(".deps/{}", name))) {
-                        Ok(_) => {}
-                        Err(_) => {
-                            if let Some(tag) = info.tag {
-                                let repo = Repository::open(Path::new(&format!(".deps/{}", name)))?;
-                                let (object, reference) = repo.revparse_ext(&tag)?;
-                                repo.checkout_tree(&object, None)?;
-                                match reference {
-                                    Some(gref) => repo.set_head(gref.name().unwrap())?,
-                                    None => repo.set_head_detached(object.id())?,
-                                }
+                    let dest = format!(".deps/{}", name);
+                    match Repository::clone(&url, Path::new(&dest)) {
+                        Ok(repo) => {
+                            if let Some(tag) = &info.tag {
+                                checkout_tag(&repo, tag)?;
+                            }
+                        }
+                        Err(e) => {
+                            if !Path::new(&dest).exists() {
+                                return Err(e.into());
+                            }
+                            if let Some(tag) = &info.tag {
+                                let repo = Repository::open(Path::new(&dest))?;
+                                checkout_tag(&repo, tag)?;
                             }
                         }
                     }
                 } else {
                     let dep_dir = format!(".deps/{}", name);
                     let cached_hash = deps_hash.get(&name).map(|h| h.as_str());
-
-                    if cached_hash.is_some() && Path::new(&dep_dir).exists() {
-                        continue;
-                    }
 
                     std::fs::create_dir_all(".deps")?;
                     let zip_path = format!(".deps/{}.zip", name);
@@ -79,29 +120,21 @@ pub fn sync() -> Result<(), Box<dyn std::error::Error>> {
                 }
             } else if let Some(local) = info.local {
                 let dest = format!(".deps/{}", name);
-                if metadata(&dest).is_err() {
+                let curr_hash = get_hash(&local)?;
+                let up_to_date = deps_hash.get(&name).map(|h| h.as_str())
+                    == Some(curr_hash.as_str())
+                    && metadata(&dest).is_ok();
+                if !up_to_date {
                     let src = Path::new(&local);
                     let dst = Path::new(&dest);
-                    if src.is_dir() {
-                        fn copy_dir(
-                            src: &Path,
-                            dst: &Path,
-                        ) -> Result<(), Box<dyn std::error::Error>> {
-                            std::fs::create_dir_all(dst)?;
-                            for entry in std::fs::read_dir(src)? {
-                                let entry = entry?;
-                                let file_type = entry.file_type()?;
-                                let file_name = entry.file_name();
-                                let src_path = entry.path();
-                                let dst_path = dst.join(&file_name);
-                                if file_type.is_dir() {
-                                    copy_dir(&src_path, &dst_path)?;
-                                } else {
-                                    std::fs::copy(&src_path, &dst_path)?;
-                                }
-                            }
-                            Ok(())
+                    if metadata(&dest).is_ok() {
+                        if dst.is_dir() {
+                            std::fs::remove_dir_all(dst)?;
+                        } else {
+                            std::fs::remove_file(dst)?;
                         }
+                    }
+                    if src.is_dir() {
                         copy_dir(src, dst)?;
                     } else {
                         if let Some(parent) = dst.parent() {
@@ -109,7 +142,6 @@ pub fn sync() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         std::fs::copy(src, dst)?;
                     }
-                    let curr_hash = get_hash(&local)?;
                     deps_hash.insert(name, curr_hash);
                 }
             }

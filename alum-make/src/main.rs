@@ -47,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         Commands::Build => match build(true) {
             Ok(_) => {}
-            Err(e) => eprintln!("{}", e),
+            Err(e) => return Err(e),
         },
         Commands::Clean => {
             if std::fs::metadata(&"target/").is_ok() {
@@ -63,10 +63,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         Commands::Run => {
-            match build(false) {
-                Ok(_) => {}
-                Err(e) => eprintln!("{}", e),
-            };
+            if let Err(e) = build(false) {
+                return Err(e);
+            }
             let toml_string = std::fs::read_to_string(&"./Alumake.toml")?;
             let config: config::Config = toml::from_str(&toml_string)?;
             let name = config.package.name;
@@ -83,15 +82,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             tag,
         } => match add_dep(name, local, url, git, tag) {
             Ok(_) => {}
-            Err(e) => eprintln!("{}", e),
+            Err(e) => return Err(e),
         },
         Commands::Remove { name } => match rm_dep(name) {
             Ok(_) => {}
-            Err(e) => eprintln!("{}", e),
+            Err(e) => return Err(e),
         },
         Commands::Sync => match sync() {
             Ok(_) => {}
-            Err(e) => eprintln!("{}", e),
+            Err(e) => return Err(e),
         },
     }
     Ok(())

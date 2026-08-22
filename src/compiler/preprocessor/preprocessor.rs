@@ -90,8 +90,14 @@ impl<'a> Preprocessor<'a> {
                 let macro_pattern = format!("{}(", name);
                 let mut search_start = 0;
 
-                while let Some(pos) = result[search_start..].find(&macro_pattern) {
-                    let abs_pos = search_start + pos;
+                while let Some(abs_pos) =
+                    self.find_outside_strings(&result, &macro_pattern, search_start)
+                {
+                    let before = result[..abs_pos].chars().next_back();
+                    if before.map_or(false, |c| c.is_alphanumeric() || c == '_') {
+                        search_start = abs_pos + 1;
+                        continue;
+                    }
                     let args_start = abs_pos + name.len();
 
                     let (args_str, args_end) = match self.extract_args(&result, args_start) {
@@ -102,8 +108,7 @@ impl<'a> Preprocessor<'a> {
                         }
                     };
 
-                    let args: Vec<String> =
-                        args_str.split(',').map(|s| s.trim().to_string()).collect();
+                    let args = self.split_macro_args(&args_str);
 
                     if args.len() != macro_def.params.len() {
                         search_start = abs_pos + 1;
@@ -126,33 +131,44 @@ impl<'a> Preprocessor<'a> {
                 if macro_def.params.is_empty() {
                     let mut new_result = String::new();
                     let mut i = 0;
+                    let mut in_string = false;
+                    let mut quote = '\0';
                     while i < result.len() {
-                        if result[i..].starts_with(name) {
-                            let before = if i > 0 {
-                                Some(result.chars().nth(i - 1).unwrap())
-                            } else {
-                                None
-                            };
-                            let after = if i + name.len() < result.len() {
-                                Some(result.chars().nth(i + name.len()).unwrap())
-                            } else {
-                                None
+                        let ch = result[i..].chars().next().unwrap();
+                        if in_string {
+                            new_result.push(ch);
+                            i += ch.len_utf8();
+                            if ch == '\\' {
+                                if let Some(esc) = result[i..].chars().next() {
+                                    new_result.push(esc);
+                                    i += esc.len_utf8();
+                                }
+                            } else if ch == quote {
+                                in_string = false;
+                            }
+                            continue;
+                        }
+                        if result[i..].starts_with(name.as_str()) {
+                            let end = i + name.len();
+                            let before = result[..i].chars().next_back();
+                            let after = result[end..].chars().next();
+                            let is_ident = |c: Option<char>| {
+                                c.map_or(false, |c| c.is_alphanumeric() || c == '_')
                             };
 
-                            let is_ident_before =
-                                before.map_or(false, |c| c.is_alphanumeric() || c == '_');
-                            let is_ident_after =
-                                after.map_or(false, |c| c.is_alphanumeric() || c == '_');
-
-                            if !is_ident_before && !is_ident_after {
+                            if !is_ident(before) && !is_ident(after) {
                                 new_result.push_str(&macro_def.body);
-                                i += name.len();
+                                i = end;
                                 changed = true;
                                 continue;
                             }
                         }
-                        new_result.push(result.chars().nth(i).unwrap());
-                        i += 1;
+                        if ch == '"' || ch == '\'' {
+                            in_string = true;
+                            quote = ch;
+                        }
+                        new_result.push(ch);
+                        i += ch.len_utf8();
                     }
                     result = new_result;
                 }
@@ -162,6 +178,80 @@ impl<'a> Preprocessor<'a> {
         }
 
         result
+    }
+
+    fn find_outside_strings(&self, text: &str, pattern: &str, start: usize) -> Option<usize> {
+        let mut i = start;
+        let mut in_string = false;
+        let mut quote = '\0';
+        while i < text.len() {
+            let ch = text[i..].chars().next()?;
+            if in_string {
+                if ch == '\\' {
+                    i += ch.len_utf8();
+                    if let Some(esc) = text[i..].chars().next() {
+                        i += esc.len_utf8();
+                    }
+                    continue;
+                }
+                if ch == quote {
+                    in_string = false;
+                }
+                i += ch.len_utf8();
+                continue;
+            }
+            if text[i..].starts_with(pattern) {
+                return Some(i);
+            }
+            if ch == '"' || ch == '\'' {
+                in_string = true;
+                quote = ch;
+            }
+            i += ch.len_utf8();
+        }
+        None
+    }
+
+    fn split_macro_args(&self, args_str: &str) -> Vec<String> {
+        if args_str.trim().is_empty() {
+            return Vec::new();
+        }
+        let mut args = Vec::new();
+        let mut depth: isize = 0;
+        let mut in_string = false;
+        let mut quote = '\0';
+        let mut current = String::new();
+        for c in args_str.chars() {
+            if in_string {
+                current.push(c);
+                if c == quote {
+                    in_string = false;
+                }
+                continue;
+            }
+            match c {
+                '"' | '\'' => {
+                    in_string = true;
+                    quote = c;
+                    current.push(c);
+                }
+                '(' | '[' | '{' => {
+                    depth += 1;
+                    current.push(c);
+                }
+                ')' | ']' | '}' => {
+                    depth -= 1;
+                    current.push(c);
+                }
+                ',' if depth == 0 => {
+                    args.push(current.trim().to_string());
+                    current = String::new();
+                }
+                _ => current.push(c),
+            }
+        }
+        args.push(current.trim().to_string());
+        args
     }
 
     fn extract_args(&self, text: &str, start: usize) -> Option<(String, usize)> {
@@ -209,10 +299,29 @@ impl<'a> Preprocessor<'a> {
     }
 
     fn substitute_params(&self, body: &str, params: &[String], args: &[String]) -> String {
-        let mut result = body.to_string();
-
-        for (param, arg) in params.iter().zip(args.iter()) {
-            result = result.replace(param, arg);
+        let is_ident = |c: Option<char>| c.map_or(false, |c| c.is_alphanumeric() || c == '_');
+        let mut result = String::new();
+        let mut i = 0;
+        while i < body.len() {
+            let mut matched = false;
+            for (param, arg) in params.iter().zip(args.iter()) {
+                if body[i..].starts_with(param.as_str()) {
+                    let end = i + param.len();
+                    let before = body[..i].chars().next_back();
+                    let after = body[end..].chars().next();
+                    if !is_ident(before) && !is_ident(after) {
+                        result.push_str(arg);
+                        i = end;
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+            if !matched {
+                let ch = body[i..].chars().next().unwrap();
+                result.push(ch);
+                i += ch.len_utf8();
+            }
         }
 
         result
@@ -239,12 +348,14 @@ impl<'a> Preprocessor<'a> {
 
         let mut search_paths = vec![
             format!("{}/{}", input_dir, file_name),
+            format!("{}/{}.al", input_dir, file_name),
             format!("{}/{}.ah", input_dir, file_name),
         ];
 
         for path in &self.include_paths {
             search_paths.push(format!("{}/{}", path, file_name));
             search_paths.push(format!("{}/{}.al", path, file_name));
+            search_paths.push(format!("{}/{}.ah", path, file_name));
         }
 
         for path in &search_paths {
@@ -256,10 +367,22 @@ impl<'a> Preprocessor<'a> {
         None
     }
 
+    fn import_file_key(path: &str) -> Option<String> {
+        fs::canonicalize(path)
+            .ok()
+            .map(|p| p.to_string_lossy().into_owned())
+    }
+
     pub fn preprocess(&mut self) -> Result<(String, SourceMap), PreprocessorError> {
         let mut output = String::new();
         let mut source_map = SourceMap::new();
         source_map.add_file(self.base_path.clone(), self.source_text.to_string());
+
+        if self.import_chain.is_empty()
+            && let Some(key) = Self::import_file_key(&self.base_path)
+        {
+            self.import_chain.push(key);
+        }
 
         while self.current() != '\0' {
             if self.current() == '/' {
@@ -280,6 +403,10 @@ impl<'a> Preprocessor<'a> {
 
                 match cmd.as_str() {
                     "define" => {
+                        if self.skipping {
+                            self.skip_until_newline();
+                            continue;
+                        }
                         self.skip_spaces();
                         let name = self.parse_ident();
                         self.skip_spaces();
@@ -375,10 +502,22 @@ impl<'a> Preprocessor<'a> {
                         self.condition_stack.push(condition_met);
                         self.skipping = !condition_met;
                     }
+                    "else" => {
+                        if let Some(top) = self.condition_stack.last_mut() {
+                            *top = !*top;
+                        } else {
+                            return Err(PreprocessorError::ConditionError {
+                                msg: "Unexpected $else".to_string(),
+                                row: self.row,
+                                col: self.col,
+                            });
+                        }
+                        self.skip_until_newline();
+                        self.skipping = self.condition_stack.iter().any(|&active| !active);
+                    }
                     "endif" => {
                         if let Some(_) = self.condition_stack.pop() {
-                            self.skipping = !self.condition_stack.is_empty()
-                                && self.condition_stack.last().map(|&s| !s).unwrap_or(false);
+                            self.skipping = self.condition_stack.iter().any(|&active| !active);
                         } else {
                             return Err(PreprocessorError::ConditionError {
                                 msg: "Unexpected $endif".to_string(),
@@ -402,11 +541,21 @@ impl<'a> Preprocessor<'a> {
 
                         let file_path = self.find_import_file(&file_name).ok_or(
                             PreprocessorError::ImportError {
-                                file: file_name,
+                                file: file_name.clone(),
                                 row: self.row,
                                 col: self.col,
                             },
                         )?;
+
+                        let import_key =
+                            Self::import_file_key(&file_path).unwrap_or_else(|| file_path.clone());
+                        if self.import_chain.iter().any(|p| *p == import_key) {
+                            return Err(PreprocessorError::ImportError {
+                                file: file_name.clone(),
+                                row: self.row,
+                                col: self.col,
+                            });
+                        }
 
                         let content = fs::read_to_string(&file_path).map_err(|e| {
                             PreprocessorError::IoError {
@@ -422,6 +571,9 @@ impl<'a> Preprocessor<'a> {
                             self.include_paths.clone(),
                         );
                         child_pp.defines = self.defines.clone();
+                        let mut child_chain = self.import_chain.clone();
+                        child_chain.push(import_key);
+                        child_pp.import_chain = child_chain;
                         let (processed_sub, child_map) = child_pp.preprocess()?;
                         source_map.merge_child(child_map);
                         output.push_str(&processed_sub);
@@ -449,6 +601,31 @@ impl<'a> Preprocessor<'a> {
             } else {
                 if self.skipping {
                     self.bump();
+                    continue;
+                }
+
+                if self.current() == '"' || self.current() == '\'' {
+                    let quote = self.current();
+                    self.emit_char(quote, &mut output, &mut source_map);
+                    self.bump();
+                    while self.current() != '\0' {
+                        let c = self.current();
+                        if c == '\\' {
+                            self.emit_char(c, &mut output, &mut source_map);
+                            self.bump();
+                            if self.current() != '\0' {
+                                let esc = self.current();
+                                self.emit_char(esc, &mut output, &mut source_map);
+                                self.bump();
+                            }
+                            continue;
+                        }
+                        self.emit_char(c, &mut output, &mut source_map);
+                        self.bump();
+                        if c == quote {
+                            break;
+                        }
+                    }
                     continue;
                 }
 

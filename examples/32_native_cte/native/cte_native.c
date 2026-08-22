@@ -17,7 +17,11 @@ int32_t cte_max3(int32_t a, int32_t b, int32_t c) {
     return m > c ? m : c;
 }
 
-double cte_hypot(double a, double b) { return a * a + b * b; }
+/* Squared norm (a^2 + b^2), not the hypotenuse: using sqrt() here would
+ * leave an undefined `sqrt` reference in the .so, which the compiler
+ * process (linked against libc only) cannot resolve when dlopen-ing it
+ * for compile-time evaluation. For a 3-4-5 triangle this yields 25. */
+double cte_sqnorm(double a, double b) { return a * a + b * b; }
 
 double cte_price(double base, int32_t tax_pct) { return base * (1.0 + tax_pct / 100.0); }
 

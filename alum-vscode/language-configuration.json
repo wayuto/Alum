@@ -74,13 +74,13 @@
             }
         },
         {
-            "beforeText": "^\\s*if\\s*\\([^)]*\\)\\s*\\{$",
+            "beforeText": "^\\s*if\\s+.*\\{$",
             "action": {
                 "indent": "indent"
             }
         },
         {
-            "beforeText": "^\\s*(else|while|match)\\s*\\{?\\s*$",
+            "beforeText": "^\\s*(else|while|match)(\\s+.*)?\\{$",
             "action": {
                 "indent": "indent"
             }

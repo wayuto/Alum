@@ -16,6 +16,7 @@ fun(pub) arr_new<T>(data: T[], len: int): Array<T> {
         len: len,
         iter: 0,
         nth: \(v: *Array<T>, i: int): T {
+            if i < 0 || i >= v.len return nil
             return v.data[i]
         },
         set_nth: \(v: *Array<T>, i: int, elem: T): void {

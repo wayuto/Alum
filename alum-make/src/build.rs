@@ -29,13 +29,28 @@ fn matches_pattern(rel: &str, pattern: &str) -> bool {
     if !pattern.contains('*') {
         return rel == pattern;
     }
-    let (pre, post) = pattern.split_once('*').unwrap();
-    if let Some(rest) = rel.strip_prefix(pre) {
-        if let Some(stripped) = rest.strip_suffix(post) {
-            return !stripped.is_empty();
+    let segs: Vec<&str> = pattern.split('*').collect();
+    let (first, last) = (segs[0], segs[segs.len() - 1]);
+    let mut rest = rel;
+    if !rest.starts_with(first) {
+        return false;
+    }
+    rest = &rest[first.len()..];
+    if !rest.ends_with(last) {
+        return false;
+    }
+    let mid = &rest[..rest.len() - last.len()];
+    let mut pos = 0;
+    for seg in &segs[1..segs.len() - 1] {
+        if seg.is_empty() {
+            continue;
+        }
+        match mid[pos..].find(seg) {
+            Some(i) => pos += i + seg.len(),
+            None => return false,
         }
     }
-    false
+    true
 }
 
 fn glob_sources(patterns: &[String]) -> Result<Vec<PathBuf>, Box<dyn Error>> {
@@ -43,12 +58,26 @@ fn glob_sources(patterns: &[String]) -> Result<Vec<PathBuf>, Box<dyn Error>> {
     for pat in patterns {
         let mut found = Vec::new();
         if pat.contains('*') {
-            for entry in WalkDir::new(".").into_iter().filter_map(|e| e.ok()) {
+            for entry in WalkDir::new(".")
+                .into_iter()
+                .filter_entry(|e| {
+                    !matches!(
+                        e.file_name().to_str(),
+                        Some(".git") | Some(".deps") | Some("target") | Some("node_modules")
+                    )
+                })
+                .filter_map(|e| e.ok())
+            {
                 if entry.file_type().is_file()
                     && entry.path().extension().and_then(|s| s.to_str()) == Some("c")
                 {
-                    let rel = entry.path().strip_prefix(".").unwrap().to_str().unwrap();
-                    if matches_pattern(rel, pat) {
+                    let rel = entry
+                        .path()
+                        .strip_prefix(".")
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned();
+                    if matches_pattern(&rel, pat) {
                         found.push(entry.path().to_path_buf());
                     }
                 }
@@ -65,6 +94,22 @@ fn glob_sources(patterns: &[String]) -> Result<Vec<PathBuf>, Box<dyn Error>> {
         out.extend(found);
     }
     Ok(out)
+}
+fn run_command(log: bool, cmd: &str, args: &[String], context: &str) -> Result<(), Box<dyn Error>> {
+    let mut parts = cmd.split_whitespace().map(str::to_string);
+    let Some(program) = parts.next() else {
+        return Err(format!("{}: empty command", context).into());
+    };
+    let mut argv: Vec<String> = parts.collect();
+    argv.extend_from_slice(args);
+    if log {
+        println!("{} {}", program, argv.join(" "));
+    }
+    let status = std::process::Command::new(&program).args(&argv).status()?;
+    if !status.success() {
+        return Err(format!("{} (command: {} {})", context, program, argv.join(" ")).into());
+    }
+    Ok(())
 }
 
 fn compile_c(
@@ -84,48 +129,39 @@ fn compile_c(
         }
     }
 
-    let mut flags = if let Some(flags) = flags {
-        flags
-    } else {
-        String::new()
-    };
-    if let Some(includes) = includes {
+    let mut extra_args: Vec<String> = Vec::new();
+    if let Some(flags) = &flags {
+        extra_args.extend(flags.split_whitespace().map(str::to_string));
+    }
+    if let Some(includes) = &includes {
         for include in includes {
-            flags.push_str(&format!(" -I{}", include));
+            extra_args.push(format!("-I{}", include));
         }
     }
     for file in source_files {
-        let output = if file.starts_with("./src") {
+        let rel = file.strip_prefix("./").unwrap_or(file.as_path());
+        let output = if rel.starts_with("src") {
             PathBuf::from("target/objects")
-                .join(file.strip_prefix("./src").unwrap().with_extension("o"))
-        } else if file.starts_with("./include") {
-            PathBuf::from("target/objects")
-                .join(file.strip_prefix(".").unwrap().with_extension("o"))
+                .join(rel.strip_prefix("src").unwrap().with_extension("o"))
+        } else if rel.starts_with("include") {
+            PathBuf::from("target/objects").join(rel.with_extension("o"))
         } else {
             PathBuf::from("target/objects")
                 .join(file.file_name().unwrap())
                 .with_extension("o")
         };
         fs::create_dir_all(output.parent().unwrap())?;
-        let mut cmd = compiler.clone();
-        cmd.push_str(" ");
-        cmd.push_str(file.to_str().unwrap());
-        cmd.push_str(" -c -o ");
-        cmd.push_str(output.to_str().unwrap());
-        if !flags.is_empty() {
-            cmd.push_str(" ");
-            cmd.push_str(&flags);
-        }
-        if log {
-            println!("{}", cmd);
-        }
-        let status = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(cmd)
-            .status()?;
-        if !status.success() {
-            return Err(format!("Failed to compile file: {:?}", file).into());
-        }
+        let mut args = extra_args.clone();
+        args.push(file.to_string_lossy().into_owned());
+        args.push("-c".to_owned());
+        args.push("-o".to_owned());
+        args.push(output.to_string_lossy().into_owned());
+        run_command(
+            log,
+            &compiler,
+            &args,
+            &format!("Failed to compile file: {:?}", file),
+        )?;
     }
     Ok(())
 }
@@ -137,14 +173,13 @@ fn compile_alum(
     includes: Option<Vec<String>>,
 ) -> Result<(), Box<dyn Error>> {
     let source_files = get_files("./src", Target::ALSRC);
-    let mut flags = if let Some(flags) = flags {
-        flags
-    } else {
-        String::new()
-    };
-    if let Some(includes) = includes {
+    let mut extra_args: Vec<String> = Vec::new();
+    if let Some(flags) = &flags {
+        extra_args.extend(flags.split_whitespace().map(str::to_string));
+    }
+    if let Some(includes) = &includes {
         for include in includes {
-            flags.push_str(&format!(" -I{}", include));
+            extra_args.push(format!("-I{}", include));
         }
     }
     if source_files.is_empty() {
@@ -156,25 +191,17 @@ fn compile_alum(
             .join(file.strip_prefix("./src").unwrap().with_extension("o"));
         fs::create_dir_all(output.parent().unwrap())?;
 
-        let mut cmd = compiler.clone();
-        cmd.push_str(" ");
-        cmd.push_str(file.to_str().unwrap());
-        cmd.push_str(" -c -o ");
-        cmd.push_str(output.to_str().unwrap());
-        if !flags.is_empty() {
-            cmd.push_str(" ");
-            cmd.push_str(&flags);
-        }
-        if log {
-            println!("{}", cmd);
-        }
-        let status = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(cmd)
-            .status()?;
-        if !status.success() {
-            return Err(format!("Failed to compile Alum file: {:?}", file).into());
-        }
+        let mut args = extra_args.clone();
+        args.push(file.to_string_lossy().into_owned());
+        args.push("-c".to_owned());
+        args.push("-o".to_owned());
+        args.push(output.to_string_lossy().into_owned());
+        run_command(
+            log,
+            &compiler,
+            &args,
+            &format!("Failed to compile Alum file: {:?}", file),
+        )?;
     }
     Ok(())
 }
@@ -197,39 +224,41 @@ fn build_native(
         return Ok(None);
     }
 
-    let mut flags = cflags.clone().unwrap_or_default();
-    if let Some(includes) = includes {
+    let mut flags_args: Vec<String> = cflags
+        .clone()
+        .unwrap_or_default()
+        .split_whitespace()
+        .map(str::to_string)
+        .collect();
+    if let Some(includes) = &includes {
         for inc in includes {
-            flags.push_str(&format!(" -I{}", inc));
+            flags_args.push(format!("-I{}", inc));
         }
     }
 
     let mut obj_files: Vec<PathBuf> = Vec::new();
     for file in &sources {
+        let rel = file.strip_prefix(".").unwrap_or(file.as_path());
+        let out_name = rel
+            .with_extension("")
+            .to_string_lossy()
+            .replace(std::path::MAIN_SEPARATOR, "_");
         let out = PathBuf::from("target/native")
-            .join(file.file_stem().unwrap().to_str().unwrap())
+            .join(out_name)
             .with_extension("o");
         fs::create_dir_all(out.parent().unwrap())?;
-        let mut cmd = compiler.clone();
-        cmd.push_str(" ");
-        cmd.push_str(file.to_str().unwrap());
-        cmd.push_str(" -c -o ");
-        cmd.push_str(out.to_str().unwrap());
-        if !flags.is_empty() {
-            cmd.push_str(" ");
-            cmd.push_str(&flags);
-        }
-        cmd.push_str(" -fPIC");
-        if log {
-            println!("{}", cmd);
-        }
-        let status = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(&cmd)
-            .status()?;
-        if !status.success() {
-            return Err(format!("Failed to compile native source: {:?}", file).into());
-        }
+        let mut args = flags_args.clone();
+        args.push(file.to_string_lossy().into_owned());
+        args.push("-c".to_owned());
+        args.push("-o".to_owned());
+        args.push(out.to_string_lossy().into_owned());
+        args.push("-fPIC".to_owned());
+        run_command(
+            log,
+            &compiler,
+            &args,
+            &format!("Failed to compile native source: {:?}", file),
+        )?;
         obj_files.push(out);
     }
 
@@ -242,47 +271,27 @@ fn build_native(
 
     if !native.shared {
         let path = out_dir.join(format!("lib{}.a", lib_name));
-        let mut ar = String::from("ar rcs ");
-        ar.push_str(path.to_str().unwrap());
-        ar.push(' ');
+        let mut args = vec!["rcs".to_owned(), path.to_string_lossy().into_owned()];
         for o in &obj_files {
-            ar.push_str(o.to_str().unwrap());
-            ar.push(' ');
+            args.push(o.to_string_lossy().into_owned());
         }
-        if log {
-            println!("{}", ar);
-        }
-        let s = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(&ar)
-            .status()?;
-        if !s.success() {
-            return Err("Failed to create native static library".into());
-        }
+        run_command(log, "ar", &args, "Failed to create native static library")?;
         Ok(Some(path))
     } else {
         let path = out_dir.join(format!("lib{}.so", lib_name));
-        let mut link = compiler.clone();
-        link.push_str(" -shared -fPIC");
+        let mut args = vec!["-shared".to_owned(), "-fPIC".to_owned()];
         for o in &obj_files {
-            link.push(' ');
-            link.push_str(o.to_str().unwrap());
+            args.push(o.to_string_lossy().into_owned());
         }
-        link.push_str(&format!(" -o {}", path.display()));
-        if !flags.is_empty() {
-            link.push_str(" ");
-            link.push_str(&flags);
-        }
-        if log {
-            println!("{}", link);
-        }
-        let s = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(&link)
-            .status()?;
-        if !s.success() {
-            return Err("Failed to link native shared library".into());
-        }
+        args.push("-o".to_owned());
+        args.push(path.to_string_lossy().into_owned());
+        args.extend(flags_args.iter().cloned());
+        run_command(
+            log,
+            &compiler,
+            &args,
+            "Failed to link native shared library",
+        )?;
         Ok(Some(path))
     }
 }
@@ -294,9 +303,10 @@ pub fn build(log: bool) -> Result<(), Box<dyn Error>> {
     if metadata(&"target").is_err() {
         create_dir(&"target")?;
     }
-    if metadata(&"target/objects").is_err() {
-        create_dir(&"target/objects")?;
+    if metadata(&"target/objects").is_ok() {
+        fs::remove_dir_all("target/objects")?;
     }
+    create_dir("target/objects")?;
 
     let name = config.package.name.clone();
 
@@ -317,7 +327,7 @@ pub fn build(log: bool) -> Result<(), Box<dyn Error>> {
         if p.extension().and_then(|e| e.to_str()) == Some("so") {
             p.canonicalize()
                 .ok()
-                .map(|ab| ab.to_str().unwrap().to_owned())
+                .map(|ab| ab.to_string_lossy().into_owned())
         } else {
             None
         }
@@ -366,63 +376,49 @@ pub fn build(log: bool) -> Result<(), Box<dyn Error>> {
 
         match config.build.library_type.as_deref() {
             Some("static") | Some("a") => {
-                let mut ar_cmd = String::from("ar rcs ");
-                ar_cmd.push_str(&format!("target/lib{}.a ", name));
+                let mut args = vec![format!("target/lib{}.a", name)];
                 for file in &obj_files {
-                    ar_cmd.push_str(file.to_str().unwrap());
-                    ar_cmd.push(' ');
+                    args.push(file.to_string_lossy().into_owned());
                 }
-                if log {
-                    println!("{}", ar_cmd);
-                }
-                let status = std::process::Command::new("sh")
-                    .arg("-c")
-                    .arg(ar_cmd)
-                    .status()?;
-                if !status.success() {
-                    return Err(format!("Failed to create static library: {:?}", name).into());
-                }
+                run_command(
+                    log,
+                    "ar rcs",
+                    &args,
+                    &format!("Failed to create static library: {:?}", name),
+                )?;
             }
             Some("shared") | Some("so") => {
-                let mut link_cmd = config.build.linker.clone();
-                link_cmd.push_str(" -shared -fPIC ");
+                let mut args = vec!["-shared".to_owned(), "-fPIC".to_owned()];
                 for file in &obj_files {
-                    link_cmd.push_str(file.to_str().unwrap());
-                    link_cmd.push(' ');
+                    args.push(file.to_string_lossy().into_owned());
                 }
-                link_cmd.push_str(&format!("-o target/lib{}.so", name));
-                if log {
-                    println!("{}", link_cmd);
-                }
-                let status = std::process::Command::new("sh")
-                    .arg("-c")
-                    .arg(link_cmd)
-                    .status()?;
-                if !status.success() {
-                    return Err(format!("Failed to create shared library: {:?}", name).into());
-                }
+                args.push("-o".to_owned());
+                args.push(format!("target/lib{}.so", name));
+                run_command(
+                    log,
+                    &config.build.linker,
+                    &args,
+                    &format!("Failed to create shared library: {:?}", name),
+                )?;
             }
             _ => {
-                let mut link_cmd = config.build.linker.clone();
-                link_cmd.push(' ');
+                let mut args: Vec<String> = Vec::new();
 
                 if config.build.linker.contains("cc") || config.build.linker.contains("gcc") {
-                    link_cmd.push_str("-nostartfiles ");
+                    args.push("-nostartfiles".to_owned());
                 }
 
                 if let Some(lnflags) = config.build.lnflags.clone() {
-                    link_cmd.push_str(&lnflags);
-                    link_cmd.push(' ');
+                    args.extend(lnflags.split_whitespace().map(str::to_string));
                 }
                 for file in &obj_files {
-                    link_cmd.push_str(file.to_str().unwrap());
-                    link_cmd.push(' ');
+                    args.push(file.to_string_lossy().into_owned());
                 }
 
                 let should_link_stdlib =
                     config.build.alc.is_some() && config.build.nostdlib != Some(true);
                 if should_link_stdlib {
-                    link_cmd.push_str("/usr/local/lib/libalum.a ");
+                    args.push("/usr/local/lib/libalum.a".to_owned());
                 }
 
                 let is_alc_linker = config.build.linker == "alc";
@@ -430,33 +426,28 @@ pub fn build(log: bool) -> Result<(), Box<dyn Error>> {
                     let abs = artifact.canonicalize().unwrap_or_else(|_| artifact.clone());
 
                     if is_alc_linker {
-                        link_cmd.push_str("--cte-lib ");
-                        link_cmd.push_str(abs.to_str().unwrap());
-                        link_cmd.push(' ');
+                        args.push("--cte-lib".to_owned());
+                        args.push(abs.to_string_lossy().into_owned());
                     } else {
                         if let Some(loader) = native_ld_loader() {
-                            link_cmd.push_str("-dynamic-linker ");
-                            link_cmd.push_str(loader);
-                            link_cmd.push(' ');
+                            args.push("-dynamic-linker".to_owned());
+                            args.push(loader.to_owned());
                         }
                         if let Some(parent) = abs.parent() {
-                            link_cmd.push_str(&format!("-Wl,-rpath,{} ", parent.to_str().unwrap()));
+                            args.push(format!("-Wl,-rpath,{}", parent.to_string_lossy()));
                         }
-                        link_cmd.push_str(&format!("{} ", abs.to_str().unwrap()));
+                        args.push(abs.to_string_lossy().into_owned());
                     }
                 }
 
-                link_cmd.push_str(&format!("-o target/{}", name));
-                if log {
-                    println!("{}", link_cmd);
-                }
-                let status = std::process::Command::new("sh")
-                    .arg("-c")
-                    .arg(link_cmd)
-                    .status()?;
-                if !status.success() {
-                    return Err(format!("Failed to link file: {:?}", name).into());
-                }
+                args.push("-o".to_owned());
+                args.push(format!("target/{}", name));
+                run_command(
+                    log,
+                    &config.build.linker,
+                    &args,
+                    &format!("Failed to link file: {:?}", name),
+                )?;
             }
         }
     }

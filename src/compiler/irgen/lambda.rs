@@ -15,13 +15,16 @@ pub(super) fn hoist_lambdas(
             let lambda_name = format!("_lambda_{}", lambda_counter);
             *lambda_counter += 1;
 
+            // Lambdas may be nested inside the body; hoist those too.
+            let body = hoist_lambdas(*body, lambda_counter, lambda_map);
+
             let lambda_func = Expr::FuncDecl(
                 lambda_name.clone(),
                 FuncAttrs::default(),
                 Vec::new(),
                 params,
                 ret_type,
-                body,
+                Box::new(body),
                 Span::new(0, 0),
             );
             lambda_map.insert(lambda_name.clone(), lambda_func);
@@ -283,6 +286,62 @@ pub(super) fn hoist_lambdas(
         Expr::DerefAssign(ptr, val, _) => Expr::DerefAssign(
             Box::new(hoist_lambdas(*ptr, lambda_counter, lambda_map)),
             Box::new(hoist_lambdas(*val, lambda_counter, lambda_map)),
+            Span::new(0, 0),
+        ),
+        Expr::Match(target, branches, default, _) => Expr::Match(
+            Box::new(hoist_lambdas(*target, lambda_counter, lambda_map)),
+            branches
+                .into_iter()
+                .map(|(pat, arm)| {
+                    (
+                        hoist_lambdas(pat, lambda_counter, lambda_map),
+                        hoist_lambdas(arm, lambda_counter, lambda_map),
+                    )
+                })
+                .collect(),
+            default.map(|d| Box::new(hoist_lambdas(*d, lambda_counter, lambda_map))),
+            Span::new(0, 0),
+        ),
+        Expr::BNot(e, _) => Expr::BNot(
+            Box::new(hoist_lambdas(*e, lambda_counter, lambda_map)),
+            Span::new(0, 0),
+        ),
+        Expr::Neg(e, _) => Expr::Neg(
+            Box::new(hoist_lambdas(*e, lambda_counter, lambda_map)),
+            Span::new(0, 0),
+        ),
+        Expr::FNeg(e, _) => Expr::FNeg(
+            Box::new(hoist_lambdas(*e, lambda_counter, lambda_map)),
+            Span::new(0, 0),
+        ),
+        Expr::Xor(l, r, _) => Expr::Xor(
+            Box::new(hoist_lambdas(*l, lambda_counter, lambda_map)),
+            Box::new(hoist_lambdas(*r, lambda_counter, lambda_map)),
+            Span::new(0, 0),
+        ),
+        Expr::LAnd(l, r, _) => Expr::LAnd(
+            Box::new(hoist_lambdas(*l, lambda_counter, lambda_map)),
+            Box::new(hoist_lambdas(*r, lambda_counter, lambda_map)),
+            Span::new(0, 0),
+        ),
+        Expr::LOr(l, r, _) => Expr::LOr(
+            Box::new(hoist_lambdas(*l, lambda_counter, lambda_map)),
+            Box::new(hoist_lambdas(*r, lambda_counter, lambda_map)),
+            Span::new(0, 0),
+        ),
+        Expr::Shl(l, r, _) => Expr::Shl(
+            Box::new(hoist_lambdas(*l, lambda_counter, lambda_map)),
+            Box::new(hoist_lambdas(*r, lambda_counter, lambda_map)),
+            Span::new(0, 0),
+        ),
+        Expr::Shr(l, r, _) => Expr::Shr(
+            Box::new(hoist_lambdas(*l, lambda_counter, lambda_map)),
+            Box::new(hoist_lambdas(*r, lambda_counter, lambda_map)),
+            Span::new(0, 0),
+        ),
+        Expr::Cast(e, ty, _) => Expr::Cast(
+            Box::new(hoist_lambdas(*e, lambda_counter, lambda_map)),
+            ty,
             Span::new(0, 0),
         ),
         _ => expr,

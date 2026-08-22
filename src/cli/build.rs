@@ -95,6 +95,8 @@ pub fn build(
 
 pub fn exec_run(
     input: String,
+    output: Option<String>,
+    nostdlib: bool,
     include_paths: Vec<String>,
     verbose: bool,
     cte_libs: Vec<String>,
@@ -109,10 +111,10 @@ pub fn exec_run(
         cte_libs.clone(),
     )?;
 
-    let exe_file = default_exe_path(&input);
+    let exe_file = output.unwrap_or_else(|| default_exe_path(&input));
     let exe_path = std::path::Path::new(&exe_file);
 
-    let std_lib_path = DEFAULT_STD_LIB_PATH;
+    let std_lib_path = if nostdlib { "" } else { DEFAULT_STD_LIB_PATH };
 
     super::link::link(
         vec![obj_file.clone()],
@@ -126,20 +128,18 @@ pub fn exec_run(
         eprintln!("Running: {}", exe_path.display());
     }
 
-    let status = std::process::Command::new(&exe_path).status()?;
+    let run_path = if exe_path.is_absolute() {
+        exe_file.clone()
+    } else {
+        format!("./{}", exe_file)
+    };
+    let status = std::process::Command::new(&run_path).status()?;
 
     let _ = std::fs::remove_file(&obj_file);
-    let _ = std::fs::remove_file(&exe_path);
+    let _ = std::fs::remove_file(exe_path);
 
     if !status.success() {
-        return Err(format!(
-            "program exited with status: {}",
-            status
-                .code()
-                .map(|c| c.to_string())
-                .unwrap_or_else(|| "signal".to_string())
-        )
-        .into());
+        std::process::exit(status.code().unwrap_or(1));
     }
 
     Ok(())

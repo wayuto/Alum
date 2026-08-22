@@ -1,4 +1,4 @@
-use super::codegen::{AsmCodeGen, m_rbp, parse_reg};
+use super::codegen::{AsmCodeGen, m_base_disp, m_rbp, parse_reg};
 use super::error::CodeGenError;
 use super::regalloc;
 use crate::compiler::{
@@ -49,8 +49,9 @@ fn cmp_to_jcc(op: &Op, jump_if_true: bool) -> Option<Jcc> {
         Op::Ge => (Jcc::Jge, Jcc::Jl),
         Op::FEq => (Jcc::Je, Jcc::Jne),
         Op::FNe => (Jcc::Jne, Jcc::Je),
-        Op::FLt => (Jcc::Jb, Jcc::Jae),
-        Op::FLe => (Jcc::Jbe, Jcc::Ja),
+
+        Op::FLt => (Jcc::Ja, Jcc::Jbe),
+        Op::FLe => (Jcc::Jae, Jcc::Jb),
         Op::FGt => (Jcc::Ja, Jcc::Jbe),
         Op::FGe => (Jcc::Jae, Jcc::Jb),
         _ => return None,
@@ -76,6 +77,9 @@ impl AsmCodeGen {
         self.alloc_regs.clear();
         self.spill_vars.clear();
         self.regs.clear();
+        self.stack_arg_plan.clear();
+        self.cur_inst_idx = 0;
+        self.call_stack_bytes = 0;
 
         let alloc = regalloc::allocate_registers(&func, &self.program.constants);
         self.alloc_regs = alloc.registers;
@@ -105,6 +109,31 @@ impl AsmCodeGen {
             if matches!(inst.op, Op::Lea) {
                 if let Some(IROperand::Var(name)) = &inst.src1 {
                     lea_used.insert(name.clone());
+                }
+            }
+        }
+
+        let mut stack_params: HashMap<String, i32> = HashMap::new();
+        {
+            let mut n_int = 0usize;
+            let mut n_flt = 0usize;
+            let mut slot = 0i32;
+            for (param, ty) in &func.params {
+                let on_stack = if matches!(ty, IRType::Float) {
+                    n_flt >= 8
+                } else {
+                    n_int >= 6
+                };
+                if matches!(ty, IRType::Float) {
+                    n_flt += 1;
+                } else {
+                    n_int += 1;
+                }
+                if on_stack {
+                    if let IROperand::Var(name) = param {
+                        stack_params.insert(name.clone(), slot);
+                    }
+                    slot += 1;
                 }
             }
         }
@@ -186,8 +215,10 @@ impl AsmCodeGen {
             0
         };
         let xmm_saved = alloc.xmm_saved;
-        let frame_less =
-            final_stack_size == 0 && xmm_saved.is_empty() && self.used_callee_saved.is_empty();
+        let frame_less = final_stack_size == 0
+            && xmm_saved.is_empty()
+            && self.used_callee_saved.is_empty()
+            && stack_params.is_empty();
 
         if func.is_pub {
             self.push_text(Asm::Global(func.name.clone()));
@@ -204,6 +235,10 @@ impl AsmCodeGen {
                 self.push_text(Asm::Push(*reg));
             }
             self.push_text(Asm::Mov(Operand::Reg(Reg::Rbp), Operand::Reg(Reg::Rsp)));
+
+            if used_regs.len() % 2 == 1 {
+                self.push_text(Asm::Sub(Operand::Reg(Reg::Rsp), Operand::Imm(8)));
+            }
 
             if final_stack_size > 0 {
                 self.push_text(Asm::Sub(
@@ -223,57 +258,100 @@ impl AsmCodeGen {
         }
 
         let alloc_regs = self.alloc_regs.clone();
+
+        let saved_base = 16 + 8 * self.used_callee_saved.len() as i32;
         let mut int_idx = 0;
         let mut flt_idx = 0;
+        let mut stack_idx = 0i32;
+
+        let mut int_moves: Vec<(Reg, Reg)> = Vec::new();
+        let mut flt_moves: Vec<(Reg, Reg)> = Vec::new();
+        let mut stack_to_reg: Vec<(Reg, Operand)> = Vec::new();
         for (param, ty) in &func.params {
             let k = param.key();
-            if let Some(alloc_reg) = alloc_regs.get(&k) {
-                if matches!(ty, IRType::Float) {
-                    if flt_idx < 8 {
-                        let arg_reg = parse_reg(&format!("xmm{}", flt_idx));
-                        if *alloc_reg != arg_reg {
-                            self.push_text(Asm::Movsd(
-                                Operand::Reg(*alloc_reg),
-                                Operand::Reg(arg_reg),
-                            ));
-                        }
-                        self.regs.insert(*alloc_reg, param.clone());
-                        flt_idx += 1;
-                    }
+            let is_float = matches!(ty, IRType::Float);
+            let on_stack = if is_float { flt_idx >= 8 } else { int_idx >= 6 };
+            if !on_stack {
+                let arg_reg = if is_float {
+                    let r = parse_reg(&self.flt_arg_reg[flt_idx]);
+                    flt_idx += 1;
+                    r
                 } else {
-                    if int_idx < 6 {
-                        let arg_reg = parse_reg(&self.arg_reg[int_idx]);
+                    let r = parse_reg(&self.arg_reg[int_idx]);
+                    int_idx += 1;
+                    r
+                };
+                match alloc_regs.get(&k) {
+                    Some(alloc_reg) => {
                         if *alloc_reg != arg_reg {
-                            self.push_text(Asm::Mov(
-                                Operand::Reg(*alloc_reg),
-                                Operand::Reg(arg_reg),
-                            ));
+                            if is_float {
+                                flt_moves.push((*alloc_reg, arg_reg));
+                            } else {
+                                int_moves.push((*alloc_reg, arg_reg));
+                            }
+                        } else {
+                            self.regs.insert(*alloc_reg, param.clone());
                         }
-                        self.regs.insert(*alloc_reg, param.clone());
-                        int_idx += 1;
+                    }
+                    None => {
+                        let off = self.get_offset(param)?;
+                        if is_float {
+                            self.push_text(Asm::Movsd(m_rbp(off), Operand::Reg(arg_reg)));
+                        } else {
+                            self.push_text(Asm::Mov(m_rbp(off), Operand::Reg(arg_reg)));
+                        }
+                        self.regs.insert(arg_reg, param.clone());
                     }
                 }
             } else {
-                let off = self.get_offset(param)?;
-                if matches!(ty, IRType::Float) {
-                    if flt_idx < 8 {
-                        let arg_reg = parse_reg(&format!("xmm{}", flt_idx));
-                        self.push_text(Asm::Movsd(m_rbp(off), Operand::Reg(arg_reg)));
-                        self.regs.insert(arg_reg, param.clone());
-                        flt_idx += 1;
-                    }
+                let src = m_base_disp(Reg::Rbp, saved_base + 8 * stack_idx);
+                stack_idx += 1;
+                if let Some(alloc_reg) = alloc_regs.get(&k) {
+                    stack_to_reg.push((*alloc_reg, src));
+                    self.regs.insert(*alloc_reg, param.clone());
                 } else {
-                    if int_idx < 6 {
-                        let arg_reg = parse_reg(&self.arg_reg[int_idx]);
-                        self.push_text(Asm::Mov(m_rbp(off), Operand::Reg(arg_reg)));
-                        self.regs.insert(arg_reg, param.clone());
-                        int_idx += 1;
-                    }
+                    let off = self.get_offset(param)?;
+                    self.push_text(Asm::Mov(Operand::Reg(Reg::Rax), src));
+                    self.push_text(Asm::Mov(m_rbp(off), Operand::Reg(Reg::Rax)));
                 }
             }
         }
+        self.emit_param_moves(&int_moves, false);
+        self.emit_param_moves(&flt_moves, true);
+
+        for (reg, src) in stack_to_reg {
+            self.push_text(Asm::Mov(Operand::Reg(reg), src));
+        }
 
         let insts = &func.instructions;
+
+        let mut stack_arg_plan: HashMap<usize, (usize, usize)> = HashMap::new();
+        for (ci, inst) in insts.iter().enumerate() {
+            if !matches!(inst.op, Op::Call) {
+                continue;
+            }
+            let mut stack_args: Vec<usize> = Vec::new();
+            let mut j = ci;
+            while j > 0 {
+                let is_stack_arg = match insts[j - 1].op {
+                    Op::Arg(n) => n >= 6,
+                    Op::FArg(n) => n >= 8,
+                    _ => false,
+                };
+                if is_stack_arg {
+                    stack_args.push(j - 1);
+                    j -= 1;
+                } else {
+                    break;
+                }
+            }
+            stack_args.reverse();
+            let total = stack_args.len();
+            for (slot, &idx) in stack_args.iter().enumerate() {
+                stack_arg_plan.insert(idx, (total, slot));
+            }
+        }
+        self.stack_arg_plan = stack_arg_plan;
 
         let mut temp_use_count: HashMap<usize, usize> = HashMap::new();
         for inst in insts.iter() {
@@ -290,6 +368,7 @@ impl AsmCodeGen {
         let mut i = 0;
         while i < insts.len() {
             let code = &insts[i];
+            self.cur_inst_idx = i;
             if self.try_fuse_compare_jump(insts, i, &temp_use_count)? {
                 i += 2;
                 continue;
@@ -328,6 +407,43 @@ impl AsmCodeGen {
             self.push_text(Asm::Ret);
         }
         Ok(())
+    }
+
+    fn emit_param_moves(&mut self, moves: &[(Reg, Reg)], is_float: bool) {
+        let has_hazard = moves
+            .iter()
+            .enumerate()
+            .any(|(i, (dst, _))| moves.iter().skip(i + 1).any(|(_, src)| src == dst));
+        if !has_hazard {
+            for (dst, src) in moves {
+                if is_float {
+                    self.push_text(Asm::Movsd(Operand::Reg(*dst), Operand::Reg(*src)));
+                } else {
+                    self.push_text(Asm::Mov(Operand::Reg(*dst), Operand::Reg(*src)));
+                }
+            }
+            return;
+        }
+        for (_, src) in moves.iter().rev() {
+            self.push_text(Asm::Push(*src));
+        }
+        for (i, (dst, _)) in moves.iter().enumerate() {
+            let src_mem = Operand::Mem(Mem {
+                base: Some(Reg::Rsp),
+                index: None,
+                scale: 0,
+                disp: (i * 8) as i32,
+            });
+            if is_float {
+                self.push_text(Asm::Movsd(Operand::Reg(*dst), src_mem));
+            } else {
+                self.push_text(Asm::Mov(Operand::Reg(*dst), src_mem));
+            }
+        }
+        self.push_text(Asm::Add(
+            Operand::Reg(Reg::Rsp),
+            Operand::Imm((moves.len() * 8) as i64),
+        ));
     }
 
     fn try_fuse_compare_jump(
@@ -370,7 +486,25 @@ impl AsmCodeGen {
         ) {
             self.load(a, Reg::Xmm0)?;
             self.load(b, Reg::Xmm1)?;
-            self.push_text(Asm::Ucomisd(Reg::Xmm0, Reg::Xmm1));
+
+            if matches!(cmp.op, Op::FLt | Op::FLe) {
+                self.push_text(Asm::Ucomisd(Reg::Xmm1, Reg::Xmm0));
+            } else {
+                self.push_text(Asm::Ucomisd(Reg::Xmm0, Reg::Xmm1));
+            }
+            if matches!(cmp.op, Op::FEq | Op::FNe) {
+                if matches!(cmp.op, Op::FEq) == jump_if_true {
+                    let skip = self.new_label("fcmp_nan");
+                    self.push_text(Asm::Jp(skip.clone()));
+                    cc.emit(self, &label);
+                    self.push_text(Asm::Label(skip));
+                } else {
+                    self.push_text(Asm::Jp(label.clone()));
+                    self.push_text(Asm::Jne(label.clone()));
+                }
+            } else {
+                cc.emit(self, &label);
+            }
             self.invalidate_cached_reg(Reg::Xmm0);
             self.invalidate_cached_reg(Reg::Xmm1);
         } else {
