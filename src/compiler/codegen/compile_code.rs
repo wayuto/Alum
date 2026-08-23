@@ -708,6 +708,66 @@ impl AsmCodeGen {
                 self.regs.insert(Reg::Rax, dst.clone());
                 Ok(())
             }
+            Op::FStoreAt => {
+                let dst = code.dst.as_ref().unwrap();
+                let src1 = code.src1.as_ref().unwrap();
+                let src2 = code.src2.as_ref().unwrap();
+                self.load(dst, Reg::R10)?;
+                self.load(src2, Reg::Xmm0)?;
+                match src1 {
+                    IROperand::ConstIdx(idx) => {
+                        if let IRConst::Int(offset) = &self.program.constants[*idx] {
+                            if *offset == 0 {
+                                self.push_text(Asm::Movsd(
+                                    m_base(Reg::R10),
+                                    Operand::Reg(Reg::Xmm0),
+                                ));
+                            } else {
+                                self.push_text(Asm::Movsd(
+                                    m_base_disp(Reg::R10, *offset as i32),
+                                    Operand::Reg(Reg::Xmm0),
+                                ));
+                            }
+                        } else {
+                            unreachable!()
+                        }
+                    }
+                    _ => {
+                        self.load(src1, Reg::R11)?;
+                        self.push_text(Asm::Add(Operand::Reg(Reg::R10), Operand::Reg(Reg::R11)));
+                        self.push_text(Asm::Movsd(m_base(Reg::R10), Operand::Reg(Reg::Xmm0)));
+                    }
+                }
+                self.invalidate_cached_reg(Reg::Xmm0);
+                Ok(())
+            }
+            Op::FLoadAt => {
+                let dst = code.dst.as_ref().unwrap();
+                let src1 = code.src1.as_ref().unwrap();
+                let src2 = code.src2.as_ref().unwrap();
+                self.load(src1, Reg::R10)?;
+                let src_op = match src2 {
+                    IROperand::ConstIdx(idx) => {
+                        if let IRConst::Int(offset) = &self.program.constants[*idx] {
+                            if *offset == 0 {
+                                m_base(Reg::R10)
+                            } else {
+                                m_base_disp(Reg::R10, *offset as i32)
+                            }
+                        } else {
+                            unreachable!()
+                        }
+                    }
+                    _ => {
+                        self.load(src2, Reg::R11)?;
+                        self.push_text(Asm::Add(Operand::Reg(Reg::R10), Operand::Reg(Reg::R11)));
+                        m_base(Reg::R10)
+                    }
+                };
+                self.push_text(Asm::Movsd(Operand::Reg(Reg::Xmm0), src_op));
+                self.store_dst_xmm(dst, Reg::Xmm0)?;
+                Ok(())
+            }
             Op::StrCat => {
                 let dst = code.dst.as_ref().unwrap();
                 let src1 = code.src1.as_ref().unwrap();

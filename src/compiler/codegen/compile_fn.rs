@@ -377,6 +377,14 @@ impl AsmCodeGen {
                 Op::Return(reg_name) => {
                     if let Some(ref val) = code.src1 {
                         self.load(val, parse_reg(reg_name))?;
+                    } else {
+                        let reg = parse_reg(reg_name);
+                        if reg == Reg::Rax {
+                            self.push_text(Asm::Xor(
+                                Operand::Reg(Reg::Rax),
+                                Operand::Reg(Reg::Rax),
+                            ));
+                        }
                     }
                     self.push_text(Asm::Jmp(self.ret_label.clone()));
                 }

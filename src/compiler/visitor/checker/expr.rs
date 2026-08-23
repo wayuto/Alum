@@ -8,6 +8,21 @@ use std::collections::HashMap;
 
 impl TypeChecker {
     pub(super) fn check_expr(&mut self, expr: &mut Expr) -> Result<Type, CheckerError> {
+        const MAX_DEPTH: usize = 8000;
+        if self.expr_depth > MAX_DEPTH {
+            return Err(CheckerError::InvalidOperation {
+                op: format!("expression nesting exceeds {} levels", MAX_DEPTH),
+                type_name: String::new(),
+                span: Span::new(0, 0),
+            });
+        }
+        self.expr_depth += 1;
+        let r = self.check_expr_inner(expr);
+        self.expr_depth -= 1;
+        r
+    }
+
+    fn check_expr_inner(&mut self, expr: &mut Expr) -> Result<Type, CheckerError> {
         let span = expr.span();
         match expr {
             Expr::Int(_, _) => Ok(Type::Primitive(Primitive::Int)),
@@ -172,18 +187,23 @@ impl TypeChecker {
                 Ok(resolved_ty)
             }
             Expr::VarAssign(name, value, _) => {
-                if self.is_constant(name) {
-                    return Err(CheckerError::InvalidOperation {
-                        op: "assignment".to_string(),
-                        type_name: format!("constant '{}'", name),
-                        span: span,
-                    });
-                }
-                let var_type = self
+                let var_type = match self
                     .lookup_var(name)
                     .or_else(|| self.extern_vars.get(name).cloned())
                     .or_else(|| self.globals.get(name).cloned())
-                    .ok_or_else(|| CheckerError::UndefinedVariable(name.clone(), span))?;
+                {
+                    Some(t) => t,
+                    None => {
+                        if self.is_constant(name) {
+                            return Err(CheckerError::InvalidOperation {
+                                op: "assignment".to_string(),
+                                type_name: format!("constant '{}'", name),
+                                span,
+                            });
+                        }
+                        return Err(CheckerError::UndefinedVariable(name.clone(), span));
+                    }
+                };
                 let value_type = self.check_expr(value)?;
 
                 if !matches!(value.as_ref(), Expr::Nil(_)) {
@@ -271,6 +291,23 @@ impl TypeChecker {
                     if let Some(pt) = ptr_type {
                         return Ok(pt);
                     }
+                }
+
+                if (lhs_type.is_float() && matches!(rhs_type, Type::Primitive(Primitive::Int)))
+                    || (rhs_type.is_float() && matches!(lhs_type, Type::Primitive(Primitive::Int)))
+                {
+                    return Err(CheckerError::TypeMismatch {
+                        expected: Type::Primitive(Primitive::Float),
+                        found: if lhs_type.is_float() {
+                            rhs_type.clone()
+                        } else {
+                            lhs_type.clone()
+                        },
+                        context: String::from(
+                            "mixed int/float arithmetic (add an explicit '@float' cast)",
+                        ),
+                        span,
+                    });
                 }
 
                 if lhs_type.is_float() || rhs_type.is_float() {
@@ -455,18 +492,23 @@ impl TypeChecker {
                 Ok(Type::Primitive(Primitive::Int))
             }
             Expr::Inc(name, _) | Expr::Dec(name, _) => {
-                if self.is_constant(name) {
-                    return Err(CheckerError::InvalidOperation {
-                        op: "increment/decrement".to_string(),
-                        type_name: format!("constant '{}'", name),
-                        span: span,
-                    });
-                }
-                let var_type = self
+                let var_type = match self
                     .lookup_var(name)
                     .or_else(|| self.extern_vars.get(name).cloned())
                     .or_else(|| self.globals.get(name).cloned())
-                    .ok_or_else(|| CheckerError::UndefinedVariable(name.clone(), span))?;
+                {
+                    Some(t) => t,
+                    None => {
+                        if self.is_constant(name) {
+                            return Err(CheckerError::InvalidOperation {
+                                op: "increment/decrement".to_string(),
+                                type_name: format!("constant '{}'", name),
+                                span,
+                            });
+                        }
+                        return Err(CheckerError::UndefinedVariable(name.clone(), span));
+                    }
+                };
                 if !var_type.is_numeric() {
                     return Err(CheckerError::InvalidOperation {
                         op: "increment/decrement".to_string(),
@@ -477,18 +519,23 @@ impl TypeChecker {
                 Ok(var_type)
             }
             Expr::AddAssign(name, value, _) | Expr::SubAssign(name, value, _) => {
-                if self.is_constant(name) {
-                    return Err(CheckerError::InvalidOperation {
-                        op: "compound assignment".to_string(),
-                        type_name: format!("constant '{}'", name),
-                        span: span,
-                    });
-                }
-                let var_type = self
+                let var_type = match self
                     .lookup_var(name)
                     .or_else(|| self.extern_vars.get(name).cloned())
                     .or_else(|| self.globals.get(name).cloned())
-                    .ok_or_else(|| CheckerError::UndefinedVariable(name.clone(), span))?;
+                {
+                    Some(t) => t,
+                    None => {
+                        if self.is_constant(name) {
+                            return Err(CheckerError::InvalidOperation {
+                                op: "compound assignment".to_string(),
+                                type_name: format!("constant '{}'", name),
+                                span,
+                            });
+                        }
+                        return Err(CheckerError::UndefinedVariable(name.clone(), span));
+                    }
+                };
                 let value_type = self.check_expr(value)?;
                 if var_type.is_pointer() {
                     if !matches!(
@@ -522,18 +569,23 @@ impl TypeChecker {
             | Expr::XorAssign(name, value, _)
             | Expr::ShlAssign(name, value, _)
             | Expr::ShrAssign(name, value, _) => {
-                if self.is_constant(name) {
-                    return Err(CheckerError::InvalidOperation {
-                        op: "compound assignment".to_string(),
-                        type_name: format!("constant '{}'", name),
-                        span: span,
-                    });
-                }
-                let var_type = self
+                let var_type = match self
                     .lookup_var(name)
                     .or_else(|| self.extern_vars.get(name).cloned())
                     .or_else(|| self.globals.get(name).cloned())
-                    .ok_or_else(|| CheckerError::UndefinedVariable(name.clone(), span))?;
+                {
+                    Some(t) => t,
+                    None => {
+                        if self.is_constant(name) {
+                            return Err(CheckerError::InvalidOperation {
+                                op: "compound assignment".to_string(),
+                                type_name: format!("constant '{}'", name),
+                                span,
+                            });
+                        }
+                        return Err(CheckerError::UndefinedVariable(name.clone(), span));
+                    }
+                };
                 if var_type.is_pointer() {
                     return Err(CheckerError::InvalidOperation {
                         op: "compound assignment".to_string(),
@@ -575,6 +627,23 @@ impl TypeChecker {
             | Expr::Ge(lhs, rhs, _) => {
                 let lhs_type = self.check_expr(lhs)?;
                 let rhs_type = self.check_expr(rhs)?;
+
+                if (lhs_type.is_float() && matches!(rhs_type, Type::Primitive(Primitive::Int)))
+                    || (rhs_type.is_float() && matches!(lhs_type, Type::Primitive(Primitive::Int)))
+                {
+                    return Err(CheckerError::TypeMismatch {
+                        expected: Type::Primitive(Primitive::Float),
+                        found: if lhs_type.is_float() {
+                            rhs_type.clone()
+                        } else {
+                            lhs_type.clone()
+                        },
+                        context: String::from(
+                            "mixed int/float comparison (add an explicit '@float' cast)",
+                        ),
+                        span,
+                    });
+                }
 
                 if lhs_type.is_float() || rhs_type.is_float() {
                     if !lhs_type.is_numeric() || !rhs_type.is_numeric() {
@@ -963,7 +1032,7 @@ impl TypeChecker {
                 let value_type = self.check_expr(value)?;
 
                 if let Expr::Index(array, idx, _) = array_idx.as_mut() {
-                    let array_type = self.get_expr_type(array);
+                    let array_type = self.check_expr(array)?;
                     let idx_type = self.check_expr(idx)?;
 
                     if !idx_type.is_numeric() {
@@ -1117,7 +1186,27 @@ impl TypeChecker {
 
                 let ret_var = self.resolve_params(ret_type);
                 self.return_types.push(ret_var.clone());
-                self.check_expr(body)?;
+                let body_type = self.check_expr(body)?;
+
+                {
+                    let resolved_ret = self.resolve_type(&ret_var);
+                    let resolved_body = self.resolve_type(&body_type);
+
+                    let ret_is_void = matches!(resolved_ret, Type::Primitive(Primitive::Void));
+                    if !ret_is_void && resolved_ret != resolved_body {
+                        self.return_types.pop();
+                        if !type_params.is_empty() {
+                            self.pop_generic_params();
+                        }
+                        self.pop_scope();
+                        return Err(CheckerError::TypeMismatch {
+                            expected: ret_var.clone(),
+                            found: body_type.clone(),
+                            context: "function return type".to_string(),
+                            span,
+                        });
+                    }
+                }
                 self.return_types.pop();
                 if !type_params.is_empty() {
                     self.pop_generic_params();
@@ -1181,16 +1270,32 @@ impl TypeChecker {
             }
             Expr::Struct(_name, type_params, fields, _) => {
                 self.push_generic_params(type_params.len());
-                for (_, field_ty) in fields {
+                let mut seen = std::collections::HashSet::new();
+                for (field_name, field_ty) in fields {
                     self.validate_type(field_ty)?;
+                    if !seen.insert(field_name.clone()) {
+                        return Err(CheckerError::InvalidOperation {
+                            op: "redeclared struct field".to_string(),
+                            type_name: field_name.clone(),
+                            span: span,
+                        });
+                    }
                 }
                 self.pop_generic_params();
                 Ok(Type::Primitive(Primitive::Void))
             }
             Expr::Union(_name, type_params, fields, _) => {
                 self.push_generic_params(type_params.len());
-                for (_, field_ty) in fields {
+                let mut seen = std::collections::HashSet::new();
+                for (field_name, field_ty) in fields {
                     self.validate_type(field_ty)?;
+                    if !seen.insert(field_name.clone()) {
+                        return Err(CheckerError::InvalidOperation {
+                            op: "redeclared union field".to_string(),
+                            type_name: field_name.clone(),
+                            span: span,
+                        });
+                    }
                 }
                 self.pop_generic_params();
                 Ok(Type::Primitive(Primitive::Void))
@@ -1275,6 +1380,36 @@ impl TypeChecker {
                     }
                 }
 
+                {
+                    let mut seen: Vec<&str> = Vec::new();
+                    for (n, _) in field_values.iter() {
+                        if !fields.iter().any(|(fname, _)| fname == n) {
+                            return Err(CheckerError::UndefinedField {
+                                struct_name: name.clone(),
+                                field: n.clone(),
+                                span,
+                            });
+                        }
+                        if seen.contains(&n.as_str()) {
+                            return Err(CheckerError::InvalidOperation {
+                                op: format!("duplicate field '{}' in struct literal", n),
+                                type_name: name.clone(),
+                                span,
+                            });
+                        }
+                        seen.push(n.as_str());
+                    }
+                    for (fname, _) in &fields {
+                        if !seen.contains(&fname.as_str()) {
+                            return Err(CheckerError::InvalidOperation {
+                                op: format!("missing field '{}' in struct literal", fname),
+                                type_name: name.clone(),
+                                span,
+                            });
+                        }
+                    }
+                }
+
                 Ok(Type::Struct(name.clone(), resolved_args))
             }
             Expr::UnionLiteral(name, type_args, field_values, _) => {
@@ -1341,6 +1476,37 @@ impl TypeChecker {
                                 span: span,
                             });
                         }
+                    }
+                }
+
+                {
+                    let mut seen: Vec<&str> = Vec::new();
+                    for (n, _) in field_values.iter() {
+                        if !fields.iter().any(|(fname, _)| fname == n) {
+                            return Err(CheckerError::UndefinedField {
+                                struct_name: name.clone(),
+                                field: n.clone(),
+                                span,
+                            });
+                        }
+                        if seen.contains(&n.as_str()) {
+                            return Err(CheckerError::InvalidOperation {
+                                op: format!("duplicate field '{}' in union literal", n),
+                                type_name: name.clone(),
+                                span,
+                            });
+                        }
+                        seen.push(n.as_str());
+                    }
+                    if seen.len() != 1 && !fields.is_empty() {
+                        return Err(CheckerError::InvalidOperation {
+                            op: format!(
+                                "union literal must specify exactly one field, got {}",
+                                seen.len()
+                            ),
+                            type_name: name.clone(),
+                            span,
+                        });
                     }
                 }
 
@@ -1525,7 +1691,7 @@ impl TypeChecker {
                 };
                 Ok(Type::Primitive(Primitive::String))
             }
-            Expr::Lambda(params, body, ret_type, _) => {
+            Expr::Lambda(params, body, ret_type, lambda_span) => {
                 self.push_scope();
                 let mut param_types = Vec::new();
                 for (param_name, param_type) in params.iter() {
@@ -1535,7 +1701,22 @@ impl TypeChecker {
                 }
                 let ret_var = self.resolve_params(ret_type);
                 self.return_types.push(ret_var.clone());
-                self.check_expr(body)?;
+                let body_type = self.check_expr(body)?;
+                {
+                    let resolved_ret = self.resolve_type(&ret_var);
+                    let resolved_body = self.resolve_type(&body_type);
+                    let ret_is_void = matches!(resolved_ret, Type::Primitive(Primitive::Void));
+                    if !ret_is_void && resolved_ret != resolved_body {
+                        self.return_types.pop();
+                        self.pop_scope();
+                        return Err(CheckerError::TypeMismatch {
+                            expected: ret_var.clone(),
+                            found: body_type.clone(),
+                            context: "lambda return type".to_string(),
+                            span: *lambda_span,
+                        });
+                    }
+                }
                 self.return_types.pop();
                 self.pop_scope();
                 Ok(Type::Function(param_types, Box::new(ret_var)))
@@ -1587,9 +1768,9 @@ impl TypeChecker {
                     | (Type::Primitive(Primitive::Float), Type::Primitive(Primitive::Float))
                     | (Type::Primitive(Primitive::Int), Type::Primitive(Primitive::Boolean))
                     | (Type::Primitive(Primitive::Boolean), Type::Primitive(Primitive::Int))
-                    | (Type::Primitive(Primitive::Boolean), Type::Primitive(Primitive::Boolean)) => {
-                        Ok(resolved_target)
-                    }
+                    | (Type::Primitive(Primitive::Boolean), Type::Primitive(Primitive::Boolean))
+                    | (_, Type::Primitive(Primitive::Void)) => Ok(resolved_target),
+                    (Type::Primitive(Primitive::Void), _) => Ok(resolved_target),
                     _ => Err(CheckerError::InvalidOperation {
                         op: "cast".to_string(),
                         type_name: format!("{:?} to {:?}", src_type, resolved_target),
@@ -1658,6 +1839,7 @@ impl TypeChecker {
                 Some(Box::new(Expr::String("false".to_string(), span))),
                 span,
             )),
+            Type::Primitive(Primitive::Void) => Ok(Expr::String("nil".to_string(), span)),
             _ => Err(CheckerError::InvalidOperation {
                 op: "f-string interpolation".to_string(),
                 type_name: ty.to_string(),

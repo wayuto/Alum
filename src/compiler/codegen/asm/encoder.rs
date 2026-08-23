@@ -364,10 +364,10 @@ impl Assembler {
             Divsd(dst, src) => self.emit_fp_binop(0x5e, dst, src, section, offset)?,
             Ucomisd(a, b) => {
                 self.emit_slice(section, &[0x66]);
-                self.emit_rex(section, false, b.rex_b(), false, a.rex_b());
+                self.emit_rex(section, false, a.rex_b(), false, b.rex_b());
                 self.emit_slice(
                     section,
-                    &[0x0f, 0x2e, self.modrm(3, b.reg_id() & 7, a.reg_id() & 7)],
+                    &[0x0f, 0x2e, self.modrm(3, a.reg_id() & 7, b.reg_id() & 7)],
                 );
             }
             Xorpd(d, src) => {

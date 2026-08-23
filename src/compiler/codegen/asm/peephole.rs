@@ -2,8 +2,18 @@ use super::types::*;
 use std::{collections::HashSet, iter::once};
 
 pub fn optimize(asms: &mut Vec<Asm>) {
+    const MAX_PEEPHOLE_ROUNDS: usize = 500;
+    let mut rounds = 0usize;
     loop {
         let mut changed = false;
+        rounds += 1;
+        if rounds > MAX_PEEPHOLE_ROUNDS {
+            eprintln!(
+                "warning: peephole optimization did not converge after {} rounds",
+                MAX_PEEPHOLE_ROUNDS
+            );
+            break;
+        }
 
         changed |= pass_dead_labels(asms);
         changed |= pass_redundant_jmp(asms);
@@ -37,6 +47,7 @@ fn pass_mov_imm_to_mem_merge(asms: &mut Vec<Asm>) -> bool {
                 Asm::Mov(Operand::Reg(r1), Operand::Imm(v)),
                 Asm::Mov(Operand::Mem(m), Operand::Reg(r2)),
             ) if r1 == r2
+                && !register_in_operand(&Operand::Mem(m.clone()), r1)
                 && !register_is_used_after(asms, i + 2, r1)
                 && v >= i32::MIN as i64
                 && v <= i32::MAX as i64 =>
@@ -84,11 +95,12 @@ fn operand_reads(asm: &Asm, reg: Reg) -> bool {
             *src == reg
                 || matches!(dst, Operand::Mem(m) if m.base == Some(reg) || m.index == Some(reg))
         }
+        Asm::Cvtsi2sd(_, src) | Asm::Cvttsd2si(_, src) => register_in_operand(src, reg),
+        Asm::Test(r) => *r == reg,
         Asm::Xorpd(a, b) => *a == reg || register_in_operand(b, reg),
         Asm::Ucomisd(a, b) => *a == reg || *b == reg,
-        Asm::Push(r) | Asm::Neg(r) | Asm::Inc(r) | Asm::Dec(r) | Asm::Idiv(r) | Asm::Not(r) => {
-            *r == reg
-        }
+        Asm::Push(r) | Asm::Neg(r) | Asm::Inc(r) | Asm::Dec(r) | Asm::Not(r) => *r == reg,
+        Asm::Idiv(r) => *r == reg || reg == Reg::Rax || reg == Reg::Rdx,
         Asm::Shl(r) | Asm::Sar(r) => *r == reg || reg == Reg::Rcx,
         Asm::Call(Operand::Reg(r)) => *r == reg,
         Asm::Cqo | Asm::Cdqe => reg == Reg::Rax,
@@ -111,6 +123,7 @@ fn operand_writes(asm: &Asm, reg: Reg) -> bool {
         | Asm::And(Operand::Reg(r), _) => *r == reg,
         Asm::Movzx(dst, _) => *dst == reg,
         Asm::Lea(dst, _) => matches!(dst, Operand::Reg(r) if *r == reg),
+        Asm::Cvtsi2sd(dst, _) | Asm::Cvttsd2si(dst, _) | Asm::Xorpd(dst, _) => *dst == reg,
         Asm::Pop(r)
         | Asm::Not(r)
         | Asm::Neg(r)

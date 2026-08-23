@@ -9,6 +9,17 @@ const {
 let client = null;
 
 function activate(context) {
+    // 无论配置是否有效都先注册命令，避免命令面板出现悬空命令
+    context.subscriptions.push(
+        vscode.commands.registerCommand("alum.restartLsp", async () => {
+            if (client) {
+                await client.stop();
+                client = null;
+            }
+            activate(context);
+        })
+    );
+
     const config = vscode.workspace.getConfiguration("alum");
     const serverPath = config.get("lsp.path", "alum-lsp");
     if (path.isAbsolute(serverPath) && !fs.existsSync(serverPath)) {
@@ -39,14 +50,6 @@ function activate(context) {
         "Alum Language Server",
         serverOptions,
         clientOptions
-    );
-
-    context.subscriptions.push(
-        vscode.commands.registerCommand("alum.restartLsp", () => {
-            if (client) {
-                client.restart();
-            }
-        })
     );
 
     client.start();

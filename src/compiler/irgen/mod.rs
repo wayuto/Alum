@@ -39,6 +39,8 @@ pub struct IRGen {
     pub(super) extern_vars: HashMap<String, Type>,
     pub(super) program_body: Vec<Expr>,
     pub(super) natives: Option<NativeTable>,
+
+    expr_depth: usize,
 }
 
 impl IRGen {
@@ -54,6 +56,7 @@ impl IRGen {
             functions: Vec::new(),
             constants: Vec::new(),
             constant_pool: HashMap::new(),
+            expr_depth: 0,
             globals: HashMap::new(),
             global_storage: HashMap::new(),
             global_emits: Vec::new(),

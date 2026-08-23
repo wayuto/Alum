@@ -1,6 +1,7 @@
 use crate::config::Config;
 use git2::Repository;
 use sha2::{Digest, Sha256};
+use std::io::Write;
 use std::{
     collections::HashMap,
     fs::{File, metadata, read_to_string},
@@ -78,45 +79,83 @@ pub fn sync() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(url) = info.url {
                 if info.git {
                     let dest = format!(".deps/{}", name);
-                    match Repository::clone(&url, Path::new(&dest)) {
+                    let dest_path = Path::new(&dest);
+
+                    let repo = match Repository::open(dest_path) {
                         Ok(repo) => {
-                            if let Some(tag) = &info.tag {
-                                checkout_tag(&repo, tag)?;
+                            if let Ok(mut remote) = repo.find_remote("origin") {
+                                let _ = remote.fetch(
+                                    &["refs/heads/*:refs/remotes/origin/*"],
+                                    None,
+                                    None,
+                                );
                             }
+                            repo
                         }
-                        Err(e) => {
-                            if !Path::new(&dest).exists() {
-                                return Err(e.into());
+                        Err(_) => {
+                            if dest_path.exists() {
+                                std::fs::remove_dir_all(dest_path)?;
                             }
-                            if let Some(tag) = &info.tag {
-                                let repo = Repository::open(Path::new(&dest))?;
-                                checkout_tag(&repo, tag)?;
-                            }
+                            std::fs::create_dir_all(".deps")?;
+                            Repository::clone(&url, dest_path)?
                         }
+                    };
+                    if let Some(tag) = &info.tag {
+                        checkout_tag(&repo, tag)?;
                     }
                 } else {
                     let dep_dir = format!(".deps/{}", name);
-                    let cached_hash = deps_hash.get(&name).map(|h| h.as_str());
+
+                    if deps_hash.contains_key(&url) && Path::new(&dep_dir).exists() {
+                        continue;
+                    }
 
                     std::fs::create_dir_all(".deps")?;
                     let zip_path = format!(".deps/{}.zip", name);
                     println!("Downloading {}", name);
                     let response = ureq::get(&url).call()?;
+
+                    const MAX_ZIP_BYTES: u64 = 512 * 1024 * 1024;
+                    if let Some(len) = response.header("Content-Length") {
+                        if let Ok(n) = len.parse::<u64>() {
+                            if n > MAX_ZIP_BYTES {
+                                return Err(format!(
+                                    "download for '{}' too large: {} bytes",
+                                    name, n
+                                )
+                                .into());
+                            }
+                        }
+                    }
                     let mut zip_file = File::create(&zip_path)?;
-                    std::io::copy(&mut response.into_reader(), &mut zip_file)?;
+                    let mut reader = response.into_reader();
+                    let mut copied: u64 = 0;
+                    loop {
+                        use std::io::Read as _;
+                        let mut buf = [0u8; 64 * 1024];
+                        let n = reader.read(&mut buf)?;
+                        if n == 0 {
+                            break;
+                        }
+                        copied += n as u64;
+                        if copied > MAX_ZIP_BYTES {
+                            return Err(format!(
+                                "download for '{}' exceeded {} bytes",
+                                name, MAX_ZIP_BYTES
+                            )
+                            .into());
+                        }
+                        zip_file.write_all(&buf[..n])?;
+                    }
 
                     let curr_hash = get_hash(&zip_path)?;
 
-                    if cached_hash == Some(&curr_hash) && Path::new(&dep_dir).exists() {
-                        std::fs::remove_file(&zip_path)?;
-                    } else {
-                        if Path::new(&dep_dir).exists() {
-                            std::fs::remove_dir_all(&dep_dir)?;
-                        }
-                        extract_zip(&zip_path, &dep_dir)?;
-                        std::fs::remove_file(&zip_path)?;
-                        deps_hash.insert(name.clone(), curr_hash);
+                    if Path::new(&dep_dir).exists() {
+                        std::fs::remove_dir_all(&dep_dir)?;
                     }
+                    extract_zip(&zip_path, &dep_dir)?;
+                    std::fs::remove_file(&zip_path)?;
+                    deps_hash.insert(url.clone(), curr_hash);
                 }
             } else if let Some(local) = info.local {
                 let dest = format!(".deps/{}", name);

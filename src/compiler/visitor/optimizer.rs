@@ -134,6 +134,7 @@ impl Optimizer {
                 self.prune_locals(body, used, pure_fns);
             }
             Expr::Lambda(_, body, _, _) => self.prune_locals(body, used, pure_fns),
+            Expr::FuncDecl(_, _, _, _, _, body, _) => self.prune_locals(body, used, pure_fns),
             Expr::VarDecl(_, _, v, _)
             | Expr::ConstDecl(_, _, v, _, _)
             | Expr::VarAssign(_, v, _)
@@ -231,10 +232,13 @@ impl Optimizer {
             | Expr::FGe(l, r, _)
             | Expr::LAnd(l, r, _)
             | Expr::LOr(l, r, _)
+            | Expr::Shl(l, r, _)
+            | Expr::Shr(l, r, _)
             | Expr::StrCat(l, r, _) => {
                 self.prune_locals(l, used, pure_fns);
                 self.prune_locals(r, used, pure_fns);
             }
+            Expr::BNot(e, _) => self.prune_locals(e, used, pure_fns),
             _ => {}
         }
     }
@@ -387,10 +391,13 @@ impl Optimizer {
             | Expr::FGe(l, r, _)
             | Expr::LAnd(l, r, _)
             | Expr::LOr(l, r, _)
+            | Expr::Shl(l, r, _)
+            | Expr::Shr(l, r, _)
             | Expr::StrCat(l, r, _) => {
                 self.for_each_name(l, f);
                 self.for_each_name(r, f);
             }
+            Expr::BNot(e, _) => self.for_each_name(e, f),
             _ => {}
         }
     }
@@ -548,9 +555,23 @@ impl Optimizer {
             | Expr::FGe(l, r, _)
             | Expr::LAnd(l, r, _)
             | Expr::LOr(l, r, _)
+            | Expr::Shl(l, r, _)
+            | Expr::Shr(l, r, _)
             | Expr::StrCat(l, r, _) => {
                 self.optimize_expr(l);
                 self.optimize_expr(r);
+            }
+            Expr::BNot(e, _) => self.optimize_expr(e),
+            Expr::FString(segs, _) => segs.iter_mut().for_each(|s| self.optimize_expr(s)),
+            Expr::Match(target, branches, default, _) => {
+                self.optimize_expr(target);
+                for (c, v) in branches.iter_mut() {
+                    self.optimize_expr(c);
+                    self.optimize_expr(v);
+                }
+                if let Some(d) = default {
+                    self.optimize_expr(d);
+                }
             }
             Expr::Not(e, _) | Expr::Neg(e, _) | Expr::FNeg(e, _) => self.optimize_expr(e),
             _ => {}
@@ -680,18 +701,6 @@ impl Optimizer {
                 }
                 (Expr::Float(a, _), Expr::Float(b, _)) => Some(Expr::Float(a * b, Span::new(0, 0))),
 
-                (Expr::Int(0, _), _) if self.is_effect_free(r) => {
-                    Some(Expr::Int(0, Span::new(0, 0)))
-                }
-                (_, Expr::Int(0, _)) if self.is_effect_free(l) => {
-                    Some(Expr::Int(0, Span::new(0, 0)))
-                }
-                (Expr::Float(0.0, _), _) if self.is_effect_free(r) => {
-                    Some(Expr::Float(0.0, Span::new(0, 0)))
-                }
-                (_, Expr::Float(0.0, _)) if self.is_effect_free(l) => {
-                    Some(Expr::Float(0.0, Span::new(0, 0)))
-                }
                 (Expr::Int(1, _), _) => Some(*r.clone()),
                 (_, Expr::Int(1, _)) => Some(*l.clone()),
                 (Expr::Float(1.0, _), _) => Some(*r.clone()),
@@ -739,12 +748,7 @@ impl Optimizer {
             },
             Expr::FMul(l, r, _) => match (l.as_ref(), r.as_ref()) {
                 (Expr::Float(a, _), Expr::Float(b, _)) => Some(Expr::Float(a * b, Span::new(0, 0))),
-                (Expr::Float(0.0, _), _) if self.is_effect_free(r) => {
-                    Some(Expr::Float(0.0, Span::new(0, 0)))
-                }
-                (_, Expr::Float(0.0, _)) if self.is_effect_free(l) => {
-                    Some(Expr::Float(0.0, Span::new(0, 0)))
-                }
+
                 (Expr::Float(1.0, _), _) => Some(*r.clone()),
                 (_, Expr::Float(1.0, _)) => Some(*l.clone()),
                 _ => None,
@@ -830,6 +834,22 @@ impl Optimizer {
                 Expr::Bool(b, _) => Some(Expr::Bool(!b, Span::new(0, 0))),
                 _ => None,
             },
+            Expr::Shl(l, r, _) => match (l.as_ref(), r.as_ref()) {
+                (Expr::Int(a, _), Expr::Int(b, _)) if *b >= 0 && *b < 64 => {
+                    Some(Expr::Int(a.wrapping_shl(*b as u32), Span::new(0, 0)))
+                }
+                _ => None,
+            },
+            Expr::Shr(l, r, _) => match (l.as_ref(), r.as_ref()) {
+                (Expr::Int(a, _), Expr::Int(b, _)) if *b >= 0 && *b < 64 => {
+                    Some(Expr::Int(a.wrapping_shr(*b as u32), Span::new(0, 0)))
+                }
+                _ => None,
+            },
+            Expr::BNot(e, _) => match e.as_ref() {
+                Expr::Int(n, _) => Some(Expr::Int(!*n, Span::new(0, 0))),
+                _ => None,
+            },
             Expr::Neg(e, _) => match e.as_ref() {
                 Expr::Int(n, _) => Some(Expr::Int(n.wrapping_neg(), Span::new(0, 0))),
                 _ => None,
@@ -855,7 +875,14 @@ impl Optimizer {
                 for e in &mut *body {
                     self.dce(e, pure_fns);
                 }
-                body.retain(|e| !matches!(e, Expr::Block(b, _) if b.is_empty()));
+
+                let last_idx = body.len().saturating_sub(1);
+                let mut i = 0usize;
+                body.retain(|e| {
+                    let keep = i == last_idx || !matches!(e, Expr::Block(b, _) if b.is_empty());
+                    i += 1;
+                    keep
+                });
             }
             Expr::If(cond, t, e, _) => {
                 self.dce(cond, pure_fns);
@@ -972,10 +999,13 @@ impl Optimizer {
             | Expr::FGe(l, r, _)
             | Expr::LAnd(l, r, _)
             | Expr::LOr(l, r, _)
+            | Expr::Shl(l, r, _)
+            | Expr::Shr(l, r, _)
             | Expr::StrCat(l, r, _) => {
                 self.dce(l, pure_fns);
                 self.dce(r, pure_fns);
             }
+            Expr::BNot(e, _) => self.dce(e, pure_fns),
             Expr::Not(e, _) | Expr::Neg(e, _) | Expr::FNeg(e, _) => self.dce(e, pure_fns),
             _ => {}
         }

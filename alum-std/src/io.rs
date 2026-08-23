@@ -47,7 +47,14 @@ pub extern "C" fn input(prompt: *const u8) -> *const u8 {
             break;
         }
 
-        if ch == b'\n' || ch == b'\r' {
+        if ch == b'\n' {
+            break;
+        }
+
+        if ch == b'\r' {
+            let mut nxt: u8 = 0;
+            let r = sys::read(0, &mut nxt as *mut u8, 1);
+            if r > 0 && nxt == b'\n' {}
             break;
         }
 
@@ -83,10 +90,17 @@ static mut BUF_READ: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
 pub extern "C" fn fread(fd: isize) -> *const u8 {
     let buf = &raw mut BUF_READ;
 
-    let n = sys::read(fd, buf.cast::<u8>(), BUFFER_SIZE - 1);
-    let n = if n <= 0 { 0 } else { n as usize };
+    let mut total = 0usize;
     unsafe {
-        (*buf)[n] = 0;
+        while total < BUFFER_SIZE - 1 {
+            let n = sys::read(fd, (*buf).as_mut_ptr().add(total), BUFFER_SIZE - 1 - total);
+            let n = if n < 0 { 0isize } else { n };
+            if n == 0 {
+                break;
+            }
+            total += n as usize;
+        }
+        (*buf)[total] = 0;
     }
     buf as *const u8
 }

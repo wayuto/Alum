@@ -112,6 +112,8 @@ impl IRGen {
         if !safety.safe(expr) {
             return None;
         }
+
+        let mut unsafe_fns: HashSet<String> = HashSet::new();
         for decl in self.program_body.iter() {
             if let Expr::FuncDecl(name, attrs, _, _, _, body, _) = decl {
                 if (attrs.is_pure || name.starts_with("_lambda_"))
@@ -119,7 +121,7 @@ impl IRGen {
                 {
                     let mut fn_safety = VmSafety::new(&self.program_body, &pure_fns);
                     if !fn_safety.safe(body) {
-                        return None;
+                        unsafe_fns.insert(name.clone());
                     }
                 }
             }
@@ -131,7 +133,8 @@ impl IRGen {
             .filter_map(|e| match e {
                 Expr::FuncDecl(name, attrs, ..)
                     if ((attrs.is_pure || name.starts_with("_lambda_"))
-                        && (!attrs.is_external || self.native_resolved(name))) =>
+                        && (!attrs.is_external || self.native_resolved(name))
+                        && !unsafe_fns.contains(name)) =>
                 {
                     Some((name.clone(), e.clone()))
                 }
@@ -161,14 +164,44 @@ impl IRGen {
 
         let prev_hook = std::panic::take_hook();
         std::panic::set_hook(std::boxed::Box::new(|_| {}));
+
+        let mut global_consts: std::collections::HashMap<String, Value> =
+            std::collections::HashMap::new();
+        for (name, (c, _)) in self.globals.iter() {
+            let v = match c {
+                IRConst::Int(i) => Some(Value::Int(*i)),
+                IRConst::Float(f) => Some(Value::Float(f.into_inner())),
+                IRConst::Str(s) => Some(Value::Str(s.clone())),
+                _ => None,
+            };
+            if let Some(v) = v {
+                global_consts.insert(name.clone(), v);
+            }
+        }
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let bc = Compiler::new().compile(program);
+            let bc = Compiler::with_global_consts(global_consts).compile(program);
             let mut vm = GVM::new(bc, natives);
             vm.run();
             vm.result()
         }));
         std::panic::set_hook(prev_hook);
-        let result = result.ok().flatten()?;
+
+        let mut fail_reason = String::new();
+        let result = match result {
+            Ok(r) => r,
+            Err(payload) => {
+                fail_reason = payload
+                    .downcast_ref::<String>()
+                    .cloned()
+                    .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                    .unwrap_or_default();
+                None
+            }
+        };
+        if !fail_reason.is_empty() {
+            eprintln!("warning: compile-time evaluation failed: {}", fail_reason);
+        }
+        let result = result?;
 
         match result {
             Value::Int(i) => Some((IRConst::Int(i), IRType::Int)),
@@ -309,6 +342,8 @@ fn order_vm_functions(selected: &mut Vec<(String, Expr)>) -> Vec<Expr> {
     if selected.is_empty() {
         return Vec::new();
     }
+
+    selected.sort_by(|a, b| a.0.cmp(&b.0));
     let decls: HashMap<String, Expr> = selected.drain(..).collect();
     let mut ordered: Vec<Expr> = Vec::new();
     let mut done: HashSet<String> = HashSet::new();

@@ -19,7 +19,7 @@ impl IRGen {
             case_labels.push(ctx.new_label("case"));
         }
 
-        let mut case_cnt = 0usize;
+        let mut case_cnt;
 
         let cmp_op = if matches!(
             ctx.get_operand_type(&target, &self.constants)?,
@@ -29,24 +29,24 @@ impl IRGen {
         } else {
             Op::Eq
         };
-        for (case, _) in branches.clone() {
+
+        for (case_idx, (case, _)) in branches.iter().enumerate() {
+            let case_op = self.compile_expr(case.clone(), ctx)?;
             let cond = ctx.new_tmp(IRType::Bool);
-            let case = self.compile_expr(case, ctx)?;
             ctx.instructions.push(Instruction {
                 op: cmp_op.clone(),
                 dst: Some(cond.clone()),
                 src1: Some(target.clone()),
-                src2: Some(case),
+                src2: Some(case_op),
             });
             ctx.instructions.push(Instruction {
                 op: Op::JumpIfTrue,
                 dst: None,
                 src1: Some(cond),
                 src2: Some(Operand::Label(
-                    case_labels.iter().nth(case_cnt).unwrap().clone(),
+                    case_labels.iter().nth(case_idx).unwrap().clone(),
                 )),
             });
-            case_cnt += 1;
         }
 
         if let Some(d) = default {
@@ -65,6 +65,14 @@ impl IRGen {
             });
             self.emit_scope_frees(ctx)?;
             ctx.exit_scope()?;
+        } else {
+            let zero_idx = self.get_const_index(super::ir::IRConst::Int(0));
+            ctx.instructions.push(Instruction {
+                op: Op::Move,
+                dst: Some(res_tmp.clone()),
+                src1: Some(Operand::ConstIdx(zero_idx)),
+                src2: None,
+            });
         }
 
         ctx.instructions.push(Instruction {

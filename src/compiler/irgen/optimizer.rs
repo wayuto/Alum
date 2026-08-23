@@ -21,8 +21,18 @@ pub(crate) fn optimize(program: &mut IRProgram) {
 }
 
 fn optimize_fn(insts: &mut Vec<Instruction>, constants: &mut Vec<IRConst>, pool: &mut ConstPool) {
+    const MAX_IR_OPT_ROUNDS: usize = 500;
+    let mut rounds = 0usize;
     loop {
         let mut changed = false;
+        rounds += 1;
+        if rounds > MAX_IR_OPT_ROUNDS {
+            eprintln!(
+                "warning: IR optimization did not converge after {} rounds",
+                MAX_IR_OPT_ROUNDS
+            );
+            break;
+        }
         changed |= pass_const_fold(insts, constants, pool);
         changed |= pass_algebraic(insts, constants, pool);
         changed |= pass_branch_const(insts, constants);
@@ -341,6 +351,10 @@ fn pass_copy_prop(insts: &mut [Instruction]) -> bool {
             if inst.dst.as_ref() == Some(&src) {
                 break;
             }
+
+            if inst.dst.as_ref() == Some(&dst) {
+                break;
+            }
             if matches!(inst.op, Op::JumpIfFalse | Op::JumpIfTrue) {
                 replaced |= replace_operand(&mut inst.src1, &dst, &src);
                 break;
@@ -371,16 +385,13 @@ fn is_pure(op: &Op) -> bool {
             | Op::FLoad
             | Op::GlobLoad
             | Op::FGlobLoad
-            | Op::LoadAt
             | Op::Add
             | Op::FAdd
             | Op::Sub
             | Op::FSub
             | Op::Mul
             | Op::FMul
-            | Op::Div
             | Op::FDiv
-            | Op::Mod
             | Op::Eq
             | Op::FEq
             | Op::Ne
@@ -413,9 +424,6 @@ fn is_pure(op: &Op) -> bool {
             | Op::SizeOf
             | Op::IntToFloat
             | Op::FloatToInt
-            | Op::ArrayAccess
-            | Op::ByteAccess
-            | Op::Lea
     )
 }
 

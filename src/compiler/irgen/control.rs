@@ -574,7 +574,7 @@ impl IRGen {
             .clone();
 
         if let Some(depth) = ctx.loop_scope_depths.last() {
-            self.emit_scope_frees_from(ctx, depth + 1)?;
+            self.emit_scope_frees_from(ctx, *depth)?;
         }
         ctx.instructions.push(Instruction {
             op: Op::Jump,

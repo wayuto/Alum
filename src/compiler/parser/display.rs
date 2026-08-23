@@ -504,7 +504,22 @@ impl Expr {
                 write!(f, "\n{})", indent_str)
             }
             Expr::TypeDef(_) => write!(f, "{}TypeDef", indent_str),
-            Expr::Match(_, _, _, _) => write!(f, "Match hasn't implemented yet"),
+            Expr::Match(target, branches, default, _) => {
+                write!(f, "{}Match(", indent_str)?;
+                target.fmt_with_indent(f, 0)?;
+                write!(f, " {{")?;
+                for (case, value) in branches {
+                    write!(f, "\n{}  Case:", indent_str)?;
+                    case.fmt_with_indent(f, 0)?;
+                    write!(f, " =>")?;
+                    value.fmt_with_indent(f, indent + 2)?;
+                }
+                if let Some(d) = default {
+                    write!(f, "\n{}  Default =>", indent_str)?;
+                    d.fmt_with_indent(f, indent + 2)?;
+                }
+                write!(f, "\n{}}})", indent_str)
+            }
             Expr::Struct(name, type_params, fields, _) => {
                 let field_str: Vec<String> = fields
                     .iter()

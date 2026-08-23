@@ -1,5 +1,5 @@
 use super::context::Context;
-use super::ir::{IRType, Instruction, Op, Operand};
+use super::ir::{IRConst, IRType, Instruction, Op, Operand};
 use crate::compiler::{
     codegen::CodeGenError,
     irgen::IRGen,
@@ -184,9 +184,34 @@ impl IRGen {
         } else {
             elem_type.map_or(IRType::Int, |t| Context::type_to_ir_type(&t))
         };
+
+        let is_ptr_src = matches!(self.expr_high_type(&arr, ctx), Some(Type::Pointer(_)));
         let arr_op = self.compile_expr(*arr, ctx)?;
         let offset = self.compile_expr(*idx, ctx)?;
-        let res_tmp = ctx.new_tmp(elem_ir_type);
+        let res_tmp = ctx.new_tmp(elem_ir_type.clone());
+        if is_ptr_src && !byte {
+            let scaled = ctx.new_tmp(IRType::Int);
+            let scale_idx = self.get_const_index(IRConst::Int(8));
+            ctx.instructions.push(Instruction {
+                op: Op::Mul,
+                dst: Some(scaled.clone()),
+                src1: Some(offset),
+                src2: Some(Operand::ConstIdx(scale_idx)),
+            });
+
+            let load_op = if elem_ir_type == IRType::Float {
+                Op::FLoadAt
+            } else {
+                Op::LoadAt
+            };
+            ctx.instructions.push(Instruction {
+                op: load_op,
+                dst: Some(res_tmp.clone()),
+                src1: Some(arr_op),
+                src2: Some(scaled),
+            });
+            return Ok(res_tmp);
+        }
         ctx.instructions.push(Instruction {
             op: if is_string_index {
                 Op::StrByte
@@ -231,25 +256,29 @@ impl IRGen {
             };
             let fn_ptr =
                 self.load_function_field(s_op.clone(), &Type::Struct(sname, ta), "set_nth", ctx)?;
-            ctx.instructions.push(Instruction {
-                op: Op::Arg(0),
-                dst: None,
-                src1: Some(s_op),
-                src2: None,
-            });
-            ctx.instructions.push(Instruction {
-                op: Op::Arg(1),
-                dst: None,
-                src1: Some(i_op),
-                src2: None,
-            });
-            let v_result = v_op.clone();
-            ctx.instructions.push(Instruction {
-                op: Op::Arg(2),
-                dst: None,
-                src1: Some(v_op),
-                src2: None,
-            });
+
+            let mut int_idx = 0usize;
+            let mut flt_idx = 0usize;
+            for op in [&s_op, &i_op, &v_op] {
+                let ty = ctx.get_operand_type(op, &self.constants)?;
+                if ty == IRType::Float {
+                    ctx.instructions.push(Instruction {
+                        op: Op::FArg(flt_idx),
+                        dst: None,
+                        src1: Some(op.clone()),
+                        src2: None,
+                    });
+                    flt_idx += 1;
+                } else {
+                    ctx.instructions.push(Instruction {
+                        op: Op::Arg(int_idx),
+                        dst: None,
+                        src1: Some(op.clone()),
+                        src2: None,
+                    });
+                    int_idx += 1;
+                }
+            }
             let res_tmp = ctx.new_tmp(IRType::Void);
             ctx.instructions.push(Instruction {
                 op: Op::Call,
@@ -257,26 +286,45 @@ impl IRGen {
                 src1: Some(fn_ptr),
                 src2: None,
             });
-            return Ok(v_result);
+            return Ok(v_op);
         }
         let (elem_type, byte) = self.index_info(&arr, ctx);
+
+        let is_ptr_src = matches!(self.expr_high_type(&arr, ctx), Some(Type::Pointer(_)));
         let arr_op = self.compile_expr(*arr, ctx)?;
         let offset = self.compile_expr(*idx, ctx)?;
         let value_copy_info = self.resource_copy_info(&value, ctx);
         let val = self.compile_expr(*value, ctx)?;
-        let val = if let Some(et) = elem_type {
-            if self.is_resource_type(&et) {
+        let val = if let Some(et) = &elem_type {
+            if self.is_resource_type(et) {
                 let val = match value_copy_info {
                     Some(ty) => self.copy_resource(ctx, val, &ty)?,
                     None => val,
                 };
                 let old_tmp = ctx.new_tmp(IRType::Int);
-                ctx.instructions.push(Instruction {
-                    op: Op::ArrayAccess,
-                    dst: Some(old_tmp.clone()),
-                    src1: Some(arr_op.clone()),
-                    src2: Some(offset.clone()),
-                });
+                if is_ptr_src && !byte {
+                    let scaled_old = ctx.new_tmp(IRType::Int);
+                    let scale_idx = self.get_const_index(IRConst::Int(8));
+                    ctx.instructions.push(Instruction {
+                        op: Op::Mul,
+                        dst: Some(scaled_old.clone()),
+                        src1: Some(offset.clone()),
+                        src2: Some(Operand::ConstIdx(scale_idx)),
+                    });
+                    ctx.instructions.push(Instruction {
+                        op: Op::LoadAt,
+                        dst: Some(old_tmp.clone()),
+                        src1: Some(arr_op.clone()),
+                        src2: Some(scaled_old),
+                    });
+                } else {
+                    ctx.instructions.push(Instruction {
+                        op: Op::ArrayAccess,
+                        dst: Some(old_tmp.clone()),
+                        src1: Some(arr_op.clone()),
+                        src2: Some(offset.clone()),
+                    });
+                }
                 self.emit_free(ctx, old_tmp, &et)?;
                 val
             } else {
@@ -286,6 +334,33 @@ impl IRGen {
             val
         };
         let result = val.clone();
+        if is_ptr_src && !byte {
+            let scaled = ctx.new_tmp(IRType::Int);
+            let scale_idx = self.get_const_index(IRConst::Int(8));
+            ctx.instructions.push(Instruction {
+                op: Op::Mul,
+                dst: Some(scaled.clone()),
+                src1: Some(offset),
+                src2: Some(Operand::ConstIdx(scale_idx)),
+            });
+
+            let elem_is_float = elem_type
+                .as_ref()
+                .map(|t| Context::type_to_ir_type(t) == IRType::Float)
+                .unwrap_or(false);
+            let store_op = if elem_is_float {
+                Op::FStoreAt
+            } else {
+                Op::StoreAt
+            };
+            ctx.instructions.push(Instruction {
+                op: store_op,
+                dst: Some(arr_op),
+                src1: Some(scaled),
+                src2: Some(val),
+            });
+            return Ok(result);
+        }
         ctx.instructions.push(Instruction {
             op: if byte {
                 Op::ByteAssign

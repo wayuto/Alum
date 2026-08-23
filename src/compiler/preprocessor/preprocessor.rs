@@ -118,6 +118,11 @@ impl<'a> Preprocessor<'a> {
                     let expanded_body =
                         self.substitute_params(&macro_def.body, &macro_def.params, &args);
 
+                    if expanded_body.starts_with(&format!("{}({})", name, args_str)) {
+                        search_start = abs_pos + name.len();
+                        continue;
+                    }
+
                     let before = &result[..abs_pos];
                     let after = &result[args_end..];
                     result = format!("{}{}{}", before, expanded_body, after);
@@ -177,6 +182,12 @@ impl<'a> Preprocessor<'a> {
             iterations += 1;
         }
 
+        if changed {
+            eprintln!(
+                "warning: macro expansion did not converge after {max_iterations} rounds (recursive macro?)"
+            );
+        }
+
         result
     }
 
@@ -221,10 +232,16 @@ impl<'a> Preprocessor<'a> {
         let mut in_string = false;
         let mut quote = '\0';
         let mut current = String::new();
-        for c in args_str.chars() {
+        let mut chars = args_str.chars().peekable();
+        while let Some(c) = chars.next() {
             if in_string {
                 current.push(c);
-                if c == quote {
+                if c == '\\' {
+                    if let Some(&next) = chars.peek() {
+                        current.push(next);
+                        chars.next();
+                    }
+                } else if c == quote {
                     in_string = false;
                 }
                 continue;
@@ -262,11 +279,18 @@ impl<'a> Preprocessor<'a> {
         let mut depth = 1;
         let args_start = start + 1;
         let mut args_end = start;
+        let mut found = false;
         let mut in_string = false;
         let mut string_char = '\0';
+        let mut chars = text[start + 1..].char_indices().peekable();
 
-        for (i, c) in text[start + 1..].char_indices() {
+        while let Some((i, c)) = chars.next() {
             let pos = start + 1 + i;
+
+            if c == '\\' && in_string {
+                chars.next();
+                continue;
+            }
 
             if c == '"' || c == '\'' {
                 if !in_string {
@@ -283,6 +307,7 @@ impl<'a> Preprocessor<'a> {
                 } else if c == ')' {
                     if depth == 1 {
                         args_end = pos;
+                        found = true;
                         break;
                     }
                     depth -= 1;
@@ -290,7 +315,7 @@ impl<'a> Preprocessor<'a> {
             }
         }
 
-        if depth != 1 {
+        if !found {
             return None;
         }
 
@@ -342,6 +367,7 @@ impl<'a> Preprocessor<'a> {
             Path::new(&self.base_path)
                 .parent()
                 .and_then(|p| p.to_str())
+                .filter(|s| !s.is_empty())
                 .unwrap_or(".")
                 .to_string()
         };
@@ -371,6 +397,36 @@ impl<'a> Preprocessor<'a> {
         fs::canonicalize(path)
             .ok()
             .map(|p| p.to_string_lossy().into_owned())
+    }
+
+    fn strip_line_comment(s: &str) -> String {
+        let mut in_string = false;
+        let mut quote = '\0';
+        let bytes = s.as_bytes();
+        let mut i = 0;
+        while i < s.len() {
+            let c = s[i..].chars().next().unwrap();
+            if in_string {
+                if c == '\\' {
+                    i += 1;
+                } else if c == quote {
+                    in_string = false;
+                }
+                i += c.len_utf8();
+                continue;
+            }
+            if c == '"' || c == '\'' {
+                in_string = true;
+                quote = c;
+                i += c.len_utf8();
+                continue;
+            }
+            if c == '/' && i + 1 < s.len() && bytes[i + 1] == b'/' {
+                return s[..i].to_string();
+            }
+            i += c.len_utf8();
+        }
+        s.to_string()
     }
 
     pub fn preprocess(&mut self) -> Result<(String, SourceMap), PreprocessorError> {
@@ -462,14 +518,20 @@ impl<'a> Preprocessor<'a> {
                                 self.bump();
                             }
 
-                            (params, macro_body.trim().to_string())
+                            (
+                                params,
+                                Self::strip_line_comment(&macro_body).trim().to_string(),
+                            )
                         } else {
                             let mut simple_value = String::new();
                             while self.current() != '\n' && self.current() != '\0' {
                                 simple_value.push(self.current());
                                 self.bump();
                             }
-                            (Vec::new(), simple_value.trim().to_string())
+                            (
+                                Vec::new(),
+                                Self::strip_line_comment(&simple_value).trim().to_string(),
+                            )
                         };
 
                         let expanded_value = self.expand_macros(&value);
@@ -491,6 +553,7 @@ impl<'a> Preprocessor<'a> {
                         let condition_met = self.check_condition(false);
                         self.condition_stack.push(condition_met);
                         self.skipping = !condition_met;
+                        self.skip_until_newline();
                     }
                     "ifndef" => {
                         if self.skipping {
@@ -501,6 +564,7 @@ impl<'a> Preprocessor<'a> {
                         let condition_met = self.check_condition(true);
                         self.condition_stack.push(condition_met);
                         self.skipping = !condition_met;
+                        self.skip_until_newline();
                     }
                     "else" => {
                         if let Some(top) = self.condition_stack.last_mut() {
@@ -565,6 +629,15 @@ impl<'a> Preprocessor<'a> {
                             }
                         })?;
 
+                        if self.import_chain.len() >= 32 {
+                            return Err(PreprocessorError::IoError {
+                                msg: format!(
+                                    "import depth exceeds 32 levels (circular or runaway includes?)"
+                                ),
+                                row: self.row,
+                                col: self.col,
+                            });
+                        }
                         let mut child_pp = Preprocessor::new(
                             &content,
                             file_path.clone(),

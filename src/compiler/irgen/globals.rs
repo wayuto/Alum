@@ -11,7 +11,10 @@ impl IRGen {
         for expr in body {
             match expr {
                 Expr::GlobalVar(name, is_pub, ty, init, _) => {
-                    if matches!(init.as_deref(), Some(Expr::FuncDecl(..))) {
+                    let is_fn_binding = matches!(init.as_deref(), Some(Expr::FuncDecl(..)))
+                        || matches!(init.as_deref(),
+                            Some(Expr::Var(v, _)) if v.starts_with("_lambda_"));
+                    if is_fn_binding {
                         continue;
                     }
                     let value = match init {

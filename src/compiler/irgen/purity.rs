@@ -1,8 +1,4 @@
-use crate::compiler::{
-    Span,
-    codegen::CodeGenError,
-    parser::{Expr, Type},
-};
+use crate::compiler::{Span, codegen::CodeGenError, parser::Expr};
 use std::collections::{HashMap, HashSet};
 
 const LAMBDA_MARKER: &str = "\u{03bb}";
@@ -19,7 +15,7 @@ pub fn check_pure_functions(body: &[Expr]) -> Result<(), CodeGenError> {
     let globals: HashSet<String> = body
         .iter()
         .filter_map(|e| match e {
-            Expr::GlobalVar(name, ..) | Expr::ConstDecl(name, ..) => Some(name.to_string()),
+            Expr::GlobalVar(name, ..) => Some(name.to_string()),
             _ => None,
         })
         .collect();
@@ -70,176 +66,8 @@ pub fn check_pure_functions(body: &[Expr]) -> Result<(), CodeGenError> {
     Ok(())
 }
 
-pub(super) fn check_lambda_params(program_body: &[Expr]) -> Result<(), CodeGenError> {
-    fn check_params(kind: &str, name: &str, params: &[(String, Type)]) -> Result<(), CodeGenError> {
-        for (pname, ty) in params {
-            if type_has_pointer(ty) {
-                return Err(CodeGenError::TypeError {
-                    message: format!(
-                        "{kind} '{name}' has pointer parameter '{pname}' ({kind}s may not take pointer parameters)",
-                    ),
-                });
-            }
-        }
-        Ok(())
-    }
-
-    fn walk_field_value(expr: &Expr) -> Result<(), CodeGenError> {
-        match expr {
-            Expr::Lambda(_, body, _, _) => walk(body),
-            other => walk(other),
-        }
-    }
-
-    fn walk(expr: &Expr) -> Result<(), CodeGenError> {
-        use Expr::*;
-        match expr {
-            Lambda(params, body, _, _) => {
-                check_params("lambda", "<lambda>", params)?;
-                walk(body)
-            }
-            FuncDecl(name, attrs, _, params, _, body, _) => {
-                if !attrs.is_external {
-                    check_params("function", name, params)?;
-                }
-                walk(body)
-            }
-            Call(f, _, args, _) => {
-                walk(f)?;
-                for a in args {
-                    walk(a)?;
-                }
-                Ok(())
-            }
-            Block(stmts, _) => {
-                for s in stmts {
-                    walk(s)?;
-                }
-                Ok(())
-            }
-            If(c, t, e, _) => {
-                walk(c)?;
-                walk(t)?;
-                if let Some(x) = e {
-                    walk(x)?;
-                }
-                Ok(())
-            }
-            While(c, b, _) => {
-                walk(c)?;
-                walk(b)
-            }
-            For(_, i, b, _) => {
-                walk(i)?;
-                walk(b)
-            }
-            Range(l, r, _) => {
-                walk(l)?;
-                walk(r)
-            }
-            Match(s, arms, d, _) => {
-                walk(s)?;
-                for (p, a) in arms {
-                    walk(p)?;
-                    walk(a)?;
-                }
-                if let Some(x) = d {
-                    walk(x)?;
-                }
-                Ok(())
-            }
-            Return(v, _)
-            | Not(v, _)
-            | BNot(v, _)
-            | Neg(v, _)
-            | FNeg(v, _)
-            | AddressOf(v, _)
-            | Deref(v, _) => walk(v),
-            VarDecl(_, _, v, _) | ConstDecl(_, _, v, _, _) => walk(v),
-            Add(l, r, _)
-            | Sub(l, r, _)
-            | Mul(l, r, _)
-            | Div(l, r, _)
-            | Mod(l, r, _)
-            | FAdd(l, r, _)
-            | FSub(l, r, _)
-            | FMul(l, r, _)
-            | FDiv(l, r, _)
-            | Eq(l, r, _)
-            | Ne(l, r, _)
-            | Lt(l, r, _)
-            | Le(l, r, _)
-            | Gt(l, r, _)
-            | Ge(l, r, _)
-            | FEq(l, r, _)
-            | FNe(l, r, _)
-            | FLt(l, r, _)
-            | FLe(l, r, _)
-            | FGt(l, r, _)
-            | FGe(l, r, _)
-            | Xor(l, r, _)
-            | LAnd(l, r, _)
-            | LOr(l, r, _)
-            | Shl(l, r, _)
-            | Shr(l, r, _)
-            | StrCat(l, r, _)
-            | Index(l, r, _)
-            | DerefAssign(l, r, _) => {
-                walk(l)?;
-                walk(r)
-            }
-            IndexAssign(o, v, _) | MemberAssign(o, _, v, _) => {
-                walk(o)?;
-                walk(v)
-            }
-            ArrayLiteral(items, _) => {
-                for it in items {
-                    walk(it)?;
-                }
-                Ok(())
-            }
-            ArrayFill(_, len, _) => walk(len),
-            StructLiteral(_, _, fields, _) | UnionLiteral(_, _, fields, _) => {
-                for (_, v) in fields {
-                    walk_field_value(v)?;
-                }
-                Ok(())
-            }
-            MemberAccess(o, _, _) => walk(o),
-            VarAssign(_, v, _)
-            | AddAssign(_, v, _)
-            | SubAssign(_, v, _)
-            | MulAssign(_, v, _)
-            | DivAssign(_, v, _)
-            | ModAssign(_, v, _)
-            | AndAssign(_, v, _)
-            | OrAssign(_, v, _)
-            | XorAssign(_, v, _)
-            | ShlAssign(_, v, _)
-            | ShrAssign(_, v, _) => walk(v),
-            FString(parts, _) => {
-                for p in parts {
-                    walk(p)?;
-                }
-                Ok(())
-            }
-            _ => Ok(()),
-        }
-    }
-
-    for expr in program_body {
-        walk(expr)?;
-    }
+pub(super) fn check_lambda_params(_program_body: &[Expr]) -> Result<(), CodeGenError> {
     Ok(())
-}
-
-fn type_has_pointer(ty: &Type) -> bool {
-    match ty {
-        Type::Pointer(_) => true,
-        Type::Array(inner) => type_has_pointer(inner),
-        Type::Function(params, ret) => params.iter().any(type_has_pointer) || type_has_pointer(ret),
-        _ => false,
-    }
 }
 
 fn op_err(fn_name: &str, what: &str, _span: Span) -> CodeGenError {
@@ -260,6 +88,7 @@ fn classify(
     use Expr::*;
 
     match expr {
+        Var(name, _) if globals.contains(name) => Err(format!("read mutable global '{}'", name)),
         Int(..) | Float(..) | Bool(..) | String(..) | Nil(_) | Var(..) | Break(_) | Continue(_)
         | TypeDef(_) | Struct(..) | Union(..) | Enum(..) => Ok(()),
 
@@ -305,11 +134,17 @@ fn classify(
         }
         While(cond, body, _) => {
             classify(fn_name, cond, decls, globals, in_progress, memo, bound)?;
-            classify(fn_name, body, decls, globals, in_progress, memo, bound)
+            let saved = bound.clone();
+            let r = classify(fn_name, body, decls, globals, in_progress, memo, bound);
+            *bound = saved;
+            r
         }
         For(_, iter, body, _) => {
             classify(fn_name, iter, decls, globals, in_progress, memo, bound)?;
-            classify(fn_name, body, decls, globals, in_progress, memo, bound)
+            let saved = bound.clone();
+            let r = classify(fn_name, body, decls, globals, in_progress, memo, bound);
+            *bound = saved;
+            r
         }
         Range(l, r, _) => {
             classify(fn_name, l, decls, globals, in_progress, memo, bound)?;

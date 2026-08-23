@@ -32,7 +32,8 @@ impl IRGen {
             .iter()
             .filter(|e| {
                 matches!(e, Expr::ConstDecl(_, _, init, _, _)
-                    if !matches!(init.as_ref(), Expr::FuncDecl(..)))
+                    if !matches!(init.as_ref(), Expr::FuncDecl(..))
+                        && !matches!(init.as_ref(), Expr::Var(v, _) if v.starts_with("_lambda_")))
             })
             .cloned()
             .collect();
@@ -81,6 +82,26 @@ impl IRGen {
         })
     }
 
+    fn register_bound_fn(
+        &mut self,
+        bind_name: &str,
+        fn_decl: Option<Expr>,
+    ) -> Result<(), CodeGenError> {
+        if let Some(Expr::FuncDecl(name, attrs, type_params, params, ret_type, lam_body, _)) =
+            fn_decl
+        {
+            if type_params.is_empty() {
+                self.func_decl(name.clone(), attrs, params.clone(), ret_type.clone())?;
+                let func = self.functions.last_mut().unwrap();
+                func.aliases.push(bind_name.to_string());
+                self.func_high_returns
+                    .insert(bind_name.to_string(), ret_type);
+                self.pending_fn_bodies.push((name, params, *lam_body));
+            }
+        }
+        Ok(())
+    }
+
     fn collect_decls(&mut self, body: &[Expr]) -> Result<(), CodeGenError> {
         for expr in body {
             match expr {
@@ -106,22 +127,13 @@ impl IRGen {
                         );
                     }
                 }
-                Expr::GlobalVar(bind_name, _, _, Some(init), _)
-                | Expr::ConstDecl(bind_name, _, init, _, _)
-                    if matches!(**init, Expr::FuncDecl(..)) =>
-                {
-                    if let Expr::FuncDecl(name, attrs, type_params, params, ret_type, body, _) =
-                        (**init).clone()
-                    {
-                        if type_params.is_empty() {
-                            self.func_decl(name.clone(), attrs, params.clone(), ret_type.clone())?;
-                            let func = self.functions.last_mut().unwrap();
-                            func.aliases.push(bind_name.to_string());
-                            self.func_high_returns
-                                .insert(bind_name.to_string(), ret_type);
-                            self.pending_fn_bodies.push((name, params, *body));
-                        }
-                    }
+                Expr::GlobalVar(bind_name, _, _, init, _) => {
+                    let fn_decl = resolve_fn_init(body, init.as_deref());
+                    self.register_bound_fn(bind_name, fn_decl)?;
+                }
+                Expr::ConstDecl(bind_name, _, init, _, _) => {
+                    let fn_decl = resolve_fn_init(body, Some(init));
+                    self.register_bound_fn(bind_name, fn_decl)?;
                 }
                 Expr::ExternVar(name, ty, _) => {
                     self.extern_vars.insert(name.clone(), ty.clone());
@@ -187,5 +199,16 @@ impl IRGen {
         self.constants.push(constant.clone());
         self.constant_pool.insert(constant, index);
         index
+    }
+}
+
+fn resolve_fn_init(body: &[Expr], init: Option<&Expr>) -> Option<Expr> {
+    match init? {
+        f @ Expr::FuncDecl(..) => Some(f.clone()),
+        Expr::Var(vname, _) if vname.starts_with("_lambda_") => body
+            .iter()
+            .find(|e| matches!(e, Expr::FuncDecl(n, ..) if n == vname))
+            .cloned(),
+        _ => None,
     }
 }

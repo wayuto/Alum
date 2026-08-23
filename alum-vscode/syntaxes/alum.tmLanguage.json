@@ -301,7 +301,7 @@
                 {
                     "name": "meta.extern.function.declaration.alum",
                     "begin": "\\b(fun)\\b\\s*(\\([^)]*\\bextern\\b[^)]*\\))\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*(<[^>\\n]*>)?\\s*(\\()",
-                    "end": "(\\))\\s*(:)\\s*([A-Za-z_][A-Za-z0-9_]*(?:<[^>\\n]*>)?(?:\\[[0-9]*\\])?(?:\\s*\\([^)\\n]*\\))?)",
+                    "end": "(\\))\\s*(:)\\s*([A-Za-z_][A-Za-z0-9_]*(?:<[^>\\n]*>)?(?:\\[[0-9]*\\])?(?:\\s*\\([^)\\n]*\\))?)(?![^:\\n]*(?:,|\\())",
                     "beginCaptures": {
                         "1": {
                             "name": "keyword.declaration.function.alum"

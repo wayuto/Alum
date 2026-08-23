@@ -34,7 +34,8 @@ The official tutorial series (中文教程) walks through the language from scra
 - **Tagged `Result`/`Maybe`** — `Result<T, E>` and `Maybe<T>` built on `struct` + `union` + `enum`, enabling error handling and null-safety
 - **Functional Programming** — lambdas, higher-order functions, first-class function pointers, and block expressions that produce values
 - **Expression-Oriented Control Flow** — `if-else` and `match` are expressions; `for` iterates arrays and ranges (`n..m`); `while` loops; implicit return of the last expression
-- **Type Cast** — `V@T` syntax converts between primitive types, e.g. `1@float` produces `1.0`, `3.99@int` produces `3` (truncation); `int`↔`bool` casts are also supported (`0@bool` → `false`, `42@bool@int` → `42`)
+- **Type Cast** — `V@T` syntax converts between primitive types, e.g. `1@float` produces `1.0`, `3.99@int` produces `3` (truncation); `int`↔`bool` casts are also supported (`0@bool` → `false`, non-zero → `true`; booleans are normalized to 0/1, so `42@bool@int` yields `1`);
+        casting to `void` explicitly discards a value (`expr@void`), and casting from `void` (e.g. the result of a void function) yields the zero value of the target type (`0`, `0.0`, `false`, `""`)
 - **Function Annotations** — `fun(extern)` for FFI, `fun(pub)` to export and make importable from modules, `fun(pure)` to mark side-effect-free functions
 - **Compile-Time Evaluation (CTE)** — `pure` functions are evaluated at compile time by the built-in GosVM bytecode interpreter; supports `for` loops, `range` expressions, `for-in` array iteration, `match` expressions, `struct`/`union` literals with member access/assignment, type casts (`@float`/`@int`/`@bool`), and recursion (e.g. `fib(40)` compiles to a single constant in ~10ms)
 - **Compile-Time Native Evaluation** — `fun(extern, pure)` declarations may be folded at compile time by attaching a native shared library with `--cte-lib ./libfoo.so`. The compiler `dlopen`s the library (using `libffi` via `dlsym`) for constant folding; the `.so` is also linked into the final executable (with an rpath) so any call that could not be folded is still resolved at runtime. Emitting the warning `purity of external function '<name>' cannot be verified` on every `extern pure` declaration, since an external symbol's purity cannot be statically verified. See `examples/32_native_cte/`.
@@ -266,6 +267,12 @@ alc -r --cte-lib ./libfoo.so main.al
 Each `fun(extern, pure)` declaration emits
 `warning: purity of external function '<name>' cannot be verified` — this is
 expected, since an external symbol's side effects cannot be statically proven.
+
+> **Note on native signatures:** the compiler assumes alum `int` corresponds to
+> C `int64_t` (signed 64-bit) and alum `float` to C `double`. If your C function
+> returns `int32_t`, sign-extend or widen it to `int64_t` before using it with
+> compile-time evaluation, otherwise folded constants may contain garbage in the
+> upper bits. Boolean returns should return 0 or 1 as a full-width value.
 
 ## Project Builds with almk
 

@@ -557,6 +557,10 @@ impl<'a> Lexer<'a> {
                     buf.push('\\');
                     self.bump();
                     if let Some(c) = self.current {
+                        if c == '\n' {
+                            self.line += 1;
+                            self.col = 0;
+                        }
                         buf.push(c);
                         self.bump();
                     }
@@ -580,18 +584,30 @@ impl<'a> Lexer<'a> {
                 Some('{') => {
                     buf.push('{');
                     self.bump();
-                    depth += 1;
+
+                    if quote.is_none() {
+                        depth += 1;
+                    }
                 }
                 Some('}') => {
-                    if depth == 0 {
+                    if quote.is_none() {
+                        if depth == 0 {
+                            self.bump();
+                            break;
+                        }
+                        buf.push('}');
                         self.bump();
-                        break;
+                        depth -= 1;
+                    } else {
+                        buf.push('}');
+                        self.bump();
                     }
-                    buf.push('}');
-                    self.bump();
-                    depth -= 1;
                 }
                 Some(c) => {
+                    if c == '\n' {
+                        self.line += 1;
+                        self.col = 0;
+                    }
                     buf.push(c);
                     self.bump();
                 }

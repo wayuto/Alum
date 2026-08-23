@@ -22,11 +22,14 @@ pub struct TypeChecker {
     pub(super) return_types: Vec<Type>,
     pub(super) generic_params: Vec<HashMap<usize, Type>>,
     pub(super) errors: Vec<CheckerError>,
+
+    pub(super) expr_depth: usize,
 }
 
 impl TypeChecker {
     pub fn new() -> Self {
         Self {
+            expr_depth: 0,
             type_stack: vec![HashMap::new()],
             const_stack: vec![std::collections::HashSet::new()],
             constants: HashMap::new(),

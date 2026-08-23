@@ -10,13 +10,28 @@ use cli::{
 use std::{error::Error, process::exit};
 
 fn main() {
-    if let Err(e) = run() {
-        if let Some(ce) = e.downcast_ref::<CompilerError>() {
-            eprint!("{}", ce.diagnose());
-        } else {
-            eprintln!("Error: {}", e);
+    let handle = std::thread::Builder::new()
+        .stack_size(512 * 1024 * 1024)
+        .spawn(|| -> Result<(), String> {
+            run().map_err(|e| {
+                if let Some(ce) = e.downcast_ref::<CompilerError>() {
+                    ce.diagnose()
+                } else {
+                    format!("Error: {}", e)
+                }
+            })
+        })
+        .expect("failed to spawn compiler thread");
+    match handle.join() {
+        Ok(Ok(())) => {}
+        Ok(Err(diag)) => {
+            eprint!("{}", diag);
+            exit(1);
         }
-        exit(1);
+        Err(_) => {
+            eprintln!("internal error: compiler thread panicked");
+            exit(101);
+        }
     }
 }
 
@@ -76,7 +91,13 @@ fn run() -> Result<(), Box<dyn Error>> {
         let obj_output = if cli.compile_only {
             match cli.output.clone() {
                 Some(o) => Some(o),
-                None => Some(default_obj_path(input)),
+                None => {
+                    if cli.input.len() > 1 {
+                        Some(input.trim_end_matches(".al").replace('/', "_") + ".o")
+                    } else {
+                        Some(default_obj_path(input))
+                    }
+                }
             }
         } else {
             None
@@ -102,10 +123,17 @@ fn run() -> Result<(), Box<dyn Error>> {
     }
 
     if let Some(lib_type) = cli.library.as_deref() {
-        let output_path = cli
-            .output
-            .clone()
-            .unwrap_or_else(|| format!("lib{}.a", default_exe_path(first_input)));
+        let output_path = cli.output.clone().unwrap_or_else(|| {
+            let base = std::path::Path::new(first_input)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("a")
+                .to_string();
+            match lib_type.to_lowercase().as_str() {
+                "shared" | "so" => format!("lib{}.so", base),
+                _ => format!("lib{}.a", base),
+            }
+        });
 
         match lib_type.to_lowercase().as_str() {
             "static" | "a" => create_static_library(obj_files, &output_path, cli.verbose)?,
@@ -136,13 +164,13 @@ fn run() -> Result<(), Box<dyn Error>> {
         eprintln!("Linking {} to {}", obj_files.join(", "), exe_path);
     }
 
-    link(
+    let link_result = link(
         obj_files,
         &std_lib_path,
         &exe_path,
         cli.verbose,
         &cli.cte_lib,
-    )?;
+    );
 
     for obj_file in generated_objs {
         if cli.verbose {
@@ -151,5 +179,5 @@ fn run() -> Result<(), Box<dyn Error>> {
         let _ = std::fs::remove_file(&obj_file);
     }
 
-    Ok(())
+    link_result.map(|_| ())
 }

@@ -1,4 +1,6 @@
+import memory
 import maybe
+using memory::{free}
 using maybe::{Maybe}
 
 struct(pub) Vec<T> {
@@ -40,6 +42,9 @@ fun(pub) vec_new<T>(): Vec<T> {
 				for i in 0..v.len {
 					new_data[i] = v.data[i]
 				}
+				var old_data: T[] = v.data
+				var old_ptr: *void = old_data
+				free(old_ptr)
 				v.data = new_data
 				v.capacity = new_capacity
 			}
@@ -74,6 +79,9 @@ fun(pub) vec_new<T>(): Vec<T> {
 			}
 		},
 		clear: \(v: *Vec<T>): void {
+			
+			var ptr: *void = v.data
+			free(ptr)
 			v.len = 0
 			v.capacity = 0
 			v.data = [T; 0]

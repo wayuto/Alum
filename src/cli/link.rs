@@ -26,7 +26,7 @@ pub fn link(
             .canonicalize()
             .unwrap_or_else(|_| std::path::PathBuf::from(lib));
         if let Some(parent) = abs.parent() {
-            cmd.arg("-rpath").arg(parent.to_str().unwrap().to_string());
+            cmd.arg("-rpath").arg(parent.to_string_lossy().to_string());
         }
         cmd.arg(abs);
     }

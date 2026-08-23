@@ -20,7 +20,9 @@ fun(pub) arr_new<T>(data: T[], len: int): Array<T> {
             return v.data[i]
         },
         set_nth: \(v: *Array<T>, i: int, elem: T): void {
-            if i < 0 || i >= v.len return
+            if i < 0 || i >= v.len {
+                return
+            }
             v.data[i] = elem
         },
         next: \(v: *Array<T>): Maybe<T> {

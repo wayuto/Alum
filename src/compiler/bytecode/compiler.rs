@@ -48,6 +48,8 @@ pub struct Compiler {
     structs: HashMap<String, Vec<(String, Type)>>,
     unions: HashMap<String, Vec<(String, Type)>>,
     var_types: Vec<HashMap<String, String>>,
+
+    global_consts: HashMap<String, Value>,
 }
 
 impl Compiler {
@@ -66,7 +68,14 @@ impl Compiler {
             structs: HashMap::new(),
             unions: HashMap::new(),
             var_types: Vec::new(),
+            global_consts: HashMap::new(),
         }
+    }
+
+    pub fn with_global_consts(map: HashMap<String, Value>) -> Self {
+        let mut c = Self::new();
+        c.global_consts = map;
+        c
     }
 
     fn emit(&mut self, op: Op, args: &[u32]) -> () {
@@ -228,10 +237,15 @@ impl Compiler {
                 match slot {
                     Some(s) => self.emit(Op::LOADVAR, &[s]),
                     None => {
-                        let func = self
-                            .load_func(name)
-                            .unwrap_or_else(|| panic!("Compiler: Variable {} not found", name));
-                        self.emit(Op::MAKEFUNC, &[func.addr, func.param_count]);
+                        if let Some(value) = self.global_consts.get(name).cloned() {
+                            let idx = self.add_const(value);
+                            self.emit(Op::LOADCONST, &[idx]);
+                        } else {
+                            let func = self
+                                .load_func(name)
+                                .unwrap_or_else(|| panic!("Compiler: Variable {} not found", name));
+                            self.emit(Op::MAKEFUNC, &[func.addr, func.param_count]);
+                        }
                     }
                 }
             }
@@ -330,6 +344,12 @@ impl Compiler {
             }
             Expr::Cast(inner, target_ty, _) => {
                 self.compile_expr(inner);
+                if matches!(target_ty, Type::Primitive(Primitive::Void)) {
+                    self.emit(Op::POP, &[]);
+                    let vidx = self.add_const(Value::Void);
+                    self.emit(Op::LOADCONST, &[vidx]);
+                    return;
+                }
                 match target_ty {
                     Type::Primitive(Primitive::Float) => self.emit(Op::I2F, &[]),
                     Type::Primitive(Primitive::Int) => self.emit(Op::F2I, &[]),
@@ -393,8 +413,11 @@ impl Compiler {
                 };
                 self.compile_expr(&idx);
                 self.compile_expr(value);
-                self.emit(Op::DUP, &[]);
                 self.emit(Op::ARRAYSET, &[slot]);
+
+                self.emit(Op::LOADVAR, &[slot]);
+                self.compile_expr(&idx);
+                self.emit(Op::ARRAYGET, &[]);
             }
 
             Expr::VarDecl(name, _, value, _) => {
@@ -852,8 +875,11 @@ impl Compiler {
                 let idx_const = self.add_const(Value::Int(idx as i64));
                 self.emit(Op::LOADCONST, &[idx_const]);
                 self.compile_expr(value);
-                self.emit(Op::DUP, &[]);
                 self.emit(Op::ARRAYSET, &[slot]);
+
+                self.emit(Op::LOADVAR, &[slot]);
+                self.emit(Op::LOADCONST, &[idx_const]);
+                self.emit(Op::ARRAYGET, &[]);
             }
             Expr::Match(target, branches, default, _) => {
                 self.compile_expr(target);
@@ -964,6 +990,10 @@ impl Compiler {
         let Some((fname, faddr)) = &self.current_func else {
             return None;
         };
+
+        if self.load_var(name).is_some() {
+            return None;
+        }
         if name != fname {
             return None;
         }

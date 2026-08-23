@@ -11,7 +11,10 @@ static mut HEAP_START: *mut u8 = ptr::null_mut();
 static mut HEAP_END: *mut u8 = ptr::null_mut();
 
 fn align_up(n: usize) -> usize {
-    (n + ALIGN - 1) & !(ALIGN - 1)
+    match n.checked_add(ALIGN - 1) {
+        Some(v) => v & !(ALIGN - 1),
+        None => usize::MAX,
+    }
 }
 
 fn block_size(b: *mut u8) -> usize {
@@ -80,6 +83,29 @@ fn remove_free(b: *mut u8) {
 fn grow_heap(need: usize) -> *mut u8 {
     unsafe {
         let cur = sys::brk(0);
+
+        let mut f = FREE_LIST;
+        while !f.is_null() {
+            if f.add(block_size(f)) as usize == cur as usize {
+                remove_free(f);
+                let sz = block_size(f);
+                if need <= sz {
+                    return f;
+                }
+                let extra = need - sz;
+                let end = sys::brk(cur + extra);
+                if (end as usize) < cur as usize + extra {
+                    return ptr::null_mut();
+                }
+                HEAP_END = end as *mut u8;
+                let new_sz = sz + (end - cur);
+                set_size(f, new_sz, true);
+                set_footer(f, new_sz, true);
+                return f;
+            }
+            f = next_free(f);
+        }
+
         let end = sys::brk(cur + need);
         if end < cur + need {
             return ptr::null_mut();
@@ -97,9 +123,63 @@ fn grow_heap(need: usize) -> *mut u8 {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn memcpy(dst: *mut u8, src: *const u8, n: usize) -> *mut u8 {
+    unsafe {
+        let mut i = 0usize;
+        while i + 8 <= n {
+            (dst.add(i) as *mut u64).write_unaligned((src.add(i) as *const u64).read_unaligned());
+            i += 8;
+        }
+        while i < n {
+            dst.add(i).write(src.add(i).read());
+            i += 1;
+        }
+    }
+    dst
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn memset(dst: *mut u8, byte: i32, n: usize) -> *mut u8 {
+    unsafe {
+        let b = byte as u8;
+        let word = (b as u64) * 0x0101_0101_0101_0101u64;
+        let mut i = 0usize;
+        while i + 8 <= n {
+            (dst.add(i) as *mut u64).write_unaligned(word);
+            i += 8;
+        }
+        while i < n {
+            dst.add(i).write(b);
+            i += 1;
+        }
+    }
+    dst
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn memmove(dst: *mut u8, src: *const u8, n: usize) -> *mut u8 {
+    unsafe {
+        if dst as usize <= src as usize {
+            return memcpy(dst, src, n);
+        }
+
+        let mut i = n;
+        while i > 0 {
+            i -= 1;
+            dst.add(i).write(src.add(i).read());
+        }
+    }
+    dst
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn malloc(size: usize) -> *mut u8 {
     let size = if size == 0 { 1 } else { size };
-    let mut need = align_up(size) + HEADER_SIZE + FOOTER_SIZE;
+
+    let mut need = match align_up(size).checked_add(HEADER_SIZE + FOOTER_SIZE) {
+        Some(v) => v,
+        None => return ptr::null_mut(),
+    };
     if need < MIN_BLOCK_SIZE {
         need = MIN_BLOCK_SIZE;
     }

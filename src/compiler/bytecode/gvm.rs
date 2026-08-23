@@ -57,6 +57,10 @@ impl GVM {
             return;
         }
 
+        if self.call_stack.len() >= 1_000_000 {
+            panic!("GVM: recursion depth exceeded 1000000 frames during constant evaluation");
+        }
+
         self.call_stack.push(CallStack {
             return_ip: self.ip,
             base_slot: self.curr_base_slot,
@@ -83,6 +87,7 @@ impl GVM {
 
     pub fn run(&mut self) {
         let mut steps: u64 = 0;
+        let start = std::time::Instant::now();
         loop {
             let code = self.read();
             let op = Op::try_from(code).expect("Bytecode: unknown opcode");
@@ -92,6 +97,17 @@ impl GVM {
                     "GVM: execution step limit exceeded (ip={}, op={:?})",
                     self.ip, op
                 );
+            }
+
+            if self.stack.len() > 20_000_000 {
+                panic!(
+                    "GVM: operand stack limit exceeded ({} values)",
+                    self.stack.len()
+                );
+            }
+
+            if steps % 1_000_000 == 0 && start.elapsed() > std::time::Duration::from_secs(60) {
+                panic!("GVM: constant evaluation exceeded 60s time budget");
             }
             match op {
                 Op::LOADCONST => {
@@ -151,6 +167,9 @@ impl GVM {
                     let right = self.pop();
                     let left = self.pop();
                     self.stack.push(match (&left, &right) {
+                        (Value::Int(_), Value::Int(0)) => {
+                            panic!("DivisionError: division by zero during constant evaluation")
+                        }
                         (Value::Int(a), Value::Int(b)) => Value::Int(a.wrapping_div(*b)),
                         (Value::Float(a), Value::Float(b)) => Value::Float(a / b),
                         (Value::Void, _) | (_, Value::Void) => Value::Void,
@@ -161,6 +180,9 @@ impl GVM {
                     let right = self.pop();
                     let left = self.pop();
                     self.stack.push(match (&left, &right) {
+                        (Value::Int(_), Value::Int(0)) => {
+                            panic!("DivisionError: modulo by zero during constant evaluation")
+                        }
                         (Value::Int(a), Value::Int(b)) => Value::Int(a.wrapping_rem(*b)),
                         (Value::Float(a), Value::Float(b)) => Value::Float(a % b),
                         (Value::Void, _) | (_, Value::Void) => Value::Void,
@@ -468,7 +490,6 @@ impl GVM {
                             self.stack.truncate(operand_base);
                             self.enter_frame(target as usize, args, operand_base);
                         }
-                        Value::Void => {}
                         _ => panic!("TypeError: value is not callable (CALL_VALUE operation)"),
                     }
                 }
@@ -540,9 +561,8 @@ impl GVM {
                     self.curr_base_slot = frame.base_slot;
                     self.stack.truncate(frame.operand_base);
                     self.curr_operand_base = frame.operand_base;
-                    if !matches!(val, Value::Void) || self.stack.is_empty() {
-                        self.stack.push(val);
-                    }
+
+                    self.stack.push(val);
                 }
                 Op::NEWARRAY => {
                     let n = self.read_u32() as usize;
@@ -574,11 +594,11 @@ impl GVM {
                         }
                         (Value::Str(s), Value::Int(i)) => {
                             if *i < 0 || *i as usize >= s.len() {
-                                self.stack.push(Value::Int(0));
-                            } else {
-                                self.stack
-                                    .push(Value::Int(s.as_bytes()[*i as usize] as i64));
+                                panic!("IndexError: String index out of bounds: {i}");
                             }
+                            let byte = s.as_bytes()[*i as usize];
+                            self.stack
+                                .push(Value::Str(String::from_utf8_lossy(&[byte]).into_owned()));
                         }
                         (Value::Void, _) | (_, Value::Void) => self.stack.push(Value::Void),
                         _ => panic!("TypeError: Wrong types for ARRAY_GET operation"),

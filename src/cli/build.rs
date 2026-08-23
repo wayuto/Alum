@@ -82,7 +82,7 @@ pub fn build(
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("output");
-        format!("/tmp/{}.o", stem)
+        format!("/tmp/{}.{}.o", stem, tmp_tag())
     };
 
     if verbose {
@@ -111,6 +111,7 @@ pub fn exec_run(
         cte_libs.clone(),
     )?;
 
+    let user_specified_output = output.is_some();
     let exe_file = output.unwrap_or_else(|| default_exe_path(&input));
     let exe_path = std::path::Path::new(&exe_file);
 
@@ -119,7 +120,7 @@ pub fn exec_run(
     super::link::link(
         vec![obj_file.clone()],
         std_lib_path,
-        exe_path.to_str().unwrap(),
+        exe_path.to_string_lossy().as_ref(),
         verbose,
         &cte_libs,
     )?;
@@ -136,13 +137,37 @@ pub fn exec_run(
     let status = std::process::Command::new(&run_path).status()?;
 
     let _ = std::fs::remove_file(&obj_file);
-    let _ = std::fs::remove_file(exe_path);
+    if !user_specified_output {
+        let _ = std::fs::remove_file(exe_path);
+    }
 
     if !status.success() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            if let Some(sig) = status.signal() {
+                eprintln!("program terminated by signal {}", sig);
+                std::process::exit(128 + sig);
+            }
+        }
         std::process::exit(status.code().unwrap_or(1));
     }
 
     Ok(())
+}
+
+fn tmp_tag() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0) as u64;
+    let pid = std::process::id() as u64;
+    let mut h = pid ^ 0x9e37_79b9_7f4a_7c15;
+    h ^= h << 13;
+    h ^= nanos.wrapping_mul(0xff51_afd7_ed55_8ccd);
+    h ^= h >> 7;
+    format!("{:016x}", h)
 }
 
 fn default_exe_path(input: &str) -> String {

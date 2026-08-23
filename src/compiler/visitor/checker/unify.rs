@@ -71,9 +71,15 @@ impl TypeChecker {
         match (&t1, &t2) {
             (Type::Primitive(Primitive::Void), Type::Primitive(Primitive::Void)) => Ok(()),
             (Type::Pointer(_), Type::Primitive(Primitive::Void)) => Ok(()),
-            (Type::TypeVar(_), Type::Primitive(Primitive::Void)) => Ok(()),
-            (Type::Param(_), Type::Primitive(Primitive::Void)) => Ok(()),
-            (Type::Primitive(Primitive::Void), Type::TypeVar(_)) => Ok(()),
+
+            (Type::TypeVar(id), Type::Primitive(Primitive::Void)) => {
+                self.bind_type_var(*id, &t2);
+                Ok(())
+            }
+            (Type::Primitive(Primitive::Void), Type::TypeVar(id)) => {
+                self.bind_type_var(*id, &t1);
+                Ok(())
+            }
             (Type::TypeVar(id), _) => {
                 self.bind_type_var(*id, &t2);
                 Ok(())

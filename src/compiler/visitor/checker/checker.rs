@@ -548,10 +548,22 @@ impl TypeChecker {
             | Expr::FGe(l, r, _)
             | Expr::LAnd(l, r, _)
             | Expr::LOr(l, r, _)
+            | Expr::Shl(l, r, _)
+            | Expr::Shr(l, r, _)
             | Expr::StrCat(l, r, _) => {
                 self.resolve_call_type_args(l);
                 self.resolve_call_type_args(r);
             }
+            Expr::BNot(e, _) => self.resolve_call_type_args(e),
+            Expr::Inc(_, _) | Expr::Dec(_, _) => {}
+            Expr::MulAssign(_, v, _)
+            | Expr::DivAssign(_, v, _)
+            | Expr::ModAssign(_, v, _)
+            | Expr::AndAssign(_, v, _)
+            | Expr::OrAssign(_, v, _)
+            | Expr::XorAssign(_, v, _)
+            | Expr::ShlAssign(_, v, _)
+            | Expr::ShrAssign(_, v, _) => self.resolve_call_type_args(v),
             Expr::Not(e, _) | Expr::Neg(e, _) | Expr::FNeg(e, _) => self.resolve_call_type_args(e),
             Expr::FString(parts, _) => {
                 for p in parts {
@@ -559,131 +571,6 @@ impl TypeChecker {
                 }
             }
             _ => {}
-        }
-    }
-
-    pub(super) fn get_expr_type(&self, expr: &Expr) -> Type {
-        match expr {
-            Expr::Int(_, _) => Type::Primitive(Primitive::Int),
-            Expr::Float(_, _) => Type::Primitive(Primitive::Float),
-            Expr::Bool(_, _) => Type::Primitive(Primitive::Boolean),
-            Expr::String(_, _) => Type::Primitive(Primitive::String),
-            Expr::Nil(_) => Type::Primitive(Primitive::Void),
-            Expr::Var(name, _) => self
-                .lookup_var(name)
-                .or_else(|| self.constants.get(name).cloned())
-                .or_else(|| self.extern_vars.get(name).cloned())
-                .or_else(|| self.globals.get(name).cloned())
-                .map(|t| self.resolve_type(&t))
-                .unwrap_or(Type::Primitive(Primitive::Int)),
-            Expr::ConstDecl(_, ty, _, _, _) => ty.clone(),
-            Expr::GlobalVar(_, _, ty, _, _) => ty.clone(),
-            Expr::ExternVar(_, ty, _) => ty.clone(),
-            Expr::FAdd(_, _, _)
-            | Expr::FSub(_, _, _)
-            | Expr::FMul(_, _, _)
-            | Expr::FDiv(_, _, _) => Type::Primitive(Primitive::Float),
-            Expr::Add(_, _, _)
-            | Expr::Sub(_, _, _)
-            | Expr::Mul(_, _, _)
-            | Expr::Div(_, _, _)
-            | Expr::Mod(_, _, _)
-            | Expr::Neg(_, _)
-            | Expr::Xor(_, _, _)
-            | Expr::Inc(_, _)
-            | Expr::Dec(_, _)
-            | Expr::AddAssign(_, _, _)
-            | Expr::SubAssign(_, _, _) => Type::Primitive(Primitive::Int),
-            Expr::FNeg(_, _) => Type::Primitive(Primitive::Float),
-            Expr::FEq(_, _, _)
-            | Expr::FNe(_, _, _)
-            | Expr::FLt(_, _, _)
-            | Expr::FLe(_, _, _)
-            | Expr::FGt(_, _, _)
-            | Expr::FGe(_, _, _) => Type::Primitive(Primitive::Boolean),
-            Expr::Eq(_, _, _)
-            | Expr::Ne(_, _, _)
-            | Expr::Lt(_, _, _)
-            | Expr::Le(_, _, _)
-            | Expr::Gt(_, _, _)
-            | Expr::Ge(_, _, _) => Type::Primitive(Primitive::Boolean),
-            Expr::LAnd(_, _, _) | Expr::LOr(_, _, _) | Expr::Not(_, _) => {
-                Type::Primitive(Primitive::Boolean)
-            }
-            Expr::StrCat(_, _, _) => Type::Primitive(Primitive::String),
-            Expr::FString(_, _) => Type::Primitive(Primitive::String),
-            Expr::Call(callee, _, _, _) => {
-                if let Expr::Var(name, _) = callee.as_ref() {
-                    if let Some((_, _, ret_type)) = self.functions.get(name) {
-                        return ret_type.clone();
-                    }
-                }
-                Type::Primitive(Primitive::Int)
-            }
-            Expr::Index(_, _, _) => Type::Primitive(Primitive::Int),
-            Expr::MemberAccess(obj, field_name, _) => {
-                if let Expr::Var(name, _) = obj.as_ref() {
-                    if let Some(members) = self.enums.get(name) {
-                        for (member_name, _) in members {
-                            if member_name == field_name {
-                                return Type::Primitive(Primitive::Int);
-                            }
-                        }
-                        return Type::Primitive(Primitive::Int);
-                    }
-                }
-                let obj_type = self.resolve_type(&self.get_expr_type(obj));
-                let inner_type = match obj_type {
-                    Type::Pointer(inner) => *inner,
-                    Type::Struct(_, _) | Type::Union(_, _) => obj_type,
-                    _ => return Type::Primitive(Primitive::Int),
-                };
-                match inner_type {
-                    Type::Struct(struct_name, args) => {
-                        if let Some((_, fields)) = self.structs.get(&struct_name) {
-                            for (name, ty) in fields {
-                                if name == field_name {
-                                    return self.resolve_type(&ty.substitute(&args));
-                                }
-                            }
-                        }
-                    }
-                    Type::Union(union_name, args) => {
-                        if let Some((_, fields)) = self.unions.get(&union_name) {
-                            for (name, ty) in fields {
-                                if name == field_name {
-                                    return self.resolve_type(&ty.substitute(&args));
-                                }
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-                Type::Primitive(Primitive::Int)
-            }
-            Expr::StructLiteral(name, type_args, _, _) => {
-                Type::Struct(name.clone(), type_args.clone())
-            }
-            Expr::UnionLiteral(name, type_args, _, _) => {
-                Type::Union(name.clone(), type_args.clone())
-            }
-            Expr::ArrayLiteral(_, _) | Expr::ArrayFill(_, _, _) => {
-                Type::Array(Box::new(Type::Primitive(Primitive::Int)))
-            }
-            Expr::AddressOf(expr, _) => {
-                let inner_type = self.get_expr_type(expr);
-                Type::Pointer(Box::new(inner_type))
-            }
-            Expr::Deref(expr, _) => {
-                let ptr_type = self.get_expr_type(expr);
-                match ptr_type {
-                    Type::Pointer(inner) => *inner,
-                    _ => Type::Primitive(Primitive::Int),
-                }
-            }
-            Expr::DerefAssign(_, _, _) => Type::Primitive(Primitive::Void),
-            Expr::Cast(_, ty, _) => ty.clone(),
-            _ => Type::Primitive(Primitive::Int),
         }
     }
 

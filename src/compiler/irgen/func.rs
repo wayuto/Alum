@@ -87,6 +87,10 @@ impl IRGen {
         let last_is_return = matches!(last_inst_op, Some(Op::Return(_)));
 
         if !last_is_return {
+            let last_is_void = matches!(
+                ctx.get_operand_type(&last_op, &self.constants),
+                Ok(IRType::Void)
+            );
             let reg = if func.ret_type == IRType::Float {
                 "xmm0".to_string()
             } else {
@@ -95,7 +99,7 @@ impl IRGen {
             ctx.instructions.push(Instruction {
                 op: Op::Return(reg),
                 dst: None,
-                src1: Some(last_op),
+                src1: if last_is_void { None } else { Some(last_op) },
                 src2: None,
             });
         }
@@ -144,7 +148,7 @@ impl IRGen {
         type_args: &[Type],
     ) -> Result<String, CodeGenError> {
         let mangled = format!(
-            "{}_{}",
+            "__mono_{}_{}",
             name,
             type_args
                 .iter()
@@ -155,6 +159,15 @@ impl IRGen {
 
         if self.find_func(&mangled).is_ok() {
             return Ok(mangled);
+        }
+
+        if self.functions.len() > 20_000 {
+            return Err(CodeGenError::TypeError {
+                message: format!(
+                    "too many generic instantiations (>20000); possible recursive generic '{}' with type args {:?}",
+                    name, type_args
+                ),
+            });
         }
 
         let (type_params, params, ret_type, body) = self
@@ -362,6 +375,28 @@ pub(super) fn substitute_expr(expr: Expr, args: &[Type]) -> Expr {
         AddressOf(e, span) => AddressOf(sub_box(e), span),
         Deref(e, span) => Deref(sub_box(e), span),
         DerefAssign(ptr, value, span) => DerefAssign(sub_box(ptr), sub_box(value), span),
+
+        Match(target, branches, default, span) => Match(
+            sub_box(target),
+            branches
+                .into_iter()
+                .map(|(c, v)| (sub_val(c), sub_val(v)))
+                .collect(),
+            default.map(sub_box),
+            span,
+        ),
+        Cast(inner, ty, span) => Cast(sub_box(inner), ty.substitute(args), span),
+        FString(parts, span) => FString(parts.into_iter().map(sub_val).collect(), span),
+        Inc(name, span) => Inc(name, span),
+        Dec(name, span) => Dec(name, span),
+        MulAssign(name, value, span) => MulAssign(name, sub_box(value), span),
+        DivAssign(name, value, span) => DivAssign(name, sub_box(value), span),
+        ModAssign(name, value, span) => ModAssign(name, sub_box(value), span),
+        AndAssign(name, value, span) => AndAssign(name, sub_box(value), span),
+        OrAssign(name, value, span) => OrAssign(name, sub_box(value), span),
+        XorAssign(name, value, span) => XorAssign(name, sub_box(value), span),
+        ShlAssign(name, value, span) => ShlAssign(name, sub_box(value), span),
+        ShrAssign(name, value, span) => ShrAssign(name, sub_box(value), span),
         other => other,
     }
 }

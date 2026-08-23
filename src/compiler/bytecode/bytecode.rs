@@ -1,6 +1,6 @@
 use std::hash::{Hash, Hasher};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Value {
     Int(i64),
     Float(f64),
@@ -9,6 +9,21 @@ pub enum Value {
     Array(Vec<Value>),
     Fn(u32, u32),
     Void,
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Value::Float(a), Value::Float(b)) => a.to_bits() == b.to_bits(),
+            (Value::Int(a), Value::Int(b)) => a == b,
+            (Value::Bool(a), Value::Bool(b)) => a == b,
+            (Value::Str(a), Value::Str(b)) => a == b,
+            (Value::Array(a), Value::Array(b)) => a == b,
+            (Value::Fn(a1, a2), Value::Fn(b1, b2)) => a1 == b1 && a2 == b2,
+            (Value::Void, Value::Void) => true,
+            _ => false,
+        }
+    }
 }
 
 impl Eq for Value {}

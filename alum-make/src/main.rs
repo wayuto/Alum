@@ -68,6 +68,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             let toml_string = std::fs::read_to_string(&"./Alumake.toml")?;
             let config: config::Config = toml::from_str(&toml_string)?;
+
+            if let Some(lib_type) = &config.build.library_type {
+                if lib_type != "none" && lib_type != "executable" {
+                    eprintln!("this is a library project; nothing to run");
+                    std::process::exit(1);
+                }
+            }
             let name = config.package.name;
             let status = std::process::Command::new(format!("./target/{}", name)).status()?;
             if !status.success() {

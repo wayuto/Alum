@@ -25,32 +25,52 @@ fn get_files(root: &str, target: Target) -> Vec<PathBuf> {
         .collect()
 }
 
+fn matches_glob_segment(pattern: &str, name: &str) -> bool {
+    let parts: Vec<&str> = pattern.split('*').collect();
+    let mut rest = name;
+    if let Some(first) = parts.first() {
+        if !first.is_empty() {
+            if !rest.starts_with(first) {
+                return false;
+            }
+            rest = &rest[first.len()..];
+        }
+    }
+    if parts.len() > 1 {
+        let last = parts[parts.len() - 1];
+        if !last.is_empty() {
+            if !rest.ends_with(last) {
+                return false;
+            }
+            rest = &rest[..rest.len() - last.len()];
+        }
+        for seg in &parts[1..parts.len() - 1] {
+            if seg.is_empty() {
+                continue;
+            }
+            match rest.find(seg) {
+                Some(i) => rest = &rest[i + seg.len()..],
+                None => return false,
+            }
+        }
+    }
+    true
+}
+
 fn matches_pattern(rel: &str, pattern: &str) -> bool {
     if !pattern.contains('*') {
         return rel == pattern;
     }
-    let segs: Vec<&str> = pattern.split('*').collect();
-    let (first, last) = (segs[0], segs[segs.len() - 1]);
-    let mut rest = rel;
-    if !rest.starts_with(first) {
+
+    let psegs: Vec<&str> = pattern.split('/').collect();
+    let nsegs: Vec<&str> = rel.split('/').collect();
+    if psegs.len() != nsegs.len() {
         return false;
     }
-    rest = &rest[first.len()..];
-    if !rest.ends_with(last) {
-        return false;
-    }
-    let mid = &rest[..rest.len() - last.len()];
-    let mut pos = 0;
-    for seg in &segs[1..segs.len() - 1] {
-        if seg.is_empty() {
-            continue;
-        }
-        match mid[pos..].find(seg) {
-            Some(i) => pos += i + seg.len(),
-            None => return false,
-        }
-    }
-    true
+    psegs
+        .iter()
+        .zip(nsegs.iter())
+        .all(|(p, n)| matches_glob_segment(p, n))
 }
 
 fn glob_sources(patterns: &[String]) -> Result<Vec<PathBuf>, Box<dyn Error>> {
@@ -84,8 +104,13 @@ fn glob_sources(patterns: &[String]) -> Result<Vec<PathBuf>, Box<dyn Error>> {
             }
         } else {
             let p = PathBuf::from(pat);
-            if metadata(&p).is_ok() {
+            if p.is_file() {
                 found.push(p);
+            } else {
+                eprintln!(
+                    "warning: native source '{}' is not a regular file (directory or missing), skipping",
+                    pat
+                );
             }
         }
         if found.is_empty() {
@@ -140,16 +165,7 @@ fn compile_c(
     }
     for file in source_files {
         let rel = file.strip_prefix("./").unwrap_or(file.as_path());
-        let output = if rel.starts_with("src") {
-            PathBuf::from("target/objects")
-                .join(rel.strip_prefix("src").unwrap().with_extension("o"))
-        } else if rel.starts_with("include") {
-            PathBuf::from("target/objects").join(rel.with_extension("o"))
-        } else {
-            PathBuf::from("target/objects")
-                .join(file.file_name().unwrap())
-                .with_extension("o")
-        };
+        let output = PathBuf::from("target/objects/c").join(rel.with_extension("o"));
         fs::create_dir_all(output.parent().unwrap())?;
         let mut args = extra_args.clone();
         args.push(file.to_string_lossy().into_owned());
@@ -187,8 +203,8 @@ fn compile_alum(
     }
 
     for file in source_files {
-        let output = PathBuf::from("target/objects")
-            .join(file.strip_prefix("./src").unwrap().with_extension("o"));
+        let rel = file.strip_prefix("./").unwrap_or(file.as_path());
+        let output = PathBuf::from("target/objects/alum").join(rel.with_extension("o"));
         fs::create_dir_all(output.parent().unwrap())?;
 
         let mut args = extra_args.clone();
@@ -333,6 +349,16 @@ pub fn build(log: bool) -> Result<(), Box<dyn Error>> {
         }
     });
 
+    if native_artifact
+        .as_ref()
+        .and_then(|p| p.extension().and_then(|e| e.to_str()))
+        == Some("a")
+    {
+        eprintln!(
+            "warning: native.shared = false: compile-time evaluation of native functions is unavailable with a static library"
+        );
+    }
+
     if let Some(ref cc) = config.build.cc {
         compile_c(
             log,
@@ -404,7 +430,10 @@ pub fn build(log: bool) -> Result<(), Box<dyn Error>> {
             _ => {
                 let mut args: Vec<String> = Vec::new();
 
-                if config.build.linker.contains("cc") || config.build.linker.contains("gcc") {
+                if config.build.linker.contains("cc")
+                    || config.build.linker.contains("gcc")
+                    || config.build.linker.contains("clang")
+                {
                     args.push("-nostartfiles".to_owned());
                 }
 
@@ -425,16 +454,20 @@ pub fn build(log: bool) -> Result<(), Box<dyn Error>> {
                 if let Some(ref artifact) = native_artifact {
                     let abs = artifact.canonicalize().unwrap_or_else(|_| artifact.clone());
 
-                    if is_alc_linker {
+                    let is_shared = artifact.extension().and_then(|e| e.to_str()) == Some("so");
+
+                    if is_alc_linker && is_shared {
                         args.push("--cte-lib".to_owned());
                         args.push(abs.to_string_lossy().into_owned());
                     } else {
-                        if let Some(loader) = native_ld_loader() {
-                            args.push("-dynamic-linker".to_owned());
-                            args.push(loader.to_owned());
-                        }
-                        if let Some(parent) = abs.parent() {
-                            args.push(format!("-Wl,-rpath,{}", parent.to_string_lossy()));
+                        if !is_alc_linker && is_shared {
+                            if let Some(loader) = native_ld_loader() {
+                                args.push("-dynamic-linker".to_owned());
+                                args.push(loader.to_owned());
+                            }
+                            if let Some(parent) = abs.parent() {
+                                args.push(format!("-Wl,-rpath,{}", parent.to_string_lossy()));
+                            }
                         }
                         args.push(abs.to_string_lossy().into_owned());
                     }

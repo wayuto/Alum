@@ -1,10 +1,15 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Mutex;
 
 use alc::compiler::{
-    Span, lexer::Lexer, modules::DeclKind, parser::Parser, preprocessor::Preprocessor,
-    visitor::TypeChecker,
+    codegen::CodeGen,
+    lexer::Lexer,
+    modules::DeclKind,
+    parser::Parser,
+    preprocessor::Preprocessor,
+    span::Span,
+    visitor::{TypeChecker, optimizer::Optimizer},
 };
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
@@ -13,6 +18,10 @@ use tower_lsp::{Client, LanguageServer, LspService, Server};
 struct Backend {
     client: Client,
     docs: Mutex<HashMap<Url, String>>,
+
+    versions: Mutex<HashMap<Url, i32>>,
+
+    published: Mutex<HashSet<Url>>,
 }
 
 #[tower_lsp::async_trait]
@@ -109,14 +118,19 @@ impl LanguageServer for Backend {
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri;
         let text = params.text_document.text;
+        let version = params.text_document.version;
         lock_docs(&self.docs).insert(uri.clone(), text);
+        lock_versions(&self.versions).insert(uri.clone(), version);
         self.publish_diagnostics(&uri).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri;
         if let Some(change) = params.content_changes.last() {
-            lock_docs(&self.docs).insert(uri.clone(), change.text.clone());
+            let text = change.text.clone();
+            let version = params.text_document.version;
+            lock_docs(&self.docs).insert(uri.clone(), text);
+            lock_versions(&self.versions).insert(uri.clone(), version);
         }
         self.publish_diagnostics(&uri).await;
     }
@@ -125,13 +139,22 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri;
         self.publish_diagnostics(&uri).await;
     }
+
+    async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        let uri = params.text_document.uri;
+        lock_docs(&self.docs).remove(&uri);
+        lock_versions(&self.versions).remove(&uri);
+        lock_published(&self.published).remove(&uri);
+        self.client.publish_diagnostics(uri, Vec::new(), None).await;
+    }
 }
 
 impl Backend {
     async fn publish_diagnostics(&self, uri: &Url) {
-        let source = {
+        let (source, version_before) = {
             let docs = lock_docs(&self.docs);
-            docs.get(uri).cloned()
+            let versions = lock_versions(&self.versions);
+            (docs.get(uri).cloned(), versions.get(uri).copied())
         };
         let Some(source) = source else {
             return;
@@ -145,11 +168,22 @@ impl Backend {
         let mut by_file: HashMap<String, Vec<Diagnostic>> = HashMap::new();
         analyze(&source, &base_path, &mut by_file);
 
+        if let Some(before) = version_before {
+            if lock_versions(&self.versions).get(uri).copied() != Some(before) {
+                return;
+            }
+        }
+
         let mut published_current = false;
+
+        let mut current_files: HashSet<Url> = HashSet::new();
         for (file, diagnostics) in by_file {
             if let Ok(file_url) = Url::from_file_path(&file) {
                 if &file_url == uri {
                     published_current = true;
+                }
+                if !diagnostics.is_empty() {
+                    current_files.insert(file_url.clone());
                 }
                 self.client
                     .publish_diagnostics(file_url, diagnostics, None)
@@ -162,6 +196,29 @@ impl Backend {
                 .publish_diagnostics(uri.clone(), Vec::new(), None)
                 .await;
         }
+
+        current_files.insert(uri.clone());
+
+        let stale: Vec<Url> = {
+            let mut published = lock_published(&self.published);
+            let stale: Vec<Url> = published
+                .iter()
+                .filter(|u| !current_files.contains(*u))
+                .cloned()
+                .collect();
+            for u in &stale {
+                published.remove(u);
+            }
+            for u in &current_files {
+                published.insert(u.clone());
+            }
+            stale
+        };
+        for file_url in stale {
+            self.client
+                .publish_diagnostics(file_url, Vec::new(), None)
+                .await;
+        }
     }
 }
 
@@ -171,13 +228,39 @@ fn lock_docs(
     docs.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+fn lock_versions(
+    versions: &Mutex<HashMap<Url, i32>>,
+) -> std::sync::MutexGuard<'_, HashMap<Url, i32>> {
+    versions
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn lock_published(published: &Mutex<HashSet<Url>>) -> std::sync::MutexGuard<'_, HashSet<Url>> {
+    published
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 fn analyze(source: &str, base_path: &str, out: &mut HashMap<String, Vec<Diagnostic>>) {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         analyze_inner(source, base_path)
     }));
-    if let Ok(by_file) = result {
-        for (file, diags) in by_file {
-            out.entry(file).or_default().extend(diags);
+    match result {
+        Ok(by_file) => {
+            for (file, diags) in by_file {
+                out.entry(file).or_default().extend(diags);
+            }
+        }
+        Err(_) => {
+            push_diag(
+                source,
+                None,
+                base_path,
+                Span::new(1, 1),
+                String::from("internal error: analysis panicked on this document"),
+                out,
+            );
         }
     }
 }
@@ -216,13 +299,31 @@ fn analyze_inner(source: &str, base_path: &str) -> HashMap<String, Vec<Diagnosti
 
     let checker = TypeChecker::new();
     let check_errors = checker.check_collect(&mut ast);
-    for e in check_errors {
+    if !check_errors.is_empty() {
+        for e in check_errors {
+            push_diag(
+                source,
+                Some(&source_map),
+                base_path,
+                e.span(),
+                e.to_string(),
+                &mut out,
+            );
+        }
+        return out;
+    }
+
+    let optimizer = Optimizer::new();
+    optimizer.optimize(&mut ast);
+
+    let codegen = CodeGen::new(ast, Vec::new());
+    if let Err(e) = codegen.generate() {
         push_diag(
             source,
             Some(&source_map),
             base_path,
             e.span(),
-            e.to_string(),
+            format!("Code generation error: {}", e),
             &mut out,
         );
     }
@@ -413,6 +514,8 @@ async fn main() {
     let (service, socket) = LspService::new(|client| Backend {
         client,
         docs: Mutex::new(HashMap::new()),
+        versions: Mutex::new(HashMap::new()),
+        published: Mutex::new(HashSet::new()),
     });
 
     Server::new(stdin, stdout, socket).serve(service).await;

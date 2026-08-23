@@ -106,6 +106,8 @@ pub enum Op {
     Free,
     StoreAt,
     LoadAt,
+    FStoreAt,
+    FLoadAt,
     StrCat,
     StrByte,
     Lea,

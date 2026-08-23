@@ -499,19 +499,15 @@ impl IRGen {
                 }
             };
             let rhs = self.compile_expr(value, ctx)?;
-            let rhs = match ctx.get_operand_type(&rhs, &self.constants)? {
-                IRType::Float => rhs,
-                _ => {
-                    let cvt_tmp = ctx.new_tmp(IRType::Float);
-                    ctx.instructions.push(Instruction {
-                        op: Op::IntToFloat,
-                        dst: Some(cvt_tmp.clone()),
-                        src1: Some(rhs),
-                        src2: None,
-                    });
-                    cvt_tmp
-                }
-            };
+
+            if ctx.get_operand_type(&rhs, &self.constants)? != IRType::Float {
+                return Err(CodeGenError::TypeError {
+                    message: String::from(
+                        "float compound assignment requires a float right-hand side (use '@float')",
+                    ),
+                });
+            }
+            let rhs = rhs;
             let var_tmp = ctx.new_tmp(IRType::Float);
             ctx.instructions.push(Instruction {
                 op: if is_extern { Op::FGlobLoad } else { Op::FLoad },
@@ -962,6 +958,23 @@ impl IRGen {
         expr: Expr,
         ctx: &mut Context,
     ) -> Result<Operand, CodeGenError> {
+        const MAX_EXPR_DEPTH: usize = 1000;
+        if self.expr_depth > MAX_EXPR_DEPTH {
+            return Err(CodeGenError::TypeError {
+                message: format!("expression nesting exceeds {} levels", MAX_EXPR_DEPTH),
+            });
+        }
+        self.expr_depth += 1;
+        let result = self.compile_expr_inner(expr, ctx);
+        self.expr_depth -= 1;
+        result
+    }
+
+    fn compile_expr_inner(
+        &mut self,
+        expr: Expr,
+        ctx: &mut Context,
+    ) -> Result<Operand, CodeGenError> {
         match expr {
             Expr::Int(n, _) => {
                 let ir_type = IRType::Int;
@@ -1138,9 +1151,17 @@ impl IRGen {
 
                 if ctx.get_var_type(&name).is_err() {
                     if let Some(store_op) = self.extern_store_op(&name) {
-                        let is_float = matches!(store_op, Op::FGlobStore);
-                        let var_typ = if is_float { IRType::Float } else { IRType::Int };
-                        if typ != var_typ && typ != IRType::Array {
+                        let var_typ = self.glob_ir_type(&name).unwrap_or({
+                            if matches!(store_op, Op::FGlobStore) {
+                                IRType::Float
+                            } else {
+                                IRType::Int
+                            }
+                        });
+                        let typ_ok = typ == var_typ
+                            || typ == IRType::Array
+                            || (var_typ == IRType::Int && typ == IRType::Bool);
+                        if !typ_ok {
                             return Err(CodeGenError::TypeError {
                                 message: format!("unexpected type: {:?}", typ),
                             });
@@ -1163,13 +1184,25 @@ impl IRGen {
                     });
                 }
                 if matches!(var_typ, IRType::Array) {
+                    let mut new_len: Option<usize> = None;
                     if let Some(len) = self.const_array_len(&value, ctx) {
-                        ctx.array_lengths.insert(name.clone(), len);
+                        new_len = Some(len);
                     } else if let Operand::ConstIdx(idx) = &value {
                         if let IRConst::Array(elems) = &self.constants[*idx] {
-                            ctx.array_lengths.insert(name.clone(), elems.len());
+                            new_len = Some(elems.len());
                         }
                     }
+                    match new_len {
+                        Some(len) => {
+                            ctx.array_lengths.insert(name.clone(), len);
+                        }
+
+                        None => {
+                            ctx.array_lengths.remove(&name);
+                        }
+                    }
+                } else {
+                    ctx.array_lengths.remove(&name);
                 }
                 if let Some(hty) = ctx.var_types.get(&name) {
                     if self.is_resource_type(hty) {
@@ -1387,6 +1420,78 @@ impl IRGen {
                 Ok(res_tmp)
             }
 
+            Expr::LAnd(_, _, _) | Expr::LOr(_, _, _) => {
+                let (op, l, r) = IRGen::get_binop_parts(expr)?;
+                let is_and = matches!(op, Op::LAnd);
+                let res_tmp = ctx.new_tmp(IRType::Bool);
+
+                let left = self.compile_expr(*l, ctx)?;
+                ctx.instructions.push(Instruction {
+                    op: Op::Move,
+                    dst: Some(res_tmp.clone()),
+                    src1: Some(left),
+                    src2: None,
+                });
+
+                if is_and {
+                    let label_end = ctx.new_label("land_end");
+                    ctx.instructions.push(Instruction {
+                        op: Op::JumpIfFalse,
+                        dst: None,
+                        src1: Some(res_tmp.clone()),
+                        src2: Some(Operand::Label(label_end.clone())),
+                    });
+                    let right = self.compile_expr(*r, ctx)?;
+                    ctx.instructions.push(Instruction {
+                        op: Op::Move,
+                        dst: Some(res_tmp.clone()),
+                        src1: Some(right),
+                        src2: None,
+                    });
+                    ctx.instructions.push(Instruction {
+                        op: Op::Label(label_end),
+                        dst: None,
+                        src1: None,
+                        src2: None,
+                    });
+                } else {
+                    let label_rhs = ctx.new_label("lor_rhs");
+                    let label_end = ctx.new_label("lor_end");
+                    ctx.instructions.push(Instruction {
+                        op: Op::JumpIfFalse,
+                        dst: None,
+                        src1: Some(res_tmp.clone()),
+                        src2: Some(Operand::Label(label_rhs.clone())),
+                    });
+                    ctx.instructions.push(Instruction {
+                        op: Op::Jump,
+                        dst: None,
+                        src1: Some(Operand::Label(label_end.clone())),
+                        src2: None,
+                    });
+                    ctx.instructions.push(Instruction {
+                        op: Op::Label(label_rhs),
+                        dst: None,
+                        src1: None,
+                        src2: None,
+                    });
+                    let right = self.compile_expr(*r, ctx)?;
+                    ctx.instructions.push(Instruction {
+                        op: Op::Move,
+                        dst: Some(res_tmp.clone()),
+                        src1: Some(right),
+                        src2: None,
+                    });
+                    ctx.instructions.push(Instruction {
+                        op: Op::Label(label_end),
+                        dst: None,
+                        src1: None,
+                        src2: None,
+                    });
+                }
+                Ok(res_tmp)
+            }
+
             Expr::Mul(_, _, _)
             | Expr::Div(_, _, _)
             | Expr::Mod(_, _, _)
@@ -1407,8 +1512,6 @@ impl IRGen {
             | Expr::FGt(_, _, _)
             | Expr::FGe(_, _, _)
             | Expr::Xor(_, _, _)
-            | Expr::LAnd(_, _, _)
-            | Expr::LOr(_, _, _)
             | Expr::Shl(_, _, _)
             | Expr::Shr(_, _, _)
             | Expr::StrCat(_, _, _) => {
@@ -1773,10 +1876,16 @@ impl IRGen {
                     });
                     addr_tmp
                 };
-                let res_tmp = ctx.new_tmp(field_ir_type);
+                let res_tmp = ctx.new_tmp(field_ir_type.clone());
                 let zero_idx = self.get_const_index(IRConst::Int(0));
+
+                let load_op = if field_ir_type == IRType::Float {
+                    Op::FLoadAt
+                } else {
+                    Op::LoadAt
+                };
                 ctx.instructions.push(Instruction {
-                    op: Op::LoadAt,
+                    op: load_op,
                     dst: Some(res_tmp.clone()),
                     src1: Some(addr),
                     src2: Some(Operand::ConstIdx(zero_idx)),
@@ -1821,8 +1930,14 @@ impl IRGen {
                     val_op
                 };
                 let result = val_op.clone();
+
+                let store_op = if Context::type_to_ir_type(&field_ty) == IRType::Float {
+                    Op::FStoreAt
+                } else {
+                    Op::StoreAt
+                };
                 ctx.instructions.push(Instruction {
-                    op: Op::StoreAt,
+                    op: store_op,
                     dst: Some(addr),
                     src1: Some(Operand::ConstIdx(zero_idx)),
                     src2: Some(val_op),
@@ -1914,7 +2029,17 @@ impl IRGen {
             },
 
             Expr::Deref(inner, _) => {
+                let pointee_is_aggregate = match self.expr_high_type(&inner, ctx) {
+                    Some(Type::Pointer(t)) => {
+                        matches!(*t, Type::Struct(_, _) | Type::Union(_, _))
+                    }
+                    Some(Type::Struct(_, _)) | Some(Type::Union(_, _)) => true,
+                    _ => false,
+                };
                 let ptr = self.compile_expr(*inner, ctx)?;
+                if pointee_is_aggregate {
+                    return Ok(ptr);
+                }
                 let res_tmp = ctx.new_tmp(IRType::Int);
                 ctx.instructions.push(Instruction {
                     op: Op::LoadAt,
@@ -1952,8 +2077,24 @@ impl IRGen {
             }
             Expr::Cast(inner, target_ty, _) => {
                 let src_ty = self.expr_high_type(&inner, ctx);
+                let src_is_void = matches!(src_ty, Some(Type::Primitive(Primitive::Void)));
                 let src = self.compile_expr(*inner, ctx)?;
                 match &target_ty {
+                    Type::Primitive(Primitive::Void) => Ok(ctx.new_tmp(IRType::Void)),
+
+                    _ if src_is_void => {
+                        let zero: Expr = match &target_ty {
+                            Type::Primitive(Primitive::Float) => Expr::Float(0.0, Span::new(0, 0)),
+                            Type::Primitive(Primitive::Boolean) => {
+                                Expr::Bool(false, Span::new(0, 0))
+                            }
+                            Type::Primitive(Primitive::String) => {
+                                Expr::String(String::new(), Span::new(0, 0))
+                            }
+                            _ => Expr::Int(0, Span::new(0, 0)),
+                        };
+                        return self.compile_expr(zero, ctx);
+                    }
                     Type::Primitive(Primitive::Float) => {
                         if matches!(src_ty, Some(Type::Primitive(Primitive::Float))) {
                             return Ok(src);
