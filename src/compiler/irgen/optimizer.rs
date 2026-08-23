@@ -689,9 +689,6 @@ fn hoist_loop(insts: &mut Vec<Instruction>, header: usize, back: usize) -> bool 
         }
     }
 
-    // A temp may only be hoisted if it is defined exactly once inside the
-    // loop; hoisting one of several definitions (e.g. both arms of an `if`
-    // assigning the same temp) would let the wrong value escape.
     let mut def_count: HashMap<usize, usize> = HashMap::new();
     for inst in insts[header + 1..back].iter() {
         if let Some(Operand::Temp(id, _)) = &inst.dst {
@@ -705,9 +702,7 @@ fn hoist_loop(insts: &mut Vec<Instruction>, header: usize, back: usize) -> bool 
     while progress {
         progress = false;
         let mut k = header + 1;
-        // Number of control-flow barriers (labels/jumps) in (header, k).
-        // Instructions beyond a barrier are not guaranteed to execute on
-        // every iteration, so they stay in the loop.
+
         let mut barriers = 0usize;
         while k < back {
             let inst = &insts[k];

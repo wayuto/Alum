@@ -15,7 +15,6 @@ pub(super) fn hoist_lambdas(
             let lambda_name = format!("_lambda_{}", lambda_counter);
             *lambda_counter += 1;
 
-            // Lambdas may be nested inside the body; hoist those too.
             let body = hoist_lambdas(*body, lambda_counter, lambda_map);
 
             let lambda_func = Expr::FuncDecl(

@@ -264,9 +264,6 @@ fn classify(
         | TypeDef(_) | Struct(..) | Union(..) | Enum(..) => Ok(()),
 
         Call(callee, _, args, _) => {
-            // Only direct calls to a named function can be verified; anything
-            // else (struct function field `s.f(...)`, computed callee, ...)
-            // is an indirect call and conservatively impure.
             let Some(name) = callee_name(callee) else {
                 return Err("indirect call (callee is not a function name)".to_string());
             };
@@ -489,8 +486,6 @@ fn is_pure(
         return false;
     };
     if *is_external {
-        // Trust the `fun(extern, pure)` declaration: const_eval and vm_safety
-        // honor the same marker, so rejecting here would contradict them.
         memo.insert(name.to_string(), *declared_pure);
         return *declared_pure;
     }

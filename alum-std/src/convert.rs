@@ -70,7 +70,6 @@ pub extern "C" fn ftoa(n: f64) -> *const u8 {
         let mut num = n;
         let mut idx = 0;
 
-        // is_sign_negative keeps the sign of -0.0 (num < 0.0 would drop it)
         if num.is_sign_negative() {
             (*buf)[idx] = b'-';
             idx += 1;

@@ -20,7 +20,7 @@ impl IRGen {
         }
 
         let mut case_cnt = 0usize;
-        // String targets compare by content (strcmp), mirroring how `==` is rewritten.
+
         let cmp_op = if matches!(
             ctx.get_operand_type(&target, &self.constants)?,
             IRType::String

@@ -121,8 +121,7 @@ impl<'a> VmSafety<'a> {
                             return false;
                         }
                     }
-                    // Indirect calls (e.g. through a struct function field)
-                    // cannot be verified: conservatively unsafe.
+
                     _ => return false,
                 }
                 args.iter().all(|a| self.safe(a))
