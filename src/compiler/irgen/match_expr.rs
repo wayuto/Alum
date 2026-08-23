@@ -15,11 +15,10 @@ impl IRGen {
         let mut case_labels: Vec<String> = Vec::new();
         let res_tmp = ctx.new_tmp(IRType::Void);
 
-        for _ in branches.clone() {
+        let (cases, bodies): (Vec<Expr>, Vec<Expr>) = branches.into_iter().unzip();
+        for _ in 0..cases.len() {
             case_labels.push(ctx.new_label("case"));
         }
-
-        let mut case_cnt;
 
         let cmp_op = if matches!(
             ctx.get_operand_type(&target, &self.constants)?,
@@ -30,8 +29,8 @@ impl IRGen {
             Op::Eq
         };
 
-        for (case_idx, (case, _)) in branches.iter().enumerate() {
-            let case_op = self.compile_expr(case.clone(), ctx)?;
+        for (case_idx, case) in cases.into_iter().enumerate() {
+            let case_op = self.compile_expr(case, ctx)?;
             let cond = ctx.new_tmp(IRType::Bool);
             ctx.instructions.push(Instruction {
                 op: cmp_op.clone(),
@@ -43,9 +42,7 @@ impl IRGen {
                 op: Op::JumpIfTrue,
                 dst: None,
                 src1: Some(cond),
-                src2: Some(Operand::Label(
-                    case_labels.iter().nth(case_idx).unwrap().clone(),
-                )),
+                src2: Some(Operand::Label(case_labels.get(case_idx).unwrap().clone())),
             });
         }
 
@@ -82,10 +79,9 @@ impl IRGen {
             src2: None,
         });
 
-        case_cnt = 0;
-        for (_, ret) in branches.clone() {
+        for (case_cnt, ret) in bodies.into_iter().enumerate() {
             ctx.instructions.push(Instruction {
-                op: Op::Label(case_labels.iter().nth(case_cnt).unwrap().clone()),
+                op: Op::Label(case_labels[case_cnt].clone()),
                 dst: None,
                 src1: None,
                 src2: None,
@@ -111,7 +107,6 @@ impl IRGen {
                 src1: Some(Operand::Label(end_label.clone())),
                 src2: None,
             });
-            case_cnt += 1;
         }
         ctx.instructions.push(Instruction {
             op: Op::Label(end_label),

@@ -267,11 +267,16 @@ impl TypeChecker {
                             span: span,
                         });
                     }
+
+                    let nil = Expr::Nil(Span::new(0, 0));
                     let (l, r) = match expr {
-                        Expr::Add(l, r, _) => (l.clone(), r.clone()),
+                        Expr::Add(l, r, _) => (
+                            std::mem::replace(l.as_mut(), nil.clone()),
+                            std::mem::replace(r.as_mut(), nil),
+                        ),
                         _ => unreachable!(),
                     };
-                    *expr = Expr::StrCat(l, r, Span::new(0, 0));
+                    *expr = Expr::StrCat(Box::new(l), Box::new(r), Span::new(0, 0));
                     return Ok(Type::Primitive(Primitive::String));
                 }
 
@@ -334,23 +339,35 @@ impl TypeChecker {
                         }
                     }
 
+                    let nil = Expr::Nil(Span::new(0, 0));
                     let (l, r) = match expr {
-                        Expr::Add(l, r, _) => (l.clone(), r.clone()),
-                        Expr::Sub(l, r, _) => (l.clone(), r.clone()),
-                        Expr::Mul(l, r, _) => (l.clone(), r.clone()),
-                        Expr::Div(l, r, _) => (l.clone(), r.clone()),
+                        Expr::Add(l, r, _)
+                        | Expr::Sub(l, r, _)
+                        | Expr::Mul(l, r, _)
+                        | Expr::Div(l, r, _) => (
+                            std::mem::replace(l.as_mut(), nil.clone()),
+                            std::mem::replace(r.as_mut(), nil),
+                        ),
                         _ => unreachable!(),
                     };
 
                     let l = if matches!(lhs_type, Type::Primitive(Primitive::Int)) {
-                        Expr::Cast(l, Type::Primitive(Primitive::Float), Span::new(0, 0))
+                        Expr::Cast(
+                            Box::new(l),
+                            Type::Primitive(Primitive::Float),
+                            Span::new(0, 0),
+                        )
                     } else {
-                        *l
+                        l
                     };
                     let r = if matches!(rhs_type, Type::Primitive(Primitive::Int)) {
-                        Expr::Cast(r, Type::Primitive(Primitive::Float), Span::new(0, 0))
+                        Expr::Cast(
+                            Box::new(r),
+                            Type::Primitive(Primitive::Float),
+                            Span::new(0, 0),
+                        )
                     } else {
-                        *r
+                        r
                     };
                     *expr = match expr {
                         Expr::Add(_, _, _) => Expr::FAdd(Box::new(l), Box::new(r), Span::new(0, 0)),
@@ -412,8 +429,10 @@ impl TypeChecker {
             Expr::Neg(operand, _) => {
                 let ty = self.check_expr(operand)?;
                 if ty.is_float() {
-                    *expr = Expr::FNeg(operand.clone(), Span::new(0, 0));
-                    return self.check_expr(expr);
+                    let nil = Expr::Nil(Span::new(0, 0));
+                    let inner = std::mem::replace(operand.as_mut(), nil);
+                    *expr = Expr::FNeg(Box::new(inner), Span::new(0, 0));
+                    return Ok(Type::Primitive(Primitive::Float));
                 }
                 if !ty.is_numeric() {
                     return Err(CheckerError::InvalidOperation {
@@ -654,25 +673,37 @@ impl TypeChecker {
                         });
                     }
 
+                    let nil = Expr::Nil(Span::new(0, 0));
                     let (l, r) = match expr {
-                        Expr::Eq(l, r, _) => (l.clone(), r.clone()),
-                        Expr::Ne(l, r, _) => (l.clone(), r.clone()),
-                        Expr::Lt(l, r, _) => (l.clone(), r.clone()),
-                        Expr::Le(l, r, _) => (l.clone(), r.clone()),
-                        Expr::Gt(l, r, _) => (l.clone(), r.clone()),
-                        Expr::Ge(l, r, _) => (l.clone(), r.clone()),
+                        Expr::Eq(l, r, _)
+                        | Expr::Ne(l, r, _)
+                        | Expr::Lt(l, r, _)
+                        | Expr::Le(l, r, _)
+                        | Expr::Gt(l, r, _)
+                        | Expr::Ge(l, r, _) => (
+                            std::mem::replace(l.as_mut(), nil.clone()),
+                            std::mem::replace(r.as_mut(), nil),
+                        ),
                         _ => unreachable!(),
                     };
 
                     let l = if matches!(lhs_type, Type::Primitive(Primitive::Int)) {
-                        Expr::Cast(l, Type::Primitive(Primitive::Float), Span::new(0, 0))
+                        Expr::Cast(
+                            Box::new(l),
+                            Type::Primitive(Primitive::Float),
+                            Span::new(0, 0),
+                        )
                     } else {
-                        *l
+                        l
                     };
                     let r = if matches!(rhs_type, Type::Primitive(Primitive::Int)) {
-                        Expr::Cast(r, Type::Primitive(Primitive::Float), Span::new(0, 0))
+                        Expr::Cast(
+                            Box::new(r),
+                            Type::Primitive(Primitive::Float),
+                            Span::new(0, 0),
+                        )
                     } else {
-                        *r
+                        r
                     };
                     *expr = match expr {
                         Expr::Eq(_, _, _) => Expr::FEq(Box::new(l), Box::new(r), Span::new(0, 0)),
