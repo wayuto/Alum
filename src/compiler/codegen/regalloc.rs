@@ -131,9 +131,8 @@ const R_R9: u32 = 1 << 9;
 const R_R10: u32 = 1 << 10;
 const R_R11: u32 = 1 << 11;
 const R_R15: u32 = 1 << 15;
-
 const ALL_VOLATILE: u32 =
-    R_RAX | R_RCX | R_RDX | R_RBX | R_RSI | R_RDI | R_R8 | R_R9 | R_R10 | R_R11;
+    R_RAX | R_RCX | R_RDX | R_RSI | R_RDI | R_R8 | R_R9 | R_R10 | R_R11;
 
 fn arg_reg_bit(n: usize) -> u32 {
     match n {

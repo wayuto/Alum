@@ -1,4 +1,4 @@
-use super::codegen::{AsmCodeGen, m_base_disp, m_rbp, parse_reg};
+use super::codegen::{m_base_disp, m_rbp, parse_reg, AsmCodeGen};
 use super::error::CodeGenError;
 use super::regalloc;
 use crate::compiler::{
@@ -322,6 +322,7 @@ impl AsmCodeGen {
         for (reg, src) in stack_to_reg {
             self.push_text(Asm::Mov(Operand::Reg(reg), src));
         }
+        let xmm_spill_slots = xmm_saved.clone();
 
         let insts = &func.instructions;
 
@@ -374,6 +375,16 @@ impl AsmCodeGen {
                 continue;
             }
             match &code.op {
+                Op::Call => {
+                    for (r, off) in &xmm_spill_slots {
+                        self.push_text(Asm::Movsd(m_rbp(*off), Operand::Reg(*r)));
+                    }
+                    self.compile_code(code.clone())?;
+                    for (r, off) in xmm_spill_slots.iter().rev() {
+                        self.push_text(Asm::Movsd(Operand::Reg(*r), m_rbp(*off)));
+                    }
+                    self.invalidate_cached_reg(Reg::Rax);
+                }
                 Op::Return(reg_name) => {
                     if let Some(ref val) = code.src1 {
                         self.load(val, parse_reg(reg_name))?;

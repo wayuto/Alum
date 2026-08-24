@@ -4,6 +4,8 @@ mod const_eval;
 mod context;
 mod control;
 mod expr;
+mod expr_memory;
+mod expr_resource;
 mod func;
 mod globals;
 pub mod ir;

@@ -80,7 +80,7 @@ bitwise      = shift , { "^" , shift } ;
 shift        = comparison , { ( "<<" | ">>" ) , comparison } ;
 comparison   = call , { ( "==" | "!=" | "<" | "<=" | ">" | ">=" ) , call } ;
 call         = additive , postfix , { postfix } ;
-additive     = term , { ( "+" | "-" ) , term } ;
+additive     = term , [ ".." , additive ] , { ( "+" | "-" ) , term } ;
 term         = prefix , { ( "*" | "/" | "%" ) , prefix } ;
 prefix       = { unary_op } , factor ;
 unary_op     = "-" | "!" | "~" | "*" | "&" | "++" | "--" ;
@@ -119,6 +119,8 @@ match_expr   = "match" , expr , "{" , match_arm , { match_arm } , [ default_arm 
 match_arm    = expr , ":" , expr ;
 default_arm  = "_" , ":" , expr ;
 return_expr  = "return" , [ expr ] ;
+break_stmt   = "break" ;
+continue_stmt = "continue" ;
 
 (* ===== Types ===== *)
 
