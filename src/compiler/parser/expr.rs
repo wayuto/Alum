@@ -1049,7 +1049,7 @@ impl<'a> Parser<'a> {
                 Ok((Token::LBRACE, span)) => {
                     self.next()?;
                     self.scope_depth += 1;
-                    let block = self.parse_block_stmts(span);
+                    let block = self.parse_block_exprs(span);
                     self.scope_depth -= 1;
                     return block;
                 }

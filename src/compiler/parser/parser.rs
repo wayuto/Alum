@@ -147,8 +147,8 @@ impl<'a> Parser<'a> {
         loop {
             match self.peek() {
                 Some(Ok((Token::EOF, _))) | None => break,
-                Some(Ok((Token::IMPORT, _))) => self.parse_import_stmt(&mut body)?,
-                Some(Ok((Token::USING, _))) => self.parse_using_stmt(&mut body)?,
+                Some(Ok((Token::IMPORT, _))) => self.parse_import(&mut body)?,
+                Some(Ok((Token::USING, _))) => self.parse_using(&mut body)?,
                 _ => {
                     let expr = self.expr()?;
                     self.record_decl(&expr);
@@ -172,13 +172,13 @@ impl<'a> Parser<'a> {
                     let _ = self.next();
                 }
                 Some(Ok((Token::IMPORT, _))) => {
-                    if let Err(e) = self.parse_import_stmt(&mut body) {
+                    if let Err(e) = self.parse_import(&mut body) {
                         errors.push(e);
                         self.synchronize();
                     }
                 }
                 Some(Ok((Token::USING, _))) => {
-                    if let Err(e) = self.parse_using_stmt(&mut body) {
+                    if let Err(e) = self.parse_using(&mut body) {
                         errors.push(e);
                         self.synchronize();
                     }
@@ -350,7 +350,7 @@ impl<'a> Parser<'a> {
         Ok(fields)
     }
 
-    pub(super) fn parse_block_stmts(&mut self, span: Span) -> Result<Expr, ParserError> {
+    pub(super) fn parse_block_exprs(&mut self, span: Span) -> Result<Expr, ParserError> {
         let mut exprs: Vec<Expr> = Vec::new();
         let last_span = self.last_span;
         loop {
@@ -532,5 +532,4 @@ impl<'a> Parser<'a> {
         }
         Ok(params)
     }
-
 }

@@ -1,5 +1,4 @@
 {
-    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
     "name": "Alum",
     "scopeName": "source.alum",
     "patterns": [
@@ -10,58 +9,37 @@
             "include": "#preprocessor"
         },
         {
-            "include": "#module"
+            "include": "#strings"
         },
         {
-            "include": "#variable-declaration"
+            "include": "#fstrings"
         },
         {
-            "include": "#typedef"
+            "include": "#numbers"
         },
         {
-            "include": "#function-declaration"
+            "include": "#constants"
         },
         {
-            "include": "#extern-function-declaration"
+            "include": "#primitive-types"
         },
         {
-            "include": "#struct-declaration"
+            "include": "#control-keywords"
         },
         {
-            "include": "#union-declaration"
-        },
-        {
-            "include": "#enum-declaration"
-        },
-        {
-            "include": "#match-expression"
-        },
-        {
-            "include": "#struct-literal"
-        },
-        {
-            "include": "#lambda"
-        },
-        {
-            "include": "#global-declaration"
-        },
-        {
-            "include": "#for-loop"
-        },
-        {
-            "include": "#builtin-functions"
-        },
-        {
-            "include": "#keywords"
+            "include": "#declaration-keywords"
         },
         {
             "include": "#function-call"
         },
         {
-            "include": "#literals"
+            "include": "#property-access"
         },
         {
             "include": "#operators"
+        },
+        {
+            "include": "#punctuation"
         }
     ],
     "repository": {
@@ -76,1270 +54,140 @@
         "preprocessor": {
             "patterns": [
                 {
-                    "name": "meta.preprocessor.import.alum",
-                    "begin": "(\\$import)\\s+(\")",
-                    "end": "(\")",
-                    "beginCaptures": {
-                        "1": {
-                            "name": "keyword.control.preprocessor.alum"
-                        },
-                        "2": {
-                            "name": "punctuation.definition.string.begin.alum"
-                        }
-                    },
-                    "endCaptures": {
-                        "1": {
-                            "name": "punctuation.definition.string.end.alum"
-                        }
-                    },
-                    "contentName": "string.quoted.double.alum"
-                },
-                {
-                    "name": "meta.preprocessor.define.alum",
-                    "begin": "(\\$define)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(\\()?",
-                    "end": "(?=\\n|$)",
-                    "beginCaptures": {
-                        "1": {
-                            "name": "keyword.control.preprocessor.alum"
-                        },
-                        "2": {
-                            "name": "entity.name.constant.macro.alum"
-                        },
-                        "3": {
-                            "name": "punctuation.definition.parameters.begin.alum"
-                        }
-                    },
-                    "patterns": [
-                        {
-                            "include": "$self"
-                        }
-                    ]
-                },
-                {
-                    "name": "keyword.control.preprocessor.alum",
-                    "match": "\\$(ifdef|ifndef|else|endif)\\b"
-                }
-            ]
-        },
-        "global-declaration": {
-            "patterns": [
-                {
-                    "name": "meta.global.variable.declaration.alum",
-                    "match": "\\b(cst)(\\s*\\(\\s*(pub)\\s*\\))?\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(:)\\s*((?:\\*+\\s*)?[A-Za-z_][A-Za-z0-9_]*(?:<[^>\\n]*>)?(?:\\[[0-9]*\\])?(?:\\s*\\([^)\\n]*\\))?)",
+                    "name": "meta.preprocessor.alum",
+                    "match": "(\\$)(import|define|ifdef|ifndef|else|endif)\\b",
                     "captures": {
                         "1": {
-                            "name": "storage.modifier.variable.alum"
+                            "name": "punctuation.definition.preprocessor.alum"
                         },
                         "2": {
-                            "patterns": [
-                                {
-                                    "name": "storage.modifier.pub.alum",
-                                    "match": "pub"
-                                }
-                            ]
-                        },
-                        "4": {
-                            "name": "variable.other.global.alum"
-                        },
-                        "5": {
-                            "name": "punctuation.separator.type-annotation.alum"
-                        },
-                        "6": {
-                            "patterns": [
-                                {
-                                    "include": "#types"
-                                }
-                            ]
-                        }
-                    }
-                },
-                {
-                    "name": "meta.extern.variable.declaration.alum",
-                    "match": "\\b(extern)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(:)\\s*([A-Za-z_][A-Za-z0-9_]*(?:<[^>\\n]*>)?(?:\\[[0-9]*\\])?(?:\\s*\\([^)\\n]*\\))?)",
-                    "captures": {
-                        "1": {
-                            "name": "keyword.declaration.extern.alum"
-                        },
-                        "2": {
-                            "name": "variable.other.extern.alum"
-                        },
-                        "3": {
-                            "name": "punctuation.separator.type-annotation.alum"
-                        },
-                        "4": {
-                            "patterns": [
-                                {
-                                    "include": "#types"
-                                }
-                            ]
+                            "name": "keyword.control.import.alum"
                         }
                     }
                 }
             ]
         },
-        "typedef": {
+        "strings": {
+            "name": "string.quoted.double.alum",
+            "begin": "\"",
+            "end": "\"",
             "patterns": [
                 {
-                    "name": "meta.typedef.alum",
-                    "match": "\\b(typedef)(?:\\s*\\([^)]*\\))?\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(=)\\s*([A-Za-z_][A-Za-z0-9_]*(?:<[^>\\n]*>)?(?:\\[[0-9]*\\])?(?:\\s*\\([^)\\n]*\\))?)",
-                    "captures": {
-                        "1": {
-                            "name": "keyword.declaration.typedef.alum"
-                        },
-                        "2": {
-                            "name": "entity.name.type.typedef.alum"
-                        },
-                        "3": {
-                            "name": "keyword.operator.assignment.alum"
-                        },
-                        "4": {
-                            "patterns": [
-                                {
-                                    "include": "#types"
-                                }
-                            ]
-                        }
-                    }
+                    "name": "constant.character.escape.alum",
+                    "match": "\\\\."
                 }
             ]
         },
-        "function-declaration": {
+        "fstrings": {
+            "name": "string.quoted.double.interpolated.alum",
+            "begin": "f\"",
+            "end": "\"",
             "patterns": [
                 {
-                    "name": "meta.function.declaration.alum",
-                    "begin": "\\b(fun)\\b\\s*(\\((?!\\s*[^)]*\\bextern\\b)[^)]*\\))?\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*(<[^>\\n]*>)?\\s*(\\()",
-                    "end": "(\\{)",
-                    "beginCaptures": {
-                        "1": {
-                            "name": "keyword.declaration.function.alum"
-                        },
-                        "2": {
-                            "patterns": [
-                                {
-                                    "name": "storage.modifier.function-annotation.alum",
-                                    "match": "\\b(pub|pure)\\b"
-                                },
-                                {
-                                    "name": "keyword.declaration.extern.alum",
-                                    "match": "\\bextern\\b"
-                                },
-                                {
-                                    "name": "punctuation.definition.annotations.begin.alum",
-                                    "match": "\\("
-                                },
-                                {
-                                    "name": "punctuation.definition.annotations.end.alum",
-                                    "match": "\\)"
-                                }
-                            ]
-                        },
-                        "3": {
-                            "name": "entity.name.function.alum"
-                        },
-                        "4": {
-                            "patterns": [
-                                {
-                                    "name": "punctuation.definition.generic.begin.alum",
-                                    "match": "<"
-                                },
-                                {
-                                    "name": "punctuation.definition.generic.end.alum",
-                                    "match": ">"
-                                },
-                                {
-                                    "name": "entity.name.type.parameter.alum",
-                                    "match": "[A-Za-z_][A-Za-z0-9_]*"
-                                }
-                            ]
-                        },
-                        "5": {
-                            "name": "punctuation.definition.parameters.begin.alum"
-                        }
-                    },
-                    "endCaptures": {
-                        "1": {
-                            "name": "punctuation.definition.block.begin.alum"
-                        }
-                    },
+                    "name": "constant.character.escape.alum",
+                    "match": "\\\\."
+                },
+                {
+                    "name": "meta.interpolation.alum",
+                    "begin": "\\{",
+                    "end": "\\}",
                     "patterns": [
                         {
-                            "name": "meta.parameter.alum",
-                            "match": "([A-Za-z_][A-Za-z0-9_]*)\\s*(:)",
-                            "captures": {
-                                "1": {
-                                    "name": "variable.parameter.alum"
-                                },
-                                "2": {
-                                    "name": "punctuation.separator.type-annotation.alum"
-                                }
-                            }
+                            "include": "#numbers"
                         },
                         {
-                            "include": "#types"
-                        },
-                        {
-                            "name": "punctuation.definition.parameters.end.alum",
-                            "match": "\\)"
-                        },
-                        {
-                            "name": "punctuation.separator.type-annotation.alum",
-                            "match": ":"
-                        },
-                        {
-                            "name": "punctuation.separator.alum",
-                            "match": ","
-                        },
-                        {
-                            "include": "#comments"
+                            "name": "variable.other.alum",
+                            "match": "\\b[A-Za-z_]\\w*\\b"
                         }
                     ]
                 }
             ]
         },
-        "extern-function-declaration": {
+        "numbers": {
             "patterns": [
                 {
-                    "name": "meta.extern.function.declaration.alum",
-                    "begin": "\\b(fun)\\b\\s*(\\([^)]*\\bextern\\b[^)]*\\))\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*(<[^>\\n]*>)?\\s*(\\()",
-                    "end": "(\\))\\s*(:)\\s*([A-Za-z_][A-Za-z0-9_]*(?:<[^>\\n]*>)?(?:\\[[0-9]*\\])?(?:\\s*\\([^)\\n]*\\))?)(?![^:\\n]*(?:,|\\())",
-                    "beginCaptures": {
-                        "1": {
-                            "name": "keyword.declaration.function.alum"
-                        },
-                        "2": {
-                            "patterns": [
-                                {
-                                    "name": "keyword.declaration.extern.alum",
-                                    "match": "\\bextern\\b"
-                                },
-                                {
-                                    "name": "storage.modifier.function-annotation.alum",
-                                    "match": "\\b(pub|pure)\\b"
-                                },
-                                {
-                                    "name": "punctuation.definition.annotations.begin.alum",
-                                    "match": "\\("
-                                },
-                                {
-                                    "name": "punctuation.definition.annotations.end.alum",
-                                    "match": "\\)"
-                                }
-                            ]
-                        },
-                        "3": {
-                            "name": "entity.name.function.extern.alum"
-                        },
-                        "4": {
-                            "patterns": [
-                                {
-                                    "name": "punctuation.definition.generic.begin.alum",
-                                    "match": "<"
-                                },
-                                {
-                                    "name": "punctuation.definition.generic.end.alum",
-                                    "match": ">"
-                                },
-                                {
-                                    "name": "entity.name.type.parameter.alum",
-                                    "match": "[A-Za-z_][A-Za-z0-9_]*"
-                                }
-                            ]
-                        },
-                        "5": {
-                            "name": "punctuation.definition.parameters.begin.alum"
-                        }
-                    },
-                    "endCaptures": {
-                        "1": {
-                            "name": "punctuation.definition.parameters.end.alum"
-                        },
-                        "2": {
-                            "name": "punctuation.separator.type-annotation.alum"
-                        },
-                        "3": {
-                            "patterns": [
-                                {
-                                    "include": "#types"
-                                }
-                            ]
-                        }
-                    },
-                    "patterns": [
-                        {
-                            "name": "meta.parameter.alum",
-                            "match": "([A-Za-z_][A-Za-z0-9_]*)\\s*(:)",
-                            "captures": {
-                                "1": {
-                                    "name": "variable.parameter.alum"
-                                },
-                                "2": {
-                                    "name": "punctuation.separator.type-annotation.alum"
-                                }
-                            }
-                        },
-                        {
-                            "include": "#types"
-                        },
-                        {
-                            "name": "punctuation.separator.alum",
-                            "match": ","
-                        },
-                        {
-                            "include": "#comments"
-                        }
-                    ]
+                    "name": "constant.numeric.float.alum",
+                    "match": "\\b\\d+\\.\\d+\\b"
+                },
+                {
+                    "name": "constant.numeric.integer.alum",
+                    "match": "\\b\\d+\\b"
                 }
             ]
         },
-        "struct-declaration": {
-            "patterns": [
-                {
-                    "name": "meta.struct.declaration.alum",
-                    "begin": "\\b(struct)(?:\\s*\\([^)]*\\))?\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(<[^>\\n]*>)?\\s*(\\{)",
-                    "end": "(\\})",
-                    "beginCaptures": {
-                        "1": {
-                            "name": "keyword.declaration.struct.alum"
-                        },
-                        "2": {
-                            "name": "entity.name.type.struct.alum"
-                        },
-                        "3": {
-                            "patterns": [
-                                {
-                                    "name": "punctuation.definition.generic.begin.alum",
-                                    "match": "<"
-                                },
-                                {
-                                    "name": "punctuation.definition.generic.end.alum",
-                                    "match": ">"
-                                },
-                                {
-                                    "name": "entity.name.type.parameter.alum",
-                                    "match": "[A-Za-z_][A-Za-z0-9_]*"
-                                }
-                            ]
-                        },
-                        "4": {
-                            "name": "punctuation.definition.block.begin.alum"
-                        }
-                    },
-                    "endCaptures": {
-                        "1": {
-                            "name": "punctuation.definition.block.end.alum"
-                        }
-                    },
-                    "patterns": [
-                        {
-                            "name": "meta.field.alum",
-                            "match": "([A-Za-z_][A-Za-z0-9_]*)\\s*(:)",
-                            "captures": {
-                                "1": {
-                                    "name": "variable.other.member.alum"
-                                },
-                                "2": {
-                                    "name": "punctuation.separator.type-annotation.alum"
-                                }
-                            }
-                        },
-                        {
-                            "include": "#types"
-                        },
-                        {
-                            "name": "punctuation.separator.alum",
-                            "match": ","
-                        },
-                        {
-                            "include": "#comments"
-                        }
-                    ]
-                }
-            ]
+        "constants": {
+            "name": "constant.language.alum",
+            "match": "\\b(true|false|nil)\\b"
         },
-        "union-declaration": {
-            "patterns": [
-                {
-                    "name": "meta.union.declaration.alum",
-                    "begin": "\\b(union)(?:\\s*\\([^)]*\\))?\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(<[^>\\n]*>)?\\s*(\\{)",
-                    "end": "(\\})",
-                    "beginCaptures": {
-                        "1": {
-                            "name": "keyword.declaration.union.alum"
-                        },
-                        "2": {
-                            "name": "entity.name.type.union.alum"
-                        },
-                        "3": {
-                            "patterns": [
-                                {
-                                    "name": "punctuation.definition.generic.begin.alum",
-                                    "match": "<"
-                                },
-                                {
-                                    "name": "punctuation.definition.generic.end.alum",
-                                    "match": ">"
-                                },
-                                {
-                                    "name": "entity.name.type.parameter.alum",
-                                    "match": "[A-Za-z_][A-Za-z0-9_]*"
-                                }
-                            ]
-                        },
-                        "4": {
-                            "name": "punctuation.definition.block.begin.alum"
-                        }
-                    },
-                    "endCaptures": {
-                        "1": {
-                            "name": "punctuation.definition.block.end.alum"
-                        }
-                    },
-                    "patterns": [
-                        {
-                            "name": "meta.field.alum",
-                            "match": "([A-Za-z_][A-Za-z0-9_]*)\\s*(:)",
-                            "captures": {
-                                "1": {
-                                    "name": "variable.other.member.alum"
-                                },
-                                "2": {
-                                    "name": "punctuation.separator.type-annotation.alum"
-                                }
-                            }
-                        },
-                        {
-                            "include": "#types"
-                        },
-                        {
-                            "name": "punctuation.separator.alum",
-                            "match": ","
-                        },
-                        {
-                            "include": "#comments"
-                        }
-                    ]
-                }
-            ]
+        "primitive-types": {
+            "name": "storage.type.alum",
+            "match": "\\b(int|float|bool|string|void)\\b"
         },
-        "enum-declaration": {
-            "patterns": [
-                {
-                    "name": "meta.enum.declaration.alum",
-                    "begin": "\\b(enum)(?:\\s*\\([^)]*\\))?\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(\\{)",
-                    "end": "(\\})",
-                    "beginCaptures": {
-                        "1": {
-                            "name": "keyword.declaration.enum.alum"
-                        },
-                        "2": {
-                            "name": "entity.name.type.enum.alum"
-                        },
-                        "3": {
-                            "name": "punctuation.definition.block.begin.alum"
-                        }
-                    },
-                    "endCaptures": {
-                        "1": {
-                            "name": "punctuation.definition.block.end.alum"
-                        }
-                    },
-                    "patterns": [
-                        {
-                            "name": "meta.enum-member-assigned.alum",
-                            "match": "([A-Za-z_][A-Za-z0-9_]*)\\s*(=)",
-                            "captures": {
-                                "1": {
-                                    "name": "constant.other.enum.alum"
-                                },
-                                "2": {
-                                    "name": "keyword.operator.assignment.alum"
-                                }
-                            }
-                        },
-                        {
-                            "name": "constant.other.enum.alum",
-                            "match": "[A-Za-z_][A-Za-z0-9_]*(?=\\s*(?:,|}|$))"
-                        },
-                        {
-                            "include": "#literals"
-                        },
-                        {
-                            "include": "#operators"
-                        },
-                        {
-                            "include": "#comments"
-                        }
-                    ]
-                }
-            ]
+        "control-keywords": {
+            "name": "keyword.control.alum",
+            "match": "\\b(if|else|while|for|in|match|return|break|continue)\\b"
         },
-        "match-expression": {
+        "declaration-keywords": {
             "patterns": [
                 {
-                    "name": "meta.match.alum",
-                    "begin": "\\b(match)\\b\\s*([^\\n{]*)\\s*(\\{)",
-                    "end": "(\\})",
-                    "beginCaptures": {
-                        "1": {
-                            "name": "keyword.control.alum"
-                        },
-                        "2": {
-                            "name": "variable.other.readwrite.alum"
-                        },
-                        "3": {
-                            "name": "punctuation.definition.block.begin.alum"
-                        }
-                    },
-                    "endCaptures": {
-                        "1": {
-                            "name": "punctuation.definition.block.end.alum"
-                        }
-                    },
-                    "patterns": [
-                        {
-                            "name": "keyword.control.match.wildcard.alum",
-                            "match": "\\b_\\s*(?=:)"
-                        },
-                        {
-                            "name": "constant.other.enum.match-case.alum",
-                            "match": "\\b[A-Z][A-Za-z0-9_]*\\s*(?=:)"
-                        },
-                        {
-                            "name": "punctuation.separator.match-case.alum",
-                            "match": ":"
-                        },
-                        {
-                            "name": "meta.block.alum",
-                            "begin": "(\\{)",
-                            "end": "(\\})",
-                            "beginCaptures": {
-                                "1": {
-                                    "name": "punctuation.definition.block.begin.alum"
-                                }
-                            },
-                            "endCaptures": {
-                                "1": {
-                                    "name": "punctuation.definition.block.end.alum"
-                                }
-                            },
-                            "patterns": [
-                                {
-                                    "include": "$self"
-                                }
-                            ]
-                        },
-                        {
-                            "include": "$self"
-                        }
-                    ]
-                }
-            ]
-        },
-        "struct-literal": {
-            "patterns": [
-                {
-                    "name": "meta.struct.literal.alum",
-                    "begin": "\\b([A-Z][A-Za-z0-9_]*)(<[^>\\n]*>)?\\s*(\\{)",
-                    "end": "(\\})",
-                    "beginCaptures": {
-                        "1": {
-                            "name": "entity.name.type.struct.alum"
-                        },
-                        "2": {
-                            "patterns": [
-                                {
-                                    "name": "punctuation.definition.generic.begin.alum",
-                                    "match": "<"
-                                },
-                                {
-                                    "name": "punctuation.definition.generic.end.alum",
-                                    "match": ">"
-                                },
-                                {
-                                    "name": "storage.type.alum",
-                                    "match": "[A-Za-z_][A-Za-z0-9_]*"
-                                }
-                            ]
-                        },
-                        "3": {
-                            "name": "punctuation.definition.block.begin.alum"
-                        }
-                    },
-                    "endCaptures": {
-                        "1": {
-                            "name": "punctuation.definition.block.end.alum"
-                        }
-                    },
-                    "patterns": [
-                        {
-                            "name": "meta.field.alum",
-                            "match": "([A-Za-z_][A-Za-z0-9_]*)\\s*(:)",
-                            "captures": {
-                                "1": {
-                                    "name": "variable.other.member.alum"
-                                },
-                                "2": {
-                                    "name": "punctuation.separator.key-value.alum"
-                                }
-                            }
-                        },
-                        {
-                            "include": "#comments"
-                        },
-                        {
-                            "include": "$self"
-                        }
-                    ]
-                }
-            ]
-        },
-        "lambda": {
-            "patterns": [
-                {
-                    "name": "meta.lambda.alum",
-                    "begin": "(\\\\\\s*\\()",
-                    "end": "(\\))\\s*(:)\\s*([A-Za-z_][A-Za-z0-9_]*(?:<[^>\\n]*>)?(?:\\[[0-9]*\\])?(?:\\s*\\([^)\\n]*\\))?)",
-                    "beginCaptures": {
-                        "1": {
-                            "name": "keyword.declaration.lambda.alum"
-                        }
-                    },
-                    "endCaptures": {
-                        "1": {
-                            "name": "punctuation.definition.parameters.end.alum"
-                        },
-                        "2": {
-                            "name": "punctuation.separator.type-annotation.alum"
-                        },
-                        "3": {
-                            "patterns": [
-                                {
-                                    "include": "#types"
-                                }
-                            ]
-                        }
-                    },
-                    "patterns": [
-                        {
-                            "name": "meta.parameter.alum",
-                            "match": "([A-Za-z_][A-Za-z0-9_]*)\\s*(:)",
-                            "captures": {
-                                "1": {
-                                    "name": "variable.parameter.alum"
-                                },
-                                "2": {
-                                    "name": "punctuation.separator.type-annotation.alum"
-                                }
-                            }
-                        },
-                        {
-                            "include": "#types"
-                        },
-                        {
-                            "name": "punctuation.definition.parameters.end.alum",
-                            "match": "\\)"
-                        },
-                        {
-                            "name": "punctuation.separator.alum",
-                            "match": ","
-                        },
-                        {
-                            "include": "$self"
-                        }
-                    ]
-                }
-            ]
-        },
-        "variable-declaration": {
-            "patterns": [
-                {
-                    "name": "meta.variable.declaration.alum",
-                    "match": "\\b(var)(\\s*\\(\\s*(pub)\\s*\\))?\\s+([A-Za-z_][A-Za-z0-9_]*)(\\s*(:)\\s*((?:\\*+\\s*)?[A-Za-z_][A-Za-z0-9_]*(?:<[^>\\n]*>)?(?:\\[[0-9]*\\])?(?:\\s*\\([^)\\n]*\\))?))?(?:\\s*(=))?",
-                    "captures": {
-                        "1": {
-                            "name": "storage.modifier.variable.alum"
-                        },
-                        "3": {
-                            "name": "storage.modifier.pub.alum"
-                        },
-                        "4": {
-                            "name": "variable.other.readwrite.alum"
-                        },
-                        "6": {
-                            "patterns": [
-                                {
-                                    "name": "punctuation.separator.type-annotation.alum",
-                                    "match": ":"
-                                },
-                                {
-                                    "include": "#types"
-                                }
-                            ]
-                        },
-                        "8": {
-                            "name": "keyword.operator.assignment.alum"
-                        }
-                    }
-                }
-            ]
-        },
-        "for-loop": {
-            "patterns": [
-                {
-                    "name": "meta.for-loop.alum",
-                    "match": "\\b(for)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+(in)\\b",
-                    "captures": {
-                        "1": {
-                            "name": "keyword.control.alum"
-                        },
-                        "2": {
-                            "name": "variable.other.readwrite.alum"
-                        },
-                        "3": {
-                            "name": "keyword.control.alum"
-                        }
-                    }
-                }
-            ]
-        },
-        "builtin-functions": {
-            "patterns": [
-                {
-                    "name": "support.function.builtin.io.alum",
-                    "match": "\\b(write|read|print|println|input|fopen|fclose|fread|fwrite|lseek|pipe|pipe2|dup|dup2|dup3)\\b"
+                    "name": "keyword.declaration.alum",
+                    "match": "\\b(fun|var|cst|struct|union|enum|typedef|extern|import|using|as)\\b"
                 },
                 {
-                    "name": "support.function.builtin.vec.alum",
-                    "match": "\\b(vec_new|arr_new)\\b"
-                },
-                {
-                    "name": "support.function.builtin.maybe.alum",
-                    "match": "\\b(is_some)\\b"
-                },
-                {
-                    "name": "support.function.builtin.math.alum",
-                    "match": "\\b(abs|sqrt|max|min|pow|fact)\\b"
-                },
-                {
-                    "name": "support.function.builtin.string.alum",
-                    "match": "\\b(strlen|strcpy|strcat|strcmp|memcpy|memset|bcmp|memcmp)\\b"
-                },
-                {
-                    "name": "support.function.builtin.convert.alum",
-                    "match": "\\b(itoa|atoi|atof|ftoa)\\b"
-                },
-                {
-                    "name": "support.function.builtin.memory.alum",
-                    "match": "\\b(malloc|free|mmap|munmap|mprotect|brk)\\b"
-                }
-            ]
-        },
-        "keywords": {
-            "patterns": [
-                {
-                    "name": "keyword.control.import.alum",
-                    "match": "\\b(import|using)\\b"
-                },
-                {
-                    "name": "keyword.control.import.alum",
-                    "match": "\\bas\\b"
-                },
-                {
-                    "name": "keyword.control.alum",
-                    "match": "\\b(if|else|while|for|in|break|continue|match)\\b"
-                },
-                {
-                    "name": "keyword.control.return.alum",
-                    "match": "\\breturn\\b"
-                },
-                {
-                    "name": "storage.modifier.variable.alum",
-                    "match": "\\bvar\\b"
-                },
-                {
-                    "name": "keyword.declaration.constant.alum",
-                    "match": "\\bcst\\b"
-                },
-                {
-                    "name": "keyword.declaration.function.alum",
-                    "match": "\\bfun\\b"
-                },
-                {
-                    "name": "keyword.declaration.extern.alum",
-                    "match": "\\bextern\\b"
-                },
-                {
-                    "name": "keyword.declaration.struct.alum",
-                    "match": "\\bstruct\\b"
-                },
-                {
-                    "name": "keyword.declaration.union.alum",
-                    "match": "\\bunion\\b"
-                },
-                {
-                    "name": "keyword.declaration.enum.alum",
-                    "match": "\\benum\\b"
-                },
-                {
-                    "name": "keyword.declaration.typedef.alum",
-                    "match": "\\btypedef\\b"
-                },
-                {
-                    "name": "keyword.declaration.lambda.alum",
-                    "match": "\\\\"
-                },
-                {
-                    "name": "constant.language.boolean.alum",
-                    "match": "\\b(true|false)\\b"
-                },
-                {
-                    "name": "constant.language.null.alum",
-                    "match": "\\bnil\\b"
+                    "name": "storage.modifier.alum",
+                    "match": "\\b(pub|pure)\\b"
                 }
             ]
         },
         "function-call": {
-            "patterns": [
-                {
-                    "name": "meta.function-call.alum",
-                    "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(<[^>\\n]*>)?\\s*(\\()",
-                    "captures": {
-                        "1": {
-                            "name": "entity.name.function.call.alum"
-                        },
-                        "2": {
-                            "patterns": [
-                                {
-                                    "name": "punctuation.definition.generic.begin.alum",
-                                    "match": "<"
-                                },
-                                {
-                                    "name": "punctuation.definition.generic.end.alum",
-                                    "match": ">"
-                                },
-                                {
-                                    "name": "entity.name.type.parameter.alum",
-                                    "match": "[A-Za-z_][A-Za-z0-9_]*"
-                                }
-                            ]
-                        },
-                        "3": {
-                            "name": "punctuation.definition.arguments.begin.alum"
-                        }
-                    }
-                }
-            ]
+            "name": "entity.name.function.alum",
+            "match": "\\b[A-Za-z_]\\w*\\s*(?=\\()"
         },
-        "types": {
-            "patterns": [
-                {
-                    "name": "storage.type.function.alum",
-                    "begin": "\\b([A-Za-z_][A-Za-z0-9_]*)(?:(<[^>\\n]*>))??\\s*(\\()",
-                    "end": "(\\))",
-                    "beginCaptures": {
-                        "1": {
-                            "name": "storage.type.alum"
-                        },
-                        "2": {
-                            "patterns": [
-                                {
-                                    "name": "punctuation.definition.generic.begin.alum",
-                                    "match": "<"
-                                },
-                                {
-                                    "name": "punctuation.definition.generic.end.alum",
-                                    "match": ">"
-                                },
-                                {
-                                    "name": "storage.type.alum",
-                                    "match": "[A-Za-z_][A-Za-z0-9_]*"
-                                }
-                            ]
-                        },
-                        "3": {
-                            "name": "punctuation.definition.parameters.begin.alum"
-                        }
-                    },
-                    "endCaptures": {
-                        "1": {
-                            "name": "punctuation.definition.parameters.end.alum"
-                        }
-                    },
-                    "patterns": [
-                        {
-                            "include": "#types"
-                        },
-                        {
-                            "include": "#operators"
-                        }
-                    ]
-                },
-                {
-                    "name": "meta.type.generic.alum",
-                    "begin": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(<)",
-                    "end": "(>)",
-                    "beginCaptures": {
-                        "1": {
-                            "name": "storage.type.alum"
-                        },
-                        "2": {
-                            "name": "punctuation.definition.generic.begin.alum"
-                        }
-                    },
-                    "endCaptures": {
-                        "1": {
-                            "name": "punctuation.definition.generic.end.alum"
-                        }
-                    },
-                    "patterns": [
-                        {
-                            "include": "#types"
-                        },
-                        {
-                            "name": "punctuation.separator.alum",
-                            "match": ","
-                        }
-                    ]
-                },
-                {
-                    "name": "storage.type.array.alum",
-                    "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?:<[^>\\n]*>)?\\s*(\\[[0-9]*\\])"
-                },
-                {
-                    "name": "storage.type.primitive.alum",
-                    "match": "\\b(int|float|bool|string|void)\\b"
-                },
-                {
-                    "name": "storage.type.pointer.alum",
-                    "match": "\\*"
-                },
-                {
-                    "name": "storage.type.alum",
-                    "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
-                }
-            ]
-        },
-        "literals": {
-            "patterns": [
-                {
-                    "name": "constant.numeric.float.alum",
-                    "match": "\\b[0-9]+\\.[0-9]+(?:[eE][+-]?[0-9]+)?\\b"
-                },
-                {
-                    "name": "constant.numeric.integer.alum",
-                    "match": "\\b[0-9]+\\b"
-                },
-                {
-                    "name": "string.quoted.double.fstring.alum",
-                    "begin": "(?<![A-Za-z0-9_])f\"",
-                    "end": "\"",
-                    "beginCaptures": {
-                        "0": {
-                            "name": "punctuation.definition.string.begin.alum"
-                        }
-                    },
-                    "endCaptures": {
-                        "0": {
-                            "name": "punctuation.definition.string.end.alum"
-                        }
-                    },
-                    "patterns": [
-                        {
-                            "name": "constant.character.escape.alum",
-                            "match": "\\\\."
-                        },
-                        {
-                            "name": "meta.interpolation.alum",
-                            "begin": "\\{",
-                            "end": "\\}",
-                            "beginCaptures": {
-                                "0": {
-                                    "name": "punctuation.definition.interpolation.begin.alum"
-                                }
-                            },
-                            "endCaptures": {
-                                "0": {
-                                    "name": "punctuation.definition.interpolation.end.alum"
-                                }
-                            },
-                            "patterns": [
-                                {
-                                    "include": "$self"
-                                }
-                            ]
-                        }
-                    ]
-                },
-                {
-                    "name": "string.quoted.single.fstring.alum",
-                    "begin": "(?<![A-Za-z0-9_])f'",
-                    "end": "'",
-                    "beginCaptures": {
-                        "0": {
-                            "name": "punctuation.definition.string.begin.alum"
-                        }
-                    },
-                    "endCaptures": {
-                        "0": {
-                            "name": "punctuation.definition.string.end.alum"
-                        }
-                    },
-                    "patterns": [
-                        {
-                            "name": "constant.character.escape.alum",
-                            "match": "\\\\."
-                        },
-                        {
-                            "name": "meta.interpolation.alum",
-                            "begin": "\\{",
-                            "end": "\\}",
-                            "beginCaptures": {
-                                "0": {
-                                    "name": "punctuation.definition.interpolation.begin.alum"
-                                }
-                            },
-                            "endCaptures": {
-                                "0": {
-                                    "name": "punctuation.definition.interpolation.end.alum"
-                                }
-                            },
-                            "patterns": [
-                                {
-                                    "include": "$self"
-                                }
-                            ]
-                        }
-                    ]
-                },
-                {
-                    "name": "string.quoted.double.alum",
-                    "begin": "\"",
-                    "end": "\"",
-                    "beginCaptures": {
-                        "0": {
-                            "name": "punctuation.definition.string.begin.alum"
-                        }
-                    },
-                    "endCaptures": {
-                        "0": {
-                            "name": "punctuation.definition.string.end.alum"
-                        }
-                    },
-                    "patterns": [
-                        {
-                            "name": "constant.character.escape.alum",
-                            "match": "\\\\."
-                        }
-                    ]
-                },
-                {
-                    "name": "string.quoted.single.alum",
-                    "begin": "'",
-                    "end": "'",
-                    "beginCaptures": {
-                        "0": {
-                            "name": "punctuation.definition.string.begin.alum"
-                        }
-                    },
-                    "endCaptures": {
-                        "0": {
-                            "name": "punctuation.definition.string.end.alum"
-                        }
-                    },
-                    "patterns": [
-                        {
-                            "name": "constant.character.escape.alum",
-                            "match": "\\\\."
-                        }
-                    ]
-                },
-                {
-                    "name": "meta.array.fill.alum",
-                    "begin": "\\[([A-Za-z_][A-Za-z0-9_]*(?:<[^>\\n]*>)?)\\s*(;)",
-                    "end": "\\]",
-                    "beginCaptures": {
-                        "1": {
-                            "patterns": [
-                                {
-                                    "include": "#types"
-                                }
-                            ]
-                        },
-                        "2": {
-                            "name": "punctuation.separator.array-fill.alum"
-                        }
-                    },
-                    "endCaptures": {
-                        "0": {
-                            "name": "punctuation.definition.array.end.alum"
-                        }
-                    },
-                    "patterns": [
-                        {
-                            "include": "$self"
-                        }
-                    ]
-                },
-                {
-                    "name": "meta.array.literal.alum",
-                    "begin": "(\\[)",
-                    "end": "(\\])",
-                    "beginCaptures": {
-                        "1": {
-                            "name": "punctuation.definition.array.begin.alum"
-                        }
-                    },
-                    "endCaptures": {
-                        "1": {
-                            "name": "punctuation.definition.array.end.alum"
-                        }
-                    },
-                    "patterns": [
-                        {
-                            "include": "$self"
-                        }
-                    ]
-                }
-            ]
+        "property-access": {
+            "name": "variable.other.property.alum",
+            "match": "(?<=\\.)[A-Za-z_]\\w*"
         },
         "operators": {
             "patterns": [
                 {
-                    "match": "([A-Za-z_][A-Za-z0-9_]*)(::)",
-                    "captures": {
-                        "1": {
-                            "name": "entity.name.namespace.alum"
-                        },
-                        "2": {
-                            "name": "keyword.operator.module.alum"
-                        }
-                    }
-                },
-                {
-                    "name": "keyword.operator.range.alum",
-                    "match": "\\.\\."
-                },
-                {
-                    "name": "keyword.operator.increment.alum",
-                    "match": "\\+\\+"
-                },
-                {
-                    "name": "keyword.operator.decrement.alum",
-                    "match": "\\-\\-"
-                },
-                {
-                    "name": "keyword.operator.assignment.compound.alum",
-                    "match": "<<=|>>=|\\+=|\\-=|\\*=|/=|%=|&=|\\|=|\\^="
-                },
-                {
-                    "name": "keyword.operator.bitwise.alum",
-                    "match": "<<|>>|~"
+                    "name": "keyword.operator.assignment.alum",
+                    "match": "<<=|>>=|[+\\-*/%&|^]="
                 },
                 {
                     "name": "keyword.operator.comparison.alum",
-                    "match": "==|!=|>=|<=|>|<"
-                },
-                {
-                    "name": "keyword.operator.assignment.alum",
-                    "match": "(?<![=<>!])=(?!=)"
-                },
-                {
-                    "name": "keyword.operator.arithmetic.alum",
-                    "match": "\\+|\\-|\\*|/|%"
+                    "match": "==|!=|<=|>=|[<>]"
                 },
                 {
                     "name": "keyword.operator.logical.alum",
                     "match": "&&|\\|\\||!"
                 },
                 {
-                    "name": "keyword.operator.bitwise.alum",
-                    "match": "\\^|\\||&(?![&=])"
+                    "name": "keyword.operator.arithmetic.alum",
+                    "match": "\\+\\+|--|<<|>>|[+\\-*/%&|^~]"
                 },
                 {
-                    "name": "keyword.operator.cast.alum",
-                    "match": "@"
-                },
-                {
-                    "name": "meta.member-access.alum",
-                    "match": "(\\.)([A-Za-z_][A-Za-z0-9_]*)",
-                    "captures": {
-                        "1": {
-                            "name": "punctuation.accessor.alum"
-                        },
-                        "2": {
-                            "name": "variable.other.member.alum"
-                        }
-                    }
-                },
-                {
-                    "name": "punctuation.separator.alum",
-                    "match": ","
-                },
-                {
-                    "name": "punctuation.terminator.alum",
-                    "match": ";"
-                },
-                {
-                    "name": "punctuation.definition.bracket.alum",
-                    "match": "[\\[\\]]"
-                },
-                {
-                    "name": "punctuation.definition.block.alum",
-                    "match": "[{}]"
-                },
-                {
-                    "name": "punctuation.definition.parenthesis.alum",
-                    "match": "[()]"
-                },
-                {
-                    "name": "variable.other.alum",
-                    "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+                    "name": "keyword.operator.alum",
+                    "match": "[@;,.?=]"
                 }
             ]
         },
-        "module": {
+        "punctuation": {
             "patterns": [
                 {
-                    "name": "meta.import.alum",
-                    "match": "\\b(import)\\s+([A-Za-z_][A-Za-z0-9_]*)(\\s+(as)\\s+([A-Za-z_][A-Za-z0-9_]*))?",
-                    "captures": {
-                        "1": {
-                            "name": "keyword.control.import.alum"
-                        },
-                        "2": {
-                            "name": "entity.name.namespace.alum"
-                        },
-                        "4": {
-                            "name": "keyword.control.import.alum"
-                        },
-                        "5": {
-                            "name": "entity.name.namespace.alum"
-                        }
-                    }
+                    "name": "punctuation.section.braces.begin.alum",
+                    "match": "\\{"
                 },
                 {
-                    "name": "meta.using.alum",
-                    "match": "\\b(using)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(::)\\s*([A-Za-z_][A-Za-z0-9_]*)?(\\s+(as)\\s+([A-Za-z_][A-Za-z0-9_]*))?(\\s*\\{)?",
-                    "captures": {
-                        "1": {
-                            "name": "keyword.control.using.alum"
-                        },
-                        "2": {
-                            "name": "entity.name.namespace.alum"
-                        },
-                        "3": {
-                            "name": "keyword.operator.module.alum"
-                        },
-                        "4": {
-                            "name": "entity.name.function.alum"
-                        },
-                        "6": {
-                            "name": "keyword.control.import.alum"
-                        },
-                        "7": {
-                            "name": "entity.name.namespace.alum"
-                        }
-                    }
+                    "name": "punctuation.section.braces.end.alum",
+                    "match": "\\}"
+                },
+                {
+                    "name": "punctuation.separator.parenthesis.alum",
+                    "match": "[()]"
+                },
+                {
+                    "name": "punctuation.separator.square-brackets.alum",
+                    "match": "\\[|\\]"
                 }
             ]
         }

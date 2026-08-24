@@ -223,6 +223,23 @@ impl TypeChecker {
             .insert(name.to_string());
     }
 
+    pub(super) fn nearest_decl_is_const(&self, name: &str) -> bool {
+        let n = self.type_stack.len();
+        for i in (0..n).rev() {
+            if let Some(scope) = self.const_stack.get(i) {
+                if scope.contains(name) {
+                    return true;
+                }
+            }
+            if let Some(ts) = self.type_stack.get(i) {
+                if ts.contains_key(name) {
+                    return false;
+                }
+            }
+        }
+        self.constants.contains_key(name)
+    }
+
     pub(super) fn is_constant(&self, name: &str) -> bool {
         if self.constants.contains_key(name) {
             return true;

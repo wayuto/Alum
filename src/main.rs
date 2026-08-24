@@ -114,9 +114,6 @@ fn run() -> Result<(), Box<dyn Error>> {
         )?;
 
         if !obj_file.is_empty() {
-            if cli.compile_only && cli.output.is_none() {
-                println!("{}", obj_file);
-            }
             obj_files.push(obj_file.clone());
             generated_objs.push(obj_file);
         }

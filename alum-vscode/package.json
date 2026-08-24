@@ -10,9 +10,6 @@
         "Programming Languages"
     ],
     "main": "./extension.js",
-    "activationEvents": [
-        "onLanguage:alum"
-    ],
     "contributes": {
         "languages": [
             {
@@ -25,7 +22,11 @@
                     "al",
                     "ah"
                 ],
-                "configuration": "./language-configuration.json"
+                "configuration": "./language-configuration.json",
+                "icon": {
+                    "dark": "./icons/alum-file-dark.svg",
+                    "light": "./icons/alum-file-light.svg"
+                }
             }
         ],
         "grammars": [

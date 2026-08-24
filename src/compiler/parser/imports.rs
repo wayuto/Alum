@@ -93,7 +93,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    pub(super) fn parse_import_stmt(&mut self, body: &mut Vec<Expr>) -> Result<(), ParserError> {
+    pub(super) fn parse_import(&mut self, body: &mut Vec<Expr>) -> Result<(), ParserError> {
         self.next()?;
         let mut segs = self.parse_module_path()?;
         let mod_name = segs.join("/");
@@ -142,7 +142,7 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    pub(super) fn parse_using_stmt(&mut self, body: &mut Vec<Expr>) -> Result<(), ParserError> {
+    pub(super) fn parse_using(&mut self, body: &mut Vec<Expr>) -> Result<(), ParserError> {
         self.next()?;
         let segs = self.parse_module_path()?;
         if segs.len() > 1 {

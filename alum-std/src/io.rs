@@ -5,14 +5,14 @@ const BUFFER_SIZE: usize = 1024;
 #[inline(never)]
 #[unsafe(no_mangle)]
 pub extern "C" fn print(fmt: *const u8) -> isize {
-    let len = strlen(fmt);
+    let len = unsafe { strlen(fmt as *const i8) };
     sys::write(1, fmt, len)
 }
 
 #[inline(never)]
 #[unsafe(no_mangle)]
 pub extern "C" fn println(fmt: *const u8) -> isize {
-    let len = strlen(fmt);
+    let len = unsafe { strlen(fmt as *const i8) };
     sys::write(1, fmt, len) + sys::write(1, b"\n".as_ptr(), 1)
 }
 
@@ -67,7 +67,7 @@ pub extern "C" fn input(prompt: *const u8) -> *const u8 {
         (*buf)[total_read] = 0;
     }
 
-    let out = crate::memory::malloc(total_read + 1);
+    let out = unsafe { crate::memory::malloc(total_read + 1) } as *mut u8;
     unsafe {
         core::ptr::copy_nonoverlapping(buf.cast::<u8>(), out, total_read + 1);
     }

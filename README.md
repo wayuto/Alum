@@ -27,24 +27,38 @@ The official tutorial series (中文教程) walks through the language from scra
 
 ## Features
 
-- **EiaE** - Everything is a expression
-- **Native AOT Compilation** — compiles directly to native x86_64 machine code through an optimizing IR pipeline, with a built-in register allocator, assembler, and ELF encoder; links with `lld`
-- **Strong Static Typing** — explicit type annotations on `var`/`cst`, full type inference, and compile-time type checking before code generation
-- **Rich Type System** — `int`, `float`, `bool`, `string`, arrays `T[]`, pointers `*T`, function pointers, structs, unions, C-style enums (bare references when unambiguous), and generics with monomorphic instantiation
-- **Tagged `Result`/`Maybe`** — `Result<T, E>` and `Maybe<T>` built on `struct` + `union` + `enum`, enabling error handling and null-safety
-- **Functional Programming** — lambdas, higher-order functions, first-class function pointers, and block expressions that produce values
-- **Expression-Oriented Control Flow** — `if-else` and `match` are expressions; `for` iterates arrays and ranges (`n..m`); `while` loops; implicit return of the last expression
-- **Type Cast** — `V@T` syntax converts between primitive types, e.g. `1@float` produces `1.0`, `3.99@int` produces `3` (truncation); `int`↔`bool` casts are also supported (`0@bool` → `false`, non-zero → `true`; booleans are normalized to 0/1, so `42@bool@int` yields `1`);
-        casting to `void` explicitly discards a value (`expr@void`), and casting from `void` (e.g. the result of a void function) yields the zero value of the target type (`0`, `0.0`, `false`, `""`)
-- **Function Annotations** — `fun(extern)` for FFI, `fun(pub)` to export and make importable from modules, `fun(pure)` to mark side-effect-free functions
-- **Compile-Time Evaluation (CTE)** — `pure` functions are evaluated at compile time by the built-in GosVM bytecode interpreter; supports `for` loops, `range` expressions, `for-in` array iteration, `match` expressions, `struct`/`union` literals with member access/assignment, type casts (`@float`/`@int`/`@bool`), and recursion (e.g. `fib(40)` compiles to a single constant in ~10ms)
-- **Compile-Time Native Evaluation** — `fun(extern, pure)` declarations may be folded at compile time by attaching a native shared library with `--cte-lib ./libfoo.so`. The compiler `dlopen`s the library (using `libffi` via `dlsym`) for constant folding; the `.so` is also linked into the final executable (with an rpath) so any call that could not be folded is still resolved at runtime. Emitting the warning `purity of external function '<name>' cannot be verified` on every `extern pure` declaration, since an external symbol's purity cannot be statically verified. See `examples/32_native_cte/`.
-- **F-String Interpolation** — `println(f"value: {x}")` with embedded expressions
-- **C Interop (FFI)** — call C functions directly via `fun(extern)`; memory layout is C-compatible with no conversion overhead
-- **Preprocessor** — `$import`, `$define` macros, and conditional compilation via `$ifdef`/`$ifndef`/`$else`/`$endif`
-- **Build Toolkit** — integrated `almk` build system for project scaffolding, building, running, dependency management, and mixed C/Alum projects
-- **Standard Library** — rich `alum-std` with I/O, string/convert, `Vec`, `Result`/`Maybe`, math, and memory management
-- **VS Code Support** — official syntax highlighting extension in `alum-vscode`
+### Core Language
+
+- **Everything is an Expression (EiaE)** — there are no statements: blocks, `if`/`else`, `match`, loops and function bodies are all expressions, and the last expression is the result
+- **Strict Static Typing** — compile-time checking with full local inference; `int` and `float` never mix implicitly — conversions go through explicit `@` casts
+- **Explicit Casts (`@T`)** — `int`↔`float` (truncating), `int`↔`bool` (normalized to 0/1), anything → `void` (discard), `void` → any primitive (zero value)
+- **Generics** — monomorphic instantiation with type inference at call sites
+- **Tagged `Result` / `Maybe`** — error handling and null-safety built from `struct` + `union` + `enum`
+
+### Memory Management
+
+- **Automatic Resource Release** — structs, unions and arrays own their heap storage as value types: assignment deep-copies, and every declared value is released automatically when its scope exits
+- **Manual Control When Needed** — raw `malloc` / `free` from the standard library for custom allocators and fine-grained lifetimes
+
+### Functional & Control Flow
+
+- **Lambdas & Higher-Order Functions** — first-class function types; struct method fields invoked through index sugar (`v[i] = x`)
+- **Expression-Oriented Control Flow** — `if`/`else`, `match` (arms need no separators, patterns evaluate lazily), `while`, `for-in` over arrays and ranges (`n..m`)
+- **Short-Circuit Logic** — `&&` and `||` evaluate lazily
+- **F-String Interpolation** — `println(f"value: {x}")`; every primitive interpolates, including `void` rendered as `nil`
+- **Function Annotations** — `(pub)` export for modules, `(extern)` external symbols, `(pure)` pure functions; return-type annotations optional (default `void`)
+
+### Compiler & Toolchain
+
+- **Native AOT Compilation** — x86_64 machine code via an optimizing IR pipeline with a built-in register allocator, assembler, and ELF encoder; links with `lld`
+- **Compile-Time Evaluation (CTE)** — `pure` functions run at compile time on the built-in bytecode VM: loops, ranges, `match`, literals, casts, recursion with memoization (`fib(40)` folds into one constant); guarded by step, time, stack, and recursion limits
+- **Native Compile-Time Evaluation** — fold `fun(extern, pure)` calls against a shared library via `--cte-lib ./libfoo.so` (`libffi`); see `examples/32_native_cte/`
+- **Preprocessor** — `$import` includes, `$define` object/function macros with recursion detection, conditional compilation via `$ifdef` / `$ifndef` / `$else` / `$endif`
+- **C Interop (FFI)** — call C functions directly; C-compatible memory layout with zero conversion overhead
+- **Build Toolkit** — integrated `almk`: scaffolding, building, running, git/zip dependencies, mixed C/Alum projects
+- **Standard Library** — I/O, string utilities, conversions, `Vec`, `Result`/`Maybe`, math
+- **Editor Support** — official VS Code extension plus `alum-lsp`, whose diagnostics run the same pipeline as the compiler
+- **Formal Grammar** — complete EBNF in [GRAMMAR.md](./GRAMMAR.md)
 
 ## Installation
 
@@ -348,6 +362,7 @@ cargo build --release
 
 ## Documentation
 
+- **[Grammar (EBNF)](./GRAMMAR.md)** - Formal grammar derived from the parser
 - **[Standard Library](./alum-std/README.md)** - Comprehensive standard library documentation
 - **[Build Tool](./alum-make/README.md)** - almk build tool documentation
 - **[Tutorial Series](https://cr0.dpdns.org)** - 19-part Chinese tutorial covering the language from scratch

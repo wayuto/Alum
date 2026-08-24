@@ -204,6 +204,14 @@ impl TypeChecker {
                         return Err(CheckerError::UndefinedVariable(name.clone(), span));
                     }
                 };
+
+                if self.nearest_decl_is_const(name) {
+                    return Err(CheckerError::InvalidOperation {
+                        op: "assignment".to_string(),
+                        type_name: format!("constant '{}'", name),
+                        span,
+                    });
+                }
                 let value_type = self.check_expr(value)?;
 
                 if !matches!(value.as_ref(), Expr::Nil(_)) {
@@ -528,6 +536,14 @@ impl TypeChecker {
                         return Err(CheckerError::UndefinedVariable(name.clone(), span));
                     }
                 };
+
+                if self.nearest_decl_is_const(name) {
+                    return Err(CheckerError::InvalidOperation {
+                        op: "increment/decrement".to_string(),
+                        type_name: format!("constant '{}'", name),
+                        span,
+                    });
+                }
                 if !var_type.is_numeric() {
                     return Err(CheckerError::InvalidOperation {
                         op: "increment/decrement".to_string(),
@@ -555,6 +571,14 @@ impl TypeChecker {
                         return Err(CheckerError::UndefinedVariable(name.clone(), span));
                     }
                 };
+
+                if self.nearest_decl_is_const(name) {
+                    return Err(CheckerError::InvalidOperation {
+                        op: "compound assignment".to_string(),
+                        type_name: format!("constant '{}'", name),
+                        span,
+                    });
+                }
                 let value_type = self.check_expr(value)?;
                 if var_type.is_pointer() {
                     if !matches!(
@@ -605,6 +629,14 @@ impl TypeChecker {
                         return Err(CheckerError::UndefinedVariable(name.clone(), span));
                     }
                 };
+
+                if self.nearest_decl_is_const(name) {
+                    return Err(CheckerError::InvalidOperation {
+                        op: "compound assignment".to_string(),
+                        type_name: format!("constant '{}'", name),
+                        span,
+                    });
+                }
                 if var_type.is_pointer() {
                     return Err(CheckerError::InvalidOperation {
                         op: "compound assignment".to_string(),

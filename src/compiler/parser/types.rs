@@ -231,5 +231,4 @@ impl<'a> Parser<'a> {
 
         Ok(base_type)
     }
-
 }

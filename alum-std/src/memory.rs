@@ -1,4 +1,5 @@
 use crate::sys;
+use core::ffi::c_void;
 use core::ptr;
 
 const ALIGN: usize = 8;
@@ -123,7 +124,9 @@ fn grow_heap(need: usize) -> *mut u8 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn memcpy(dst: *mut u8, src: *const u8, n: usize) -> *mut u8 {
+pub unsafe extern "C" fn memcpy(dst: *mut c_void, src: *const c_void, n: usize) -> *mut c_void {
+    let dst = dst as *mut u8;
+    let src = src as *const u8;
     unsafe {
         let mut i = 0usize;
         while i + 8 <= n {
@@ -135,11 +138,12 @@ pub extern "C" fn memcpy(dst: *mut u8, src: *const u8, n: usize) -> *mut u8 {
             i += 1;
         }
     }
-    dst
+    dst as *mut c_void
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn memset(dst: *mut u8, byte: i32, n: usize) -> *mut u8 {
+pub unsafe extern "C" fn memset(dst: *mut c_void, byte: i32, n: usize) -> *mut c_void {
+    let dst = dst as *mut u8;
     unsafe {
         let b = byte as u8;
         let word = (b as u64) * 0x0101_0101_0101_0101u64;
@@ -153,14 +157,16 @@ pub extern "C" fn memset(dst: *mut u8, byte: i32, n: usize) -> *mut u8 {
             i += 1;
         }
     }
-    dst
+    dst as *mut c_void
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn memmove(dst: *mut u8, src: *const u8, n: usize) -> *mut u8 {
+pub unsafe extern "C" fn memmove(dst: *mut c_void, src: *const c_void, n: usize) -> *mut c_void {
+    let dst = dst as *mut u8;
+    let src = src as *const u8;
     unsafe {
-        if dst as usize <= src as usize {
-            return memcpy(dst, src, n);
+        if (dst as usize) <= (src as usize) {
+            return memcpy(dst as *mut c_void, src as *mut c_void, n);
         }
 
         let mut i = n;
@@ -169,11 +175,11 @@ pub extern "C" fn memmove(dst: *mut u8, src: *const u8, n: usize) -> *mut u8 {
             dst.add(i).write(src.add(i).read());
         }
     }
-    dst
+    dst as *mut c_void
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn malloc(size: usize) -> *mut u8 {
+pub unsafe extern "C" fn malloc(size: usize) -> *mut c_void {
     let size = if size == 0 { 1 } else { size };
 
     let mut need = match align_up(size).checked_add(HEADER_SIZE + FOOTER_SIZE) {
@@ -206,7 +212,7 @@ pub extern "C" fn malloc(size: usize) -> *mut u8 {
                     set_size(cur, sz, false);
                     set_footer(cur, sz, false);
                 }
-                return cur.add(HEADER_SIZE);
+                return cur.add(HEADER_SIZE) as *mut c_void;
             }
             prev = cur;
             cur = next_free(cur);
@@ -225,16 +231,17 @@ pub extern "C" fn malloc(size: usize) -> *mut u8 {
         }
         set_size(b, need, false);
         set_footer(b, need, false);
-        b.add(HEADER_SIZE)
+        b.add(HEADER_SIZE) as *mut c_void
     }
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn free(ptr: *mut u8) {
+pub unsafe extern "C" fn free(ptr: *mut c_void) {
     if ptr.is_null() {
         return;
     }
     unsafe {
+        let ptr = ptr as *mut u8;
         let mut b = ptr.sub(HEADER_SIZE);
         if is_free(b) {
             return;

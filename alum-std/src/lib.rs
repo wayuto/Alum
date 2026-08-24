@@ -39,7 +39,7 @@ extern "C" fn _start() -> ! {
 
 #[unsafe(no_mangle)]
 extern "C" fn _start_impl(argc: isize, argv: *const *const u8) -> ! {
-    let arr = crate::memory::malloc(8 + argc as usize * 8) as *mut u8;
+    let arr = unsafe { crate::memory::malloc(8 + argc as usize * 8) } as *mut u8;
     unsafe {
         *(arr as *mut usize) = argc as usize;
         let data = arr.add(8) as *mut *const u8;

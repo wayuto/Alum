@@ -1,5 +1,6 @@
 #[unsafe(no_mangle)]
-pub extern "C" fn strlen(ptr: *const u8) -> usize {
+pub unsafe extern "C" fn strlen(ptr: *const i8) -> usize {
+    let ptr = ptr as *const u8;
     let mut len = 0;
     let mut p = ptr;
     unsafe {
