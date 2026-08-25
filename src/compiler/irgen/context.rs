@@ -26,12 +26,9 @@ pub(super) struct Context {
     pub array_lengths: HashMap<String, usize>,
     pub func_name: String,
     pub borrowed: HashSet<String>,
-
     pub moved: HashSet<String>,
-
     pub moved_at: HashMap<String, Span>,
     pub(super) var_slots: HashMap<String, Vec<String>>,
-
     pub(super) var_type_history: HashMap<String, Vec<Option<Type>>>,
     pub(super) array_len_history: HashMap<String, Vec<Option<usize>>>,
     pub(super) borrow_history: HashMap<String, Vec<bool>>,

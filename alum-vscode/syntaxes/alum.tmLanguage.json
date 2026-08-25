@@ -58,7 +58,7 @@
             "patterns": [
                 {
                     "name": "meta.preprocessor.alum",
-                    "match": "(\\$)(import|define|ifdef|ifndef|else|endif)\\b",
+                    "match": "(\\#)(include|define|ifdef|ifndef|else|endif)\\b",
                     "captures": {
                         "1": {
                             "name": "punctuation.definition.preprocessor.alum"
@@ -68,28 +68,68 @@
                         }
                     }
                 }
-            ],
-            "match": "(\\#)(include|define|ifdef|ifndef|else|endif)\\b"
+            ]
+        },
+        "escapes": {
+            "name": "constant.character.escape.alum",
+            "match": "\\\\."
         },
         "strings": {
-            "name": "string.quoted.double.alum",
-            "begin": "\"",
-            "end": "\"",
             "patterns": [
                 {
-                    "name": "constant.character.escape.alum",
-                    "match": "\\\\."
+                    "name": "string.quoted.double.alum",
+                    "begin": "\"",
+                    "end": "\"",
+                    "patterns": [
+                        {
+                            "include": "#escapes"
+                        }
+                    ]
+                },
+                {
+                    "name": "string.quoted.single.alum",
+                    "begin": "'",
+                    "end": "'",
+                    "patterns": [
+                        {
+                            "include": "#escapes"
+                        }
+                    ]
                 }
             ]
         },
         "fstrings": {
-            "name": "string.quoted.double.interpolated.alum",
-            "begin": "f\"",
-            "end": "\"",
             "patterns": [
                 {
+                    "name": "string.quoted.double.interpolated.alum",
+                    "begin": "f\"",
+                    "end": "\"",
+                    "patterns": [
+                        {
+                            "include": "#fstring-content"
+                        }
+                    ]
+                },
+                {
+                    "name": "string.quoted.single.interpolated.alum",
+                    "begin": "f'",
+                    "end": "'",
+                    "patterns": [
+                        {
+                            "include": "#fstring-content"
+                        }
+                    ]
+                }
+            ]
+        },
+        "fstring-content": {
+            "patterns": [
+                {
+                    "include": "#escapes"
+                },
+                {
                     "name": "constant.character.escape.alum",
-                    "match": "\\\\."
+                    "match": "\\{\\{|\\}\\}"
                 },
                 {
                     "name": "meta.interpolation.alum",
@@ -97,13 +137,49 @@
                     "end": "\\}",
                     "patterns": [
                         {
-                            "include": "#numbers"
-                        },
-                        {
-                            "name": "variable.other.alum",
-                            "match": "\\b[A-Za-z_]\\w*\\b"
+                            "include": "#code"
                         }
                     ]
+                }
+            ]
+        },
+        "code": {
+            "patterns": [
+                {
+                    "include": "#strings"
+                },
+                {
+                    "include": "#fstrings"
+                },
+                {
+                    "include": "#numbers"
+                },
+                {
+                    "include": "#constants"
+                },
+                {
+                    "include": "#primitive-types"
+                },
+                {
+                    "include": "#control-keywords"
+                },
+                {
+                    "include": "#declaration-keywords"
+                },
+                {
+                    "include": "#copy-op"
+                },
+                {
+                    "include": "#operators"
+                },
+                {
+                    "include": "#property-access"
+                },
+                {
+                    "include": "#function-call"
+                },
+                {
+                    "include": "#punctuation"
                 }
             ]
         },
@@ -170,6 +246,18 @@
                     "match": "\\+\\+|--|<<|>>|[+\\-*/%&|^~]"
                 },
                 {
+                    "name": "keyword.operator.range.alum",
+                    "match": "\\.\\."
+                },
+                {
+                    "name": "keyword.operator.namespace.alum",
+                    "match": "::"
+                },
+                {
+                    "name": "keyword.operator.lambda.alum",
+                    "match": "\\\\"
+                },
+                {
                     "name": "keyword.operator.alum",
                     "match": "[@;,.?=]"
                 }
@@ -197,7 +285,7 @@
         },
         "copy-op": {
             "name": "keyword.operator.copy.alum",
-            "match": "\\$[A-Za-z_]\\w*"
+            "match": "\\$[A-Za-z_]\\w*|\\$"
         }
     }
 }
