@@ -25,4 +25,11 @@ impl<'a> Lexer<'a> {
             col: 1,
         }
     }
+
+    pub fn with_position(src: &'a str, line: usize, col: usize) -> Self {
+        let mut lex = Self::new(src);
+        lex.line = line;
+        lex.col = col;
+        lex
+    }
 }

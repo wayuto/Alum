@@ -55,8 +55,11 @@ impl IRGen {
                 message: format!("expression nesting exceeds {} levels", MAX_EXPR_DEPTH),
             });
         }
+        let span = expr.span();
         self.expr_depth += 1;
-        let result = self.compile_expr_inner(expr, ctx);
+        let result = self
+            .compile_expr_inner(expr, ctx)
+            .map_err(|e| e.with_fallback_span(span));
         self.expr_depth -= 1;
         result
     }

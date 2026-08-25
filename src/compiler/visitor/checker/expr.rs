@@ -276,7 +276,7 @@ impl TypeChecker {
                         });
                     }
 
-                    let nil = Expr::Nil(Span::new(0, 0));
+                    let nil = Expr::Nil(span);
                     let (l, r) = match expr {
                         Expr::Add(l, r, _) => (
                             std::mem::replace(l.as_mut(), nil.clone()),
@@ -284,7 +284,7 @@ impl TypeChecker {
                         ),
                         _ => unreachable!(),
                     };
-                    *expr = Expr::StrCat(Box::new(l), Box::new(r), Span::new(0, 0));
+                    *expr = Expr::StrCat(Box::new(l), Box::new(r), span);
                     return Ok(Type::Primitive(Primitive::String));
                 }
 
@@ -347,7 +347,7 @@ impl TypeChecker {
                         }
                     }
 
-                    let nil = Expr::Nil(Span::new(0, 0));
+                    let nil = Expr::Nil(span);
                     let (l, r) = match expr {
                         Expr::Add(l, r, _)
                         | Expr::Sub(l, r, _)
@@ -360,28 +360,20 @@ impl TypeChecker {
                     };
 
                     let l = if matches!(lhs_type, Type::Primitive(Primitive::Int)) {
-                        Expr::Cast(
-                            Box::new(l),
-                            Type::Primitive(Primitive::Float),
-                            Span::new(0, 0),
-                        )
+                        Expr::Cast(Box::new(l), Type::Primitive(Primitive::Float), span)
                     } else {
                         l
                     };
                     let r = if matches!(rhs_type, Type::Primitive(Primitive::Int)) {
-                        Expr::Cast(
-                            Box::new(r),
-                            Type::Primitive(Primitive::Float),
-                            Span::new(0, 0),
-                        )
+                        Expr::Cast(Box::new(r), Type::Primitive(Primitive::Float), span)
                     } else {
                         r
                     };
                     *expr = match expr {
-                        Expr::Add(_, _, _) => Expr::FAdd(Box::new(l), Box::new(r), Span::new(0, 0)),
-                        Expr::Sub(_, _, _) => Expr::FSub(Box::new(l), Box::new(r), Span::new(0, 0)),
-                        Expr::Mul(_, _, _) => Expr::FMul(Box::new(l), Box::new(r), Span::new(0, 0)),
-                        Expr::Div(_, _, _) => Expr::FDiv(Box::new(l), Box::new(r), Span::new(0, 0)),
+                        Expr::Add(_, _, _) => Expr::FAdd(Box::new(l), Box::new(r), span),
+                        Expr::Sub(_, _, _) => Expr::FSub(Box::new(l), Box::new(r), span),
+                        Expr::Mul(_, _, _) => Expr::FMul(Box::new(l), Box::new(r), span),
+                        Expr::Div(_, _, _) => Expr::FDiv(Box::new(l), Box::new(r), span),
                         _ => unreachable!(),
                     };
                     return Ok(Type::Primitive(Primitive::Float));
@@ -437,9 +429,9 @@ impl TypeChecker {
             Expr::Neg(operand, _) => {
                 let ty = self.check_expr(operand)?;
                 if ty.is_float() {
-                    let nil = Expr::Nil(Span::new(0, 0));
+                    let nil = Expr::Nil(span);
                     let inner = std::mem::replace(operand.as_mut(), nil);
-                    *expr = Expr::FNeg(Box::new(inner), Span::new(0, 0));
+                    *expr = Expr::FNeg(Box::new(inner), span);
                     return Ok(Type::Primitive(Primitive::Float));
                 }
                 if !ty.is_numeric() {
@@ -705,7 +697,7 @@ impl TypeChecker {
                         });
                     }
 
-                    let nil = Expr::Nil(Span::new(0, 0));
+                    let nil = Expr::Nil(span);
                     let (l, r) = match expr {
                         Expr::Eq(l, r, _)
                         | Expr::Ne(l, r, _)
@@ -720,30 +712,22 @@ impl TypeChecker {
                     };
 
                     let l = if matches!(lhs_type, Type::Primitive(Primitive::Int)) {
-                        Expr::Cast(
-                            Box::new(l),
-                            Type::Primitive(Primitive::Float),
-                            Span::new(0, 0),
-                        )
+                        Expr::Cast(Box::new(l), Type::Primitive(Primitive::Float), span)
                     } else {
                         l
                     };
                     let r = if matches!(rhs_type, Type::Primitive(Primitive::Int)) {
-                        Expr::Cast(
-                            Box::new(r),
-                            Type::Primitive(Primitive::Float),
-                            Span::new(0, 0),
-                        )
+                        Expr::Cast(Box::new(r), Type::Primitive(Primitive::Float), span)
                     } else {
                         r
                     };
                     *expr = match expr {
-                        Expr::Eq(_, _, _) => Expr::FEq(Box::new(l), Box::new(r), Span::new(0, 0)),
-                        Expr::Ne(_, _, _) => Expr::FNe(Box::new(l), Box::new(r), Span::new(0, 0)),
-                        Expr::Lt(_, _, _) => Expr::FLt(Box::new(l), Box::new(r), Span::new(0, 0)),
-                        Expr::Le(_, _, _) => Expr::FLe(Box::new(l), Box::new(r), Span::new(0, 0)),
-                        Expr::Gt(_, _, _) => Expr::FGt(Box::new(l), Box::new(r), Span::new(0, 0)),
-                        Expr::Ge(_, _, _) => Expr::FGe(Box::new(l), Box::new(r), Span::new(0, 0)),
+                        Expr::Eq(_, _, _) => Expr::FEq(Box::new(l), Box::new(r), span),
+                        Expr::Ne(_, _, _) => Expr::FNe(Box::new(l), Box::new(r), span),
+                        Expr::Lt(_, _, _) => Expr::FLt(Box::new(l), Box::new(r), span),
+                        Expr::Le(_, _, _) => Expr::FLe(Box::new(l), Box::new(r), span),
+                        Expr::Gt(_, _, _) => Expr::FGt(Box::new(l), Box::new(r), span),
+                        Expr::Ge(_, _, _) => Expr::FGe(Box::new(l), Box::new(r), span),
                         _ => unreachable!(),
                     };
                 } else if lhs_type.is_string() || rhs_type.is_string() {
@@ -1760,6 +1744,13 @@ impl TypeChecker {
                 }
                 *expr = if strings.is_empty() {
                     Expr::String(String::new(), *span)
+                } else if strings.len() == 1 {
+                    Expr::Call(
+                        Box::new(Expr::Var("_alum_copy".to_string(), *span)),
+                        Vec::new(),
+                        strings,
+                        *span,
+                    )
                 } else {
                     let mut acc = strings.remove(0);
                     for s in strings {

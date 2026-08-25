@@ -16,7 +16,7 @@ impl<'a> Parser<'a> {
                 span,
             });
         }
-        let lex = Lexer::new(src);
+        let lex = Lexer::with_position(src, span.line, span.col);
         let mut sub = Parser {
             lex: lex.peekable(),
             lookahead: Vec::new(),
