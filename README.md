@@ -19,7 +19,7 @@ The official tutorial series (中文教程) walks through the language from scra
 | [07-函数](https://cr0.dpdns.org/2026/02/28/07-Function/)           | [16-Result与Maybe类型](https://cr0.dpdns.org/2026/08/02/16-Result-Maybe/) |
 | [08-函数式编程](https://cr0.dpdns.org/2026/02/28/08-FP/)           | [17-函数注解](https://cr0.dpdns.org/2026/08/06/17-Function-Annotations/)  |
 | [09-外部函数接口](https://cr0.dpdns.org/2026/02/28/09-FFI/)        | [18-编译时求值](https://cr0.dpdns.org/2026/08/08/18-CTE/)                 |
-| [19-模块](https://cr0.dpdns.org/2026/08/17/19-Module/)             | [19-移动与深拷贝](https://cr0.dpdns.org/2026/08/25/20-Move-DeepCopy/)     |
+| [19-模块](https://cr0.dpdns.org/2026/08/17/19-Module/)             | [20-移动与深拷贝](https://cr0.dpdns.org/2026/08/25/20-Move-DeepCopy/)     |
 
 ## Benchmarks
 
