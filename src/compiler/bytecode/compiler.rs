@@ -579,6 +579,12 @@ impl Compiler {
                 self.compile_func(name, params.len(), params, body);
             }
             Expr::Call(f, _, args, _) => {
+                if let Expr::Var(n, _) = f.as_ref() {
+                    if n == "_alum_copy" && args.len() == 1 {
+                        self.compile_expr(&args[0]);
+                        return;
+                    }
+                }
                 let direct_func: Option<Func> = match f.as_ref() {
                     Expr::Var(name, _) => {
                         if self.load_var(name).is_none() {

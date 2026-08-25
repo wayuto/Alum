@@ -1,5 +1,5 @@
 $ifndef ALUM_ARRAY_COMPAT
-$define ALUM_ARRAY_COMPAT 1
+#define ALUM_ARRAY_COMPAT 1
 
 // C-compatible array functions
 // Alum arrays are fully compatible with C arrays

@@ -1,6 +1,7 @@
 use super::context::Context;
 use super::ir::{IRConst, IRType, Instruction, Op, Operand};
 use crate::compiler::{
+    Span,
     codegen::CodeGenError,
     irgen::IRGen,
     parser::{Expr, Primitive, Type},
@@ -13,8 +14,36 @@ impl IRGen {
             Type::Struct(name, _) => self.structs.contains_key(name),
             Type::Union(name, _) => self.unions.contains_key(name),
             Type::Array(_) => true,
+            Type::Primitive(Primitive::String) => true,
             _ => false,
         }
+    }
+
+    pub(super) fn can_move_var(&self, name: &str, ctx: &Context) -> bool {
+        ctx.get_var_type(name).is_ok() && !ctx.borrowed.contains(name)
+    }
+
+    pub(super) fn check_use_after_move(
+        &self,
+        name: &str,
+        span: Span,
+        ctx: &Context,
+    ) -> Result<(), CodeGenError> {
+        if !ctx.moved.contains(name) || ctx.get_var_type(name).is_err() {
+            return Ok(());
+        }
+        let is_resource = ctx
+            .get_var_high_type(name)
+            .map(|t| self.is_resource_type(t))
+            .unwrap_or(false);
+        if is_resource {
+            return Err(CodeGenError::UseAfterMove {
+                name: name.to_string(),
+                moved_at: ctx.moved_at.get(name).copied().unwrap_or(span),
+                span,
+            });
+        }
+        Ok(())
     }
 
     pub(super) fn is_fresh_expr(&self, e: &Expr) -> bool {
@@ -31,6 +60,32 @@ impl IRGen {
         )
     }
 
+    pub(super) fn array_has_string_elems(e: &Expr) -> bool {
+        match e {
+            Expr::ArrayLiteral(items, _) => items.iter().any(|i| Self::expr_holds_string(i)),
+            Expr::ArrayFill(ty, len, _) => {
+                matches!(ty, Type::Primitive(Primitive::String))
+                    || Self::array_has_string_elems(len)
+            }
+            _ => false,
+        }
+    }
+
+    fn expr_holds_string(e: &Expr) -> bool {
+        match e {
+            Expr::String(..) => true,
+            Expr::ArrayLiteral(..) => Self::array_has_string_elems(e),
+            Expr::ArrayFill(ty, _, _) => matches!(ty, Type::Primitive(Primitive::String)),
+            Expr::StructLiteral(_, _, fields, _) => {
+                fields.iter().any(|(_, fe)| Self::expr_holds_string(fe))
+            }
+            Expr::UnionLiteral(_, _, fields, _) => {
+                fields.iter().any(|(_, fe)| Self::expr_holds_string(fe))
+            }
+            _ => false,
+        }
+    }
+
     pub(super) fn resource_copy_info(&self, e: &Expr, ctx: &Context) -> Option<Type> {
         let ty = self.expr_high_type(e, ctx)?;
         if self.is_resource_type(&ty) && !self.is_fresh_expr(e) {
@@ -40,6 +95,27 @@ impl IRGen {
         }
     }
 
+    pub(super) fn check_loop_moves(
+        &self,
+        before: &std::collections::HashSet<String>,
+        ctx: &Context,
+    ) -> Result<(), CodeGenError> {
+        let newly: Vec<(String, Span)> = ctx
+            .moved
+            .iter()
+            .filter(|n| !before.contains(*n))
+            .filter_map(|n| ctx.moved_at.get(n).map(|sp| (n.clone(), *sp)))
+            .collect();
+        for (name, at) in newly {
+            return Err(CodeGenError::UseAfterMove {
+                name,
+                moved_at: at,
+                span: at,
+            });
+        }
+        Ok(())
+    }
+
     pub(super) fn elem_scale(ty: &Type) -> i64 {
         match ty {
             Type::Primitive(Primitive::Boolean) => 8,
@@ -47,7 +123,12 @@ impl IRGen {
         }
     }
 
-    pub(super) fn emit_field_addr(&mut self, ctx: &mut Context, base_op: Operand, base: usize) -> Operand {
+    pub(super) fn emit_field_addr(
+        &mut self,
+        ctx: &mut Context,
+        base_op: Operand,
+        base: usize,
+    ) -> Operand {
         if base == 0 {
             base_op
         } else {
@@ -220,10 +301,31 @@ impl IRGen {
     }
 
     pub(super) fn emit_free_ptr(&mut self, ctx: &mut Context, ptr: Operand) {
+        let zero_idx = self.get_const_index(IRConst::Int(0));
+        let skip = ctx.new_label("freed");
+        let chk = ctx.new_tmp(IRType::Bool);
+        ctx.instructions.push(Instruction {
+            op: Op::Ne,
+            dst: Some(chk.clone()),
+            src1: Some(ptr.clone()),
+            src2: Some(Operand::ConstIdx(zero_idx)),
+        });
+        ctx.instructions.push(Instruction {
+            op: Op::JumpIfFalse,
+            dst: None,
+            src1: Some(chk),
+            src2: Some(Operand::Label(skip.clone())),
+        });
         ctx.instructions.push(Instruction {
             op: Op::Free,
             dst: None,
             src1: Some(ptr),
+            src2: None,
+        });
+        ctx.instructions.push(Instruction {
+            op: Op::Label(skip),
+            dst: None,
+            src1: None,
             src2: None,
         });
     }
@@ -393,6 +495,37 @@ impl IRGen {
         ptr: Operand,
         ty: &Type,
     ) -> Result<(), CodeGenError> {
+        let zero_idx = self.get_const_index(IRConst::Int(0));
+        let nonnull = ctx.new_tmp(IRType::Bool);
+        let end = ctx.new_label("freeend");
+        ctx.instructions.push(Instruction {
+            op: Op::Ne,
+            dst: Some(nonnull.clone()),
+            src1: Some(ptr.clone()),
+            src2: Some(Operand::ConstIdx(zero_idx)),
+        });
+        ctx.instructions.push(Instruction {
+            op: Op::JumpIfFalse,
+            dst: None,
+            src1: Some(nonnull),
+            src2: Some(Operand::Label(end.clone())),
+        });
+        self.emit_free_inner(ctx, ptr, ty)?;
+        ctx.instructions.push(Instruction {
+            op: Op::Label(end),
+            dst: None,
+            src1: None,
+            src2: None,
+        });
+        Ok(())
+    }
+
+    fn emit_free_inner(
+        &mut self,
+        ctx: &mut Context,
+        ptr: Operand,
+        ty: &Type,
+    ) -> Result<(), CodeGenError> {
         match ty {
             Type::Struct(name, targs) => {
                 let Some((_, fields)) = self.structs.get(name).cloned() else {
@@ -407,9 +540,14 @@ impl IRGen {
                     let fval = self.emit_load_at(ctx, addr);
                     self.emit_free(ctx, fval, &fty)?;
                 }
+                self.emit_free_ptr(ctx, ptr);
                 Ok(())
             }
             Type::Union(..) => {
+                self.emit_free_ptr(ctx, ptr);
+                Ok(())
+            }
+            Type::Primitive(Primitive::String) => {
                 self.emit_free_ptr(ctx, ptr);
                 Ok(())
             }
@@ -530,6 +668,56 @@ impl IRGen {
                 let dst = self.emit_malloc(ctx, 8);
                 let fval = self.emit_load_at(ctx, src);
                 self.emit_const_store_at(ctx, dst.clone(), fval);
+                Ok(dst)
+            }
+            Type::Primitive(Primitive::String) => {
+                let len_tmp = ctx.new_tmp(IRType::Int);
+                ctx.instructions.push(Instruction {
+                    op: Op::Arg(0),
+                    dst: None,
+                    src1: Some(src.clone()),
+                    src2: None,
+                });
+                ctx.instructions.push(Instruction {
+                    op: Op::Call,
+                    dst: Some(len_tmp.clone()),
+                    src1: Some(Operand::Function("strlen".to_string())),
+                    src2: None,
+                });
+                let one_idx = self.get_const_index(IRConst::Int(1));
+                let size_tmp = ctx.new_tmp(IRType::Int);
+                ctx.instructions.push(Instruction {
+                    op: Op::Add,
+                    dst: Some(size_tmp.clone()),
+                    src1: Some(len_tmp),
+                    src2: Some(Operand::ConstIdx(one_idx)),
+                });
+                let dst = ctx.new_tmp(IRType::String);
+                ctx.instructions.push(Instruction {
+                    op: Op::Malloc,
+                    dst: Some(dst.clone()),
+                    src1: Some(size_tmp),
+                    src2: None,
+                });
+                ctx.instructions.push(Instruction {
+                    op: Op::Arg(0),
+                    dst: None,
+                    src1: Some(dst.clone()),
+                    src2: None,
+                });
+                ctx.instructions.push(Instruction {
+                    op: Op::Arg(1),
+                    dst: None,
+                    src1: Some(src),
+                    src2: None,
+                });
+                let ret_tmp = ctx.new_tmp(IRType::Int);
+                ctx.instructions.push(Instruction {
+                    op: Op::Call,
+                    dst: Some(ret_tmp),
+                    src1: Some(Operand::Function("strcpy".to_string())),
+                    src2: None,
+                });
                 Ok(dst)
             }
             Type::Array(elem) => {

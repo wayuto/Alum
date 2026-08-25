@@ -124,10 +124,12 @@ impl IRGen {
             src2: None,
         });
 
+        let moved_before = ctx.moved.clone();
         ctx.enter_scope();
         self.compile_expr(*body, ctx)?;
         self.emit_scope_frees(ctx)?;
         ctx.exit_scope()?;
+        self.check_loop_moves(&moved_before, ctx)?;
 
         ctx.instructions.push(Instruction {
             op: Op::Label(label_cont.clone()),
@@ -173,6 +175,7 @@ impl IRGen {
             ctx.loop_end_labels.push(label_end.clone());
             ctx.loop_inc_labels.push(label_inc.clone());
             ctx.loop_scope_depths.push(ctx.scope.len());
+            let moved_before = ctx.moved.clone();
             ctx.enter_scope();
             let idx_name = ctx.new_label("idx");
             let idx_var = Operand::Var(idx_name.clone());
@@ -260,6 +263,7 @@ impl IRGen {
             });
             self.emit_scope_frees(ctx)?;
             ctx.exit_scope()?;
+            self.check_loop_moves(&moved_before, ctx)?;
             ctx.loop_end_labels.pop();
             ctx.loop_inc_labels.pop();
             ctx.loop_scope_depths.pop();
@@ -300,6 +304,7 @@ impl IRGen {
             ctx.loop_inc_labels.push(label_cond.clone());
 
             ctx.loop_scope_depths.push(ctx.scope.len());
+            let moved_before = ctx.moved.clone();
             ctx.enter_scope();
 
             ctx.instructions.push(Instruction {
@@ -384,6 +389,7 @@ impl IRGen {
 
             self.emit_scope_frees(ctx)?;
             ctx.exit_scope()?;
+            self.check_loop_moves(&moved_before, ctx)?;
             ctx.loop_end_labels.pop();
             ctx.loop_inc_labels.pop();
             ctx.loop_scope_depths.pop();
@@ -443,6 +449,7 @@ impl IRGen {
         ctx.loop_inc_labels.push(label_inc.clone());
 
         ctx.loop_scope_depths.push(ctx.scope.len());
+        let moved_before = ctx.moved.clone();
         ctx.enter_scope();
         let idx_name = ctx.new_label("idx");
         let idx_var = Operand::Var(idx_name.clone());
@@ -557,6 +564,7 @@ impl IRGen {
 
         self.emit_scope_frees(ctx)?;
         ctx.exit_scope()?;
+        self.check_loop_moves(&moved_before, ctx)?;
         ctx.loop_end_labels.pop();
         ctx.loop_inc_labels.pop();
         ctx.loop_scope_depths.pop();

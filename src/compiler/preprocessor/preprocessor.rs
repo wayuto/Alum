@@ -453,7 +453,20 @@ impl<'a> Preprocessor<'a> {
                 continue;
             }
 
-            if self.current() == '$' {
+            if self.current() == '#' {
+                let out_tail = output.as_bytes();
+                let line_start = match out_tail.iter().rposition(|&b| b == b'\n') {
+                    Some(i) => i + 1,
+                    None => 0,
+                };
+                if !out_tail[line_start..]
+                    .iter()
+                    .all(|&b| b == b' ' || b == b'\t')
+                {
+                    self.emit_char('#', &mut output, &mut source_map);
+                    continue;
+                }
+
                 self.bump();
                 let cmd = self.parse_ident();
 
@@ -590,7 +603,7 @@ impl<'a> Preprocessor<'a> {
                             });
                         }
                     }
-                    "import" => {
+                    "include" => {
                         if self.skipping {
                             self.skip_until_newline();
                             continue;

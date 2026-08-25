@@ -1,5 +1,5 @@
 $ifndef VARS_AL
-$define VARS_AL nil
+#define VARS_AL nil
 
 extern counter: int
 extern ratio: float

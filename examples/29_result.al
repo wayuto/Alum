@@ -36,6 +36,3 @@ fun main(): int {
     }
     return 0    
 }
-
-
-

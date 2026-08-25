@@ -1,5 +1,5 @@
 $ifndef HELPER_AL
-$define HELPER_AL nil
+#define HELPER_AL nil
 
 fun(extern) c_add(int, int): int
 fun(extern) c_multiply(int, int): int

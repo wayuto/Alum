@@ -14,7 +14,17 @@ impl IRGen {
     ) -> Result<Operand, CodeGenError> {
         let mut compiled = Vec::new();
         for e in elements.iter() {
-            compiled.push(self.compile_expr(e.clone(), ctx)?);
+            let op = self.compile_expr(e.clone(), ctx)?;
+
+            let op = if matches!(
+                self.expr_high_type(e, ctx),
+                Some(Type::Primitive(Primitive::String))
+            ) {
+                self.copy_resource(ctx, op, &Type::Primitive(Primitive::String))?
+            } else {
+                op
+            };
+            compiled.push(op);
         }
 
         let ir_const = IRConst::Array(compiled.clone());

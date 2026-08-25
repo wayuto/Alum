@@ -362,6 +362,10 @@ impl<'a> Lexer<'a> {
                 self.bump();
                 Token::AT
             }
+            '$' => {
+                self.bump();
+                Token::DOLLAR
+            }
             '\\' => {
                 self.bump();
                 Token::LAMBDA

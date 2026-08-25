@@ -790,6 +790,18 @@ impl TypeChecker {
                 }
                 Ok(Type::Primitive(Primitive::Boolean))
             }
+            Expr::Call(callee, _, args, _) if matches!(callee.as_ref(), Expr::Var(n, _) if n == "_alum_copy") =>
+            {
+                if args.len() != 1 {
+                    return Err(CheckerError::ArgCountMismatch {
+                        expected: 1,
+                        found: args.len(),
+                        func: "copy".to_string(),
+                        span,
+                    });
+                }
+                self.check_expr(&mut args[0])
+            }
             Expr::Call(callee, type_args, args, _) => {
                 let callee_type = self.check_expr(callee)?;
                 let arg_types: Result<Vec<Type>, CheckerError> =
@@ -1130,12 +1142,15 @@ impl TypeChecker {
                             }
                         }
                         Type::Pointer(inner) => {
-                            if !self.types_compatible(&inner, &value_type) {
+                            let void_byte_store =
+                                matches!(inner.as_ref(), Type::Primitive(Primitive::Void))
+                                    && matches!(value_type, Type::Primitive(Primitive::Int));
+                            if !void_byte_store && !self.types_compatible(&inner, &value_type) {
                                 return Err(CheckerError::TypeMismatch {
                                     expected: *inner,
                                     found: value_type,
                                     context: "pointer assignment".to_string(),
-                                    span: span,
+                                    span,
                                 });
                             }
                         }

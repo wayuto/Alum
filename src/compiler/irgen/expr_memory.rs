@@ -336,5 +336,4 @@ impl IRGen {
             _ => None,
         }
     }
-
 }

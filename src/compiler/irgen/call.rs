@@ -1,6 +1,7 @@
 use super::context::Context;
 use super::ir::{IRConst, IRType, Instruction, Op, Operand};
 use crate::compiler::{
+    Span,
     codegen::CodeGenError,
     irgen::IRGen,
     parser::{Expr, Primitive, Type},
@@ -15,6 +16,18 @@ impl IRGen {
         args: Vec<Expr>,
         ctx: &mut Context,
     ) -> Result<Operand, CodeGenError> {
+        if matches!(&*callee, Expr::Var(n, _) if n == "_alum_copy") {
+            let arg = args.first().ok_or_else(|| CodeGenError::TypeError {
+                message: String::from("_alum_copy requires exactly one argument"),
+            })?;
+            let src = self.compile_expr(arg.clone(), ctx)?;
+            let hty = self.expr_high_type(arg, ctx);
+            return match hty {
+                Some(ty) if self.is_resource_type(&ty) => self.copy_resource(ctx, src, &ty),
+                _ => Ok(src),
+            };
+        }
+
         let func_name = match &*callee {
             Expr::Var(name, _) => {
                 if self.find_func(name).is_ok() {
@@ -27,7 +40,6 @@ impl IRGen {
             }
             _ => None,
         };
-
         if let Some(ref name) = func_name {
             let func = self.find_func(name)?;
             if args.len() != func.params.len() {
@@ -40,6 +52,8 @@ impl IRGen {
                 });
             }
             let mut evaluated: Vec<(Operand, IRType)> = Vec::new();
+
+            let mut moved_args: Vec<(String, Span)> = Vec::new();
             let mut n = 0;
             for (arg, param) in zip(args.iter(), func.params.iter()) {
                 let operand = self.compile_expr(arg.clone(), ctx)?;
@@ -57,7 +71,17 @@ impl IRGen {
                 }
                 let operand = match self.expr_high_type(arg, ctx) {
                     Some(hty) if self.is_resource_type(&hty) && !self.is_fresh_expr(arg) => {
-                        self.copy_resource(ctx, operand, &hty)?
+                        if let Expr::Var(src, sp) = arg {
+                            if self.can_move_var(src, ctx) {
+                                ctx.mark_moved(src, *sp);
+                                moved_args.push((src.clone(), *sp));
+                                operand
+                            } else {
+                                self.copy_resource(ctx, operand, &hty)?
+                            }
+                        } else {
+                            self.copy_resource(ctx, operand, &hty)?
+                        }
                     }
                     _ => operand,
                 };
@@ -88,6 +112,16 @@ impl IRGen {
                     }
                 }
             }
+
+            let zero_idx = self.get_const_index(IRConst::Int(0));
+            for (src_name, _) in &moved_args {
+                ctx.instructions.push(Instruction {
+                    op: Op::Store,
+                    dst: Some(Operand::Var(ctx.slot(src_name.as_str()))),
+                    src1: Some(Operand::ConstIdx(zero_idx)),
+                    src2: None,
+                });
+            }
             let res_tmp = ctx.new_tmp(func.ret_type);
             ctx.instructions.push(Instruction {
                 op: Op::Call,
@@ -102,8 +136,33 @@ impl IRGen {
             let mut evaluated: Vec<Operand> = Vec::new();
             for arg in args.iter() {
                 let operand = self.compile_expr(arg.clone(), ctx)?;
+
                 let operand = match self.resource_copy_info(arg, ctx) {
-                    Some(ty) => self.copy_resource(ctx, operand, &ty)?,
+                    Some(ty) => {
+                        if let Expr::Var(src, arg_span) = arg {
+                            if self.can_move_var(src, ctx) {
+                                let h = ctx.new_tmp(IRType::Int);
+                                ctx.instructions.push(Instruction {
+                                    op: Op::Load,
+                                    dst: Some(h.clone()),
+                                    src1: Some(operand.clone()),
+                                    src2: None,
+                                });
+                                let zero_idx = self.get_const_index(IRConst::Int(0));
+                                let src_name = src.clone();
+                                ctx.instructions.push(Instruction {
+                                    op: Op::Store,
+                                    dst: Some(Operand::Var(ctx.slot(&src_name))),
+                                    src1: Some(Operand::ConstIdx(zero_idx)),
+                                    src2: None,
+                                });
+                                ctx.mark_moved(src, *arg_span);
+                                evaluated.push(h);
+                                continue;
+                            }
+                        }
+                        self.copy_resource(ctx, operand, &ty)?
+                    }
                     None => operand,
                 };
                 evaluated.push(operand);

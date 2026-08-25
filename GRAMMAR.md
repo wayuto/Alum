@@ -24,13 +24,13 @@ keyword      = "fun" | "var" | "cst" | "struct" | "union" | "enum" | "typedef"
 
 (* ===== Preprocessor (standalone text layer) ===== *)
 
-pp_line      = pp_import | pp_define | pp_ifdef | pp_ifndef | pp_else | pp_endif ;
-pp_import    = "$import" , file_path ;
-pp_define    = "$define" , identifier , [ "(" , id_list , ")" ] , replacement ;
-pp_ifdef     = "$ifdef" , identifier ;
-pp_ifndef    = "$ifndef" , identifier ;
-pp_else      = "$else" ;
-pp_endif     = "$endif" ;
+pp_line      = pp_include | pp_define | pp_ifdef | pp_ifndef | pp_else | pp_endif ;
+pp_include   = "#include" , file_path ;
+pp_define    = "#define" , identifier , [ "(" , id_list , ")" ] , replacement ;
+pp_ifdef     = "#ifdef" , identifier ;
+pp_ifndef    = "#ifndef" , identifier ;
+pp_else      = "#else" ;
+pp_endif     = "#endif" ;
 
 (* ===== Program ===== *)
 
@@ -83,7 +83,7 @@ call         = additive , postfix , { postfix } ;
 additive     = term , [ ".." , additive ] , { ( "+" | "-" ) , term } ;
 term         = prefix , { ( "*" | "/" | "%" ) , prefix } ;
 prefix       = { unary_op } , factor ;
-unary_op     = "-" | "!" | "~" | "*" | "&" | "++" | "--" ;
+unary_op     = "-" | "!" | "~" | "*" | "&" | "++" | "--" | "$" ;   (* $expr = deep copy *)
 
 postfix      = "." , identifier
              | "[" , expr , "]"

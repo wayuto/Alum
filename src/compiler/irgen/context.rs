@@ -26,11 +26,16 @@ pub(super) struct Context {
     pub array_lengths: HashMap<String, usize>,
     pub func_name: String,
     pub borrowed: HashSet<String>,
+
+    pub moved: HashSet<String>,
+
+    pub moved_at: HashMap<String, Span>,
     pub(super) var_slots: HashMap<String, Vec<String>>,
 
     pub(super) var_type_history: HashMap<String, Vec<Option<Type>>>,
     pub(super) array_len_history: HashMap<String, Vec<Option<usize>>>,
     pub(super) borrow_history: HashMap<String, Vec<bool>>,
+    pub(super) moved_history: HashMap<String, Vec<bool>>,
 }
 
 impl Context {
@@ -47,10 +52,13 @@ impl Context {
             array_lengths: HashMap::new(),
             func_name,
             borrowed: HashSet::new(),
+            moved: HashSet::new(),
+            moved_at: HashMap::new(),
             var_slots: HashMap::new(),
             var_type_history: HashMap::new(),
             array_len_history: HashMap::new(),
             borrow_history: HashMap::new(),
+            moved_history: HashMap::new(),
         }
     }
 
@@ -128,6 +136,19 @@ impl Context {
                 }
                 if history.is_empty() {
                     self.borrow_history.remove(name);
+                }
+            }
+            if let Some(history) = self.moved_history.get_mut(name) {
+                if let Some(was_moved) = history.pop() {
+                    if was_moved {
+                        self.moved.insert(name.clone());
+                    } else {
+                        self.moved.remove(name);
+                        self.moved_at.remove(name);
+                    }
+                }
+                if history.is_empty() {
+                    self.moved_history.remove(name);
                 }
             }
         }
@@ -219,6 +240,10 @@ impl Context {
             .entry(name.clone())
             .or_default()
             .push(self.borrowed.contains(&name));
+        self.moved_history
+            .entry(name.clone())
+            .or_default()
+            .push(self.moved.contains(&name));
         current_scope.insert(name.clone(), Symbol { ir_type, slot });
         Ok(())
     }
@@ -236,5 +261,15 @@ impl Context {
 
     pub fn get_var_high_type(&self, name: &str) -> Option<&Type> {
         self.var_types.get(name)
+    }
+
+    pub fn mark_moved(&mut self, name: &str, span: Span) {
+        self.moved.insert(name.to_string());
+        self.moved_at.insert(name.to_string(), span);
+    }
+
+    pub fn unmark_moved(&mut self, name: &str) {
+        self.moved.remove(name);
+        self.moved_at.remove(name);
     }
 }

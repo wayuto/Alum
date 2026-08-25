@@ -44,7 +44,7 @@ impl fmt::Display for PreprocessorError {
             PreprocessorError::ImportError { file, row, col } => {
                 write!(
                     f,
-                    "Import error at {}:{}: cannot import '{}'",
+                    "Import error at {}:{}: cannot include '{}'",
                     row, col, file
                 )
             }

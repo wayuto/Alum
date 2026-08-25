@@ -956,6 +956,21 @@ impl<'a> Parser<'a> {
 
     pub(super) fn prefix_inner(&mut self) -> Result<Expr, ParserError> {
         match self.peek().cloned() {
+            Some(Ok((Token::DOLLAR, span))) => {
+                self.next()?;
+                let inner = self.prefix()?;
+                let sp = if inner.span().line == 0 || inner.span().col == 0 {
+                    span
+                } else {
+                    inner.span()
+                };
+                return Ok(Expr::Call(
+                    Box::new(Expr::Var("_alum_copy".to_string(), sp)),
+                    Vec::new(),
+                    vec![inner],
+                    sp,
+                ));
+            }
             Some(Ok((Token::STAR, span))) => {
                 self.next()?;
                 self.deref_depth += 1;

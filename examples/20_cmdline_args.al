@@ -11,6 +11,3 @@ fun main(argc: int, argv: string[]): int {
     }
     return 0
 }
-
-
-

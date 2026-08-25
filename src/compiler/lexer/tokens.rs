@@ -80,6 +80,7 @@ pub enum Token {
     TYPE(String),
     IDENT(String),
     AT,
+    DOLLAR,
     LAMBDA,
     EOF,
 }

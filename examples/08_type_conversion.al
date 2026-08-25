@@ -20,9 +20,10 @@ fun main(): int {
     println(f"Negative integer {neg_num} as string: {str_neg}")
     
     // String to integer
+    // NOTE: atoi takes ownership of its argument; `$str` passes a copy
     var str: string = "100"
-    var parsed_int: int = atoi(str)
-    
+    var parsed_int: int = atoi($str)
+
     println(f"String \"{str}\" as integer: {parsed_int}")
     
     // Float to string
@@ -33,7 +34,7 @@ fun main(): int {
     
     // String to float
     var float_str: string = "2.718"
-    var parsed_float: float = atof(float_str)
+    var parsed_float: float = atof($float_str)
     
     println(f"String \"{float_str}\" as float: {parsed_float}")
     

@@ -65,6 +65,13 @@ impl IRGen {
                 let obj_ty = self.expr_high_type(obj, ctx)?;
                 self.member_field_type(&obj_ty, field_name)
             }
+
+            Expr::Call(callee, _, args, _)
+                if matches!(callee.as_ref(), Expr::Var(n, _) if n == "_alum_copy")
+                    && args.len() == 1 =>
+            {
+                self.expr_high_type(&args[0], ctx)
+            }
             Expr::Call(callee, type_args, _, _) => self.call_ret_high_type(callee, type_args, ctx),
             Expr::StructLiteral(name, type_args, _, _) => {
                 Some(Type::Struct(name.clone(), type_args.clone()))

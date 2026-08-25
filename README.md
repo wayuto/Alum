@@ -37,7 +37,7 @@ The official tutorial series (中文教程) walks through the language from scra
 
 ### Memory Management
 
-- **Automatic Resource Release** — structs, unions and arrays own their heap storage as value types: assignment deep-copies, and every declared value is released automatically when its scope exits
+- **Move Semantics + Explicit Copies** — assignment and argument passing transfer ownership (O(1)); use `$expr` for an explicit deep copy and `*T` pointers for shared access; every owned value is released automatically when its scope exits
 - **Manual Control When Needed** — raw `malloc` / `free` from the standard library for custom allocators and fine-grained lifetimes
 
 ### Functional & Control Flow
@@ -53,7 +53,7 @@ The official tutorial series (中文教程) walks through the language from scra
 - **Native AOT Compilation** — x86_64 machine code via an optimizing IR pipeline with a built-in register allocator, assembler, and ELF encoder; links with `lld`
 - **Compile-Time Evaluation (CTE)** — `pure` functions run at compile time on the built-in bytecode VM: loops, ranges, `match`, literals, casts, recursion with memoization (`fib(40)` folds into one constant); guarded by step, time, stack, and recursion limits
 - **Native Compile-Time Evaluation** — fold `fun(extern, pure)` calls against a shared library via `--cte-lib ./libfoo.so` (`libffi`); see `examples/32_native_cte/`
-- **Preprocessor** — `$import` includes, `$define` object/function macros with recursion detection, conditional compilation via `$ifdef` / `$ifndef` / `$else` / `$endif`
+- **Preprocessor** — `#include` textual includes, `#define` object/function macros with recursion detection, conditional compilation via `#ifdef` / `#ifndef` / `#else` / `#endif`
 - **C Interop (FFI)** — call C functions directly; C-compatible memory layout with zero conversion overhead
 - **Build Toolkit** — integrated `almk`: scaffolding, building, running, git/zip dependencies, mixed C/Alum projects
 - **Standard Library** — I/O, string utilities, conversions, `Vec`, `Result`/`Maybe`, math

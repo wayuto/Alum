@@ -1,4 +1,4 @@
-use super::codegen::{m_base_disp, m_rbp, parse_reg, AsmCodeGen};
+use super::codegen::{AsmCodeGen, m_base_disp, m_rbp, parse_reg};
 use super::error::CodeGenError;
 use super::regalloc;
 use crate::compiler::{

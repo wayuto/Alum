@@ -9,6 +9,9 @@
             "include": "#preprocessor"
         },
         {
+            "include": "#copy-op"
+        },
+        {
             "include": "#strings"
         },
         {
@@ -65,7 +68,8 @@
                         }
                     }
                 }
-            ]
+            ],
+            "match": "(\\#)(include|define|ifdef|ifndef|else|endif)\\b"
         },
         "strings": {
             "name": "string.quoted.double.alum",
@@ -190,6 +194,10 @@
                     "match": "\\[|\\]"
                 }
             ]
+        },
+        "copy-op": {
+            "name": "keyword.operator.copy.alum",
+            "match": "\\$[A-Za-z_]\\w*"
         }
     }
 }
