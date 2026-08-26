@@ -41,5 +41,3 @@ code --install-extension alum-vscode-0.9.8.vsix
 npm install
 npx vsce package
 ```
-
-This generates `alum-vscode-0.9.8.vsix` in the project root.

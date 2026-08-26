@@ -319,23 +319,28 @@ links the `.so` into the final executable with an rpath (when using
 ## CLI Usage
 
 ```
-alc [OPTIONS] <INPUT>
+Alum compiler
+
+Usage: alc [OPTIONS] [INPUT]...
 
 Arguments:
-  <INPUT>...    Input files (.al source files or .o/.obj object files)
+  [INPUT]...  Input files (.al source files or .o/.obj object files)
 
 Options:
-  -o, --output <FILE>       Output file name
-  -c, --compile-only        Compile only, do not link
-  -r, --run                 Compile and run immediately
-  -E                        Preprocess only; do not compile, assemble or link
-  --emit-ast                Output AST representation
-  -I <DIR>                  Add include directory (can be used multiple times)
-  --nostdlib                Do not link with standard library
-  --cte-lib <PATH>          Shared library dlopened for compile-time evaluation of `fun(extern, pure)` (can be repeated; also linked into the final executable)
-  -v, --verbose             Verbose output
-  -h, --help                Print help
-  -V, --version             Print version
+  -o, --output <FILE>   Output file name
+  -c, --compile-only    Compile only, do not link
+      --emit-ast        Output AST representation
+      --emit-ir         Dump optimized IR to stderr, then continue compiling
+      --emit-asm        Dump generated assembly to stderr, then continue compiling
+  -r, --run             Compile and run immediately
+  -I <DIR>              Add include directory
+  -E                    Preprocess only; do not compile, assemble or link
+      --nostdlib        Do not link with standard library
+  -v, --verbose         Verbose output
+      --library <TYPE>  Build library (static or shared)
+      --cte-lib <PATH>  Shared library to dlopen for compile-time evaluation of fun(extern, pure) functions
+  -h, --help            Print help
+  -V, --version         Print version
 ```
 
 ## Development
