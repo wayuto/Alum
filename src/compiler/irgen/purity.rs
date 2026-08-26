@@ -66,10 +66,6 @@ pub fn check_pure_functions(body: &[Expr]) -> Result<(), CodeGenError> {
     Ok(())
 }
 
-pub(super) fn check_lambda_params(_program_body: &[Expr]) -> Result<(), CodeGenError> {
-    Ok(())
-}
-
 fn op_err(fn_name: &str, what: &str, _span: Span) -> CodeGenError {
     CodeGenError::NameError {
         message: format!("pure function '{}' may not {}", fn_name, what),

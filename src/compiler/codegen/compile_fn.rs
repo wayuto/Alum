@@ -5,7 +5,7 @@ use crate::compiler::{
     codegen::asm::*,
     irgen::ir::{IRFunction, IRType, Instruction, Op, Operand as IROperand},
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy)]
 enum Jcc {
@@ -87,37 +87,19 @@ impl AsmCodeGen {
         self.used_callee_saved = alloc.used_callee_saved;
         let stack_size = alloc.stack_size;
 
-        let is_leaf = !func.instructions.iter().any(|i| {
-            matches!(
-                i.op,
-                Op::Call
-                    | Op::Malloc
-                    | Op::Free
-                    | Op::StrCat
-                    | Op::StrByte
-                    | Op::Range
-                    | Op::StrEq
-                    | Op::StrNe
-                    | Op::StrLt
-                    | Op::StrLe
-                    | Op::StrGt
-                    | Op::StrGe
-            )
-        });
+        let is_leaf = alloc.is_leaf;
         let mut lea_used: std::collections::HashSet<String> = std::collections::HashSet::new();
         for inst in &func.instructions {
-            if matches!(inst.op, Op::Lea) {
-                if let Some(IROperand::Var(name)) = &inst.src1 {
-                    lea_used.insert(name.clone());
-                }
+            if matches!(inst.op, Op::Lea)
+                && let Some(IROperand::Var(name)) = &inst.src1
+            {
+                lea_used.insert(name.clone());
             }
         }
-
-        let mut stack_params: HashMap<String, i32> = HashMap::new();
+        let mut stack_params: HashSet<String> = HashSet::new();
         {
             let mut n_int = 0usize;
             let mut n_flt = 0usize;
-            let mut slot = 0i32;
             for (param, ty) in &func.params {
                 let on_stack = if matches!(ty, IRType::Float) {
                     n_flt >= 8
@@ -131,9 +113,8 @@ impl AsmCodeGen {
                 }
                 if on_stack {
                     if let IROperand::Var(name) = param {
-                        stack_params.insert(name.clone(), slot);
+                        stack_params.insert(name.clone());
                     }
-                    slot += 1;
                 }
             }
         }
@@ -517,6 +498,7 @@ impl AsmCodeGen {
                     self.push_text(Asm::Jp(skip.clone()));
                     cc.emit(self, &label);
                     self.push_text(Asm::Label(skip));
+                    cc.emit(self, &label);
                 } else {
                     self.push_text(Asm::Jp(label.clone()));
                     self.push_text(Asm::Jne(label.clone()));
@@ -532,8 +514,8 @@ impl AsmCodeGen {
             self.push_text(Asm::Cmp(Operand::Reg(Reg::Rax), Operand::Reg(Reg::Rbx)));
             self.invalidate_cached_reg(Reg::Rax);
             self.invalidate_cached_reg(Reg::Rbx);
+            cc.emit(self, &label);
         }
-        cc.emit(self, &label);
         Ok(true)
     }
 }

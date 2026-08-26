@@ -85,59 +85,25 @@ impl error::Error for CompilerError {
     }
 }
 
-impl From<io::Error> for CompilerError {
-    fn from(e: io::Error) -> Self {
-        CompilerError {
-            source_map: SourceMap::new(),
-            errors: vec![CompilerErrorKind::Io(e)],
+macro_rules! from_impl {
+    ($t:ty, $k:path) => {
+        impl From<$t> for CompilerError {
+            fn from(e: $t) -> Self {
+                CompilerError {
+                    source_map: SourceMap::new(),
+                    errors: vec![$k(e)],
+                }
+            }
         }
-    }
+    };
 }
 
-impl From<PreprocessorError> for CompilerError {
-    fn from(e: PreprocessorError) -> Self {
-        CompilerError {
-            source_map: SourceMap::new(),
-            errors: vec![CompilerErrorKind::Preprocessor(e)],
-        }
-    }
-}
-
-impl From<LexerError> for CompilerError {
-    fn from(e: LexerError) -> Self {
-        CompilerError {
-            source_map: SourceMap::new(),
-            errors: vec![CompilerErrorKind::Lexer(e)],
-        }
-    }
-}
-
-impl From<ParserError> for CompilerError {
-    fn from(e: ParserError) -> Self {
-        CompilerError {
-            source_map: SourceMap::new(),
-            errors: vec![CompilerErrorKind::Parser(e)],
-        }
-    }
-}
-
-impl From<CheckerError> for CompilerError {
-    fn from(e: CheckerError) -> Self {
-        CompilerError {
-            source_map: SourceMap::new(),
-            errors: vec![CompilerErrorKind::Checker(e)],
-        }
-    }
-}
-
-impl From<CodeGenError> for CompilerError {
-    fn from(e: CodeGenError) -> Self {
-        CompilerError {
-            source_map: SourceMap::new(),
-            errors: vec![CompilerErrorKind::CodeGen(e)],
-        }
-    }
-}
+from_impl!(io::Error, CompilerErrorKind::Io);
+from_impl!(PreprocessorError, CompilerErrorKind::Preprocessor);
+from_impl!(LexerError, CompilerErrorKind::Lexer);
+from_impl!(ParserError, CompilerErrorKind::Parser);
+from_impl!(CheckerError, CompilerErrorKind::Checker);
+from_impl!(CodeGenError, CompilerErrorKind::CodeGen);
 
 impl CompilerError {
     pub fn span(&self) -> Option<Span> {

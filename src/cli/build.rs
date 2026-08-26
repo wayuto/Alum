@@ -1,6 +1,6 @@
 use alc::compiler::{
     CompilerError, SourceMap,
-    codegen::CodeGen,
+    codegen::{CodeGen, DumpOptions},
     lexer::Lexer,
     parser::Parser,
     preprocessor::Preprocessor,
@@ -18,6 +18,7 @@ pub fn build(
     preprocess_only: bool,
     verbose: bool,
     cte_libs: Vec<String>,
+    dumps: DumpOptions,
 ) -> Result<String, CompilerError> {
     let src = fs::read_to_string(&input)?;
 
@@ -69,7 +70,7 @@ pub fn build(
     if verbose {
         eprintln!("Generating code...");
     }
-    let codegen = CodeGen::new(ast, cte_libs);
+    let codegen = CodeGen::new(ast, cte_libs).with_dumps(dumps);
     let object_code = codegen
         .generate()
         .map_err(|e| CompilerError::new(e, source_map.clone()))?;
@@ -100,6 +101,7 @@ pub fn exec_run(
     include_paths: Vec<String>,
     verbose: bool,
     cte_libs: Vec<String>,
+    dumps: DumpOptions,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let obj_file = build(
         input.clone(),
@@ -109,6 +111,7 @@ pub fn exec_run(
         false,
         verbose,
         cte_libs.clone(),
+        dumps,
     )?;
 
     let user_specified_output = output.is_some();

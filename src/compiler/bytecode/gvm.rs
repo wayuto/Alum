@@ -131,100 +131,55 @@ impl GVM {
 
                     self.slots[index] = self.stack.last().cloned().unwrap_or(Value::Void);
                 }
-                Op::ADD => {
-                    let right = self.pop();
-                    let left = self.pop();
-                    self.stack.push(match (&left, &right) {
-                        (Value::Int(a), Value::Int(b)) => Value::Int(a.wrapping_add(*b)),
-                        (Value::Float(a), Value::Float(b)) => Value::Float(a + b),
-                        (Value::Str(a), Value::Str(b)) => Value::Str(a.clone() + b),
-                        (Value::Bool(a), Value::Bool(b)) => Value::Bool(*a & *b),
-                        (Value::Void, _) | (_, Value::Void) => Value::Void,
-                        _ => panic!("TypeError: Wrong types for ADD operation"),
-                    });
-                }
-                Op::SUB => {
-                    let right = self.pop();
-                    let left = self.pop();
-                    self.stack.push(match (&left, &right) {
-                        (Value::Int(a), Value::Int(b)) => Value::Int(a.wrapping_sub(*b)),
-                        (Value::Float(a), Value::Float(b)) => Value::Float(a - b),
-                        (Value::Void, _) | (_, Value::Void) => Value::Void,
-                        _ => panic!("TypeError: Wrong types for SUB operation"),
-                    });
-                }
-                Op::MUL => {
-                    let right = self.pop();
-                    let left = self.pop();
-                    self.stack.push(match (&left, &right) {
-                        (Value::Int(a), Value::Int(b)) => Value::Int(a.wrapping_mul(*b)),
-                        (Value::Float(a), Value::Float(b)) => Value::Float(a * b),
-                        (Value::Void, _) | (_, Value::Void) => Value::Void,
-                        _ => panic!("TypeError: Wrong types for MUL operation"),
-                    });
-                }
-                Op::DIV => {
-                    let right = self.pop();
-                    let left = self.pop();
-                    self.stack.push(match (&left, &right) {
-                        (Value::Int(_), Value::Int(0)) => {
-                            panic!("DivisionError: division by zero during constant evaluation")
-                        }
-                        (Value::Int(a), Value::Int(b)) => Value::Int(a.wrapping_div(*b)),
-                        (Value::Float(a), Value::Float(b)) => Value::Float(a / b),
-                        (Value::Void, _) | (_, Value::Void) => Value::Void,
-                        _ => panic!("TypeError: Wrong types for DIV operation"),
-                    });
-                }
-                Op::MOD => {
-                    let right = self.pop();
-                    let left = self.pop();
-                    self.stack.push(match (&left, &right) {
-                        (Value::Int(_), Value::Int(0)) => {
-                            panic!("DivisionError: modulo by zero during constant evaluation")
-                        }
-                        (Value::Int(a), Value::Int(b)) => Value::Int(a.wrapping_rem(*b)),
-                        (Value::Float(a), Value::Float(b)) => Value::Float(a % b),
-                        (Value::Void, _) | (_, Value::Void) => Value::Void,
-                        _ => panic!("TypeError: Wrong types for MOD operation"),
-                    });
-                }
-                Op::FADD => {
-                    let right = self.pop();
-                    let left = self.pop();
-                    self.stack.push(match (left, right) {
-                        (Value::Float(l), Value::Float(r)) => Value::Float(l + r),
-                        (Value::Void, _) | (_, Value::Void) => Value::Void,
-                        _ => panic!("TypeError: Wrong types for F_ADD operation"),
-                    });
-                }
-                Op::FSUB => {
-                    let right = self.pop();
-                    let left = self.pop();
-                    self.stack.push(match (left, right) {
-                        (Value::Float(l), Value::Float(r)) => Value::Float(l - r),
-                        (Value::Void, _) | (_, Value::Void) => Value::Void,
-                        _ => panic!("TypeError: Wrong types for F_SUB operation"),
-                    });
-                }
-                Op::FMUL => {
-                    let right = self.pop();
-                    let left = self.pop();
-                    self.stack.push(match (left, right) {
-                        (Value::Float(l), Value::Float(r)) => Value::Float(l * r),
-                        (Value::Void, _) | (_, Value::Void) => Value::Void,
-                        _ => panic!("TypeError: Wrong types for F_MUL operation"),
-                    });
-                }
-                Op::FDIV => {
-                    let right = self.pop();
-                    let left = self.pop();
-                    self.stack.push(match (left, right) {
-                        (Value::Float(l), Value::Float(r)) => Value::Float(l / r),
-                        (Value::Void, _) | (_, Value::Void) => Value::Void,
-                        _ => panic!("TypeError: Wrong types for F_DIV operation"),
-                    });
-                }
+                Op::ADD => self.binop("ADD", |left, right| match (&left, &right) {
+                    (Value::Int(a), Value::Int(b)) => Some(Value::Int(a.wrapping_add(*b))),
+                    (Value::Float(a), Value::Float(b)) => Some(Value::Float(a + b)),
+                    (Value::Str(a), Value::Str(b)) => Some(Value::Str(a.clone() + b)),
+                    (Value::Bool(a), Value::Bool(b)) => Some(Value::Bool(*a & *b)),
+                    _ => None,
+                }),
+                Op::SUB => self.binop("SUB", |left, right| match (&left, &right) {
+                    (Value::Int(a), Value::Int(b)) => Some(Value::Int(a.wrapping_sub(*b))),
+                    (Value::Float(a), Value::Float(b)) => Some(Value::Float(a - b)),
+                    _ => None,
+                }),
+                Op::MUL => self.binop("MUL", |left, right| match (&left, &right) {
+                    (Value::Int(a), Value::Int(b)) => Some(Value::Int(a.wrapping_mul(*b))),
+                    (Value::Float(a), Value::Float(b)) => Some(Value::Float(a * b)),
+                    _ => None,
+                }),
+                Op::DIV => self.binop("DIV", |left, right| match (&left, &right) {
+                    (Value::Int(_), Value::Int(0)) => {
+                        panic!("DivisionError: division by zero during constant evaluation")
+                    }
+                    (Value::Int(a), Value::Int(b)) => Some(Value::Int(a.wrapping_div(*b))),
+                    (Value::Float(a), Value::Float(b)) => Some(Value::Float(a / b)),
+                    _ => None,
+                }),
+                Op::MOD => self.binop("MOD", |left, right| match (&left, &right) {
+                    (Value::Int(_), Value::Int(0)) => {
+                        panic!("DivisionError: modulo by zero during constant evaluation")
+                    }
+                    (Value::Int(a), Value::Int(b)) => Some(Value::Int(a.wrapping_rem(*b))),
+                    (Value::Float(a), Value::Float(b)) => Some(Value::Float(a % b)),
+                    _ => None,
+                }),
+                Op::FADD => self.binop("F_ADD", |left, right| match (&left, &right) {
+                    (Value::Float(l), Value::Float(r)) => Some(Value::Float(l + r)),
+                    _ => None,
+                }),
+                Op::FSUB => self.binop("F_SUB", |left, right| match (&left, &right) {
+                    (Value::Float(l), Value::Float(r)) => Some(Value::Float(l - r)),
+                    _ => None,
+                }),
+                Op::FMUL => self.binop("F_MUL", |left, right| match (&left, &right) {
+                    (Value::Float(l), Value::Float(r)) => Some(Value::Float(l * r)),
+                    _ => None,
+                }),
+                Op::FDIV => self.binop("F_DIV", |left, right| match (&left, &right) {
+                    (Value::Float(l), Value::Float(r)) => Some(Value::Float(l / r)),
+                    _ => None,
+                }),
                 Op::EQ => {
                     let right = self.pop();
                     let left = self.pop();
@@ -235,7 +190,7 @@ impl GVM {
                     let left = self.pop();
                     self.stack.push(Value::Bool(left != right));
                 }
-                Op::GT => {
+                Op::GT | Op::FGT => {
                     let right = self.pop();
                     let left = self.pop();
                     self.stack.push(Value::Bool(num_cmp(
@@ -245,7 +200,7 @@ impl GVM {
                         |a, b| a > b,
                     )));
                 }
-                Op::GE => {
+                Op::GE | Op::FGE => {
                     let right = self.pop();
                     let left = self.pop();
                     self.stack.push(Value::Bool(num_cmp(
@@ -255,7 +210,7 @@ impl GVM {
                         |a, b| a >= b,
                     )));
                 }
-                Op::LT => {
+                Op::LT | Op::FLT => {
                     let right = self.pop();
                     let left = self.pop();
                     self.stack.push(Value::Bool(num_cmp(
@@ -265,7 +220,7 @@ impl GVM {
                         |a, b| a < b,
                     )));
                 }
-                Op::LE => {
+                Op::LE | Op::FLE => {
                     let right = self.pop();
                     let left = self.pop();
                     self.stack.push(Value::Bool(num_cmp(
@@ -295,165 +250,68 @@ impl GVM {
                         |a, b| a != b,
                     )));
                 }
-                Op::FGT => {
-                    let right = self.pop();
-                    let left = self.pop();
-                    self.stack.push(Value::Bool(num_cmp(
-                        &left,
-                        &right,
-                        |a, b| a > b,
-                        |a, b| a > b,
-                    )));
-                }
-                Op::FGE => {
-                    let right = self.pop();
-                    let left = self.pop();
-                    self.stack.push(Value::Bool(num_cmp(
-                        &left,
-                        &right,
-                        |a, b| a >= b,
-                        |a, b| a >= b,
-                    )));
-                }
-                Op::FLT => {
-                    let right = self.pop();
-                    let left = self.pop();
-                    self.stack.push(Value::Bool(num_cmp(
-                        &left,
-                        &right,
-                        |a, b| a < b,
-                        |a, b| a < b,
-                    )));
-                }
-                Op::FLE => {
-                    let right = self.pop();
-                    let left = self.pop();
-                    self.stack.push(Value::Bool(num_cmp(
-                        &left,
-                        &right,
-                        |a, b| a <= b,
-                        |a, b| a <= b,
-                    )));
-                }
                 Op::POP => {
                     if self.stack.len() > self.curr_operand_base {
                         self.stack.pop();
                     }
                 }
-                Op::NEG => {
-                    let v = self.pop();
-                    self.stack.push(match v {
-                        Value::Int(v) => Value::Int(v.wrapping_neg()),
-                        Value::Void => Value::Void,
-                        _ => panic!("TypeError: Wrong type for NEG operation"),
-                    });
-                }
-                Op::FNEG => {
-                    let v = self.pop();
-                    self.stack.push(match v {
-                        Value::Float(v) => Value::Float(-v),
-                        Value::Void => Value::Void,
-                        _ => panic!("TypeError: Wrong type for F_NEG operation"),
-                    });
-                }
-                Op::I2F => {
-                    let v = self.pop();
-                    self.stack.push(match v {
-                        Value::Int(v) => Value::Float(v as f64),
-                        Value::Float(v) => Value::Float(v),
-                        Value::Void => Value::Void,
-                        _ => panic!("TypeError: Wrong type for I2F operation"),
-                    });
-                }
-                Op::F2I => {
-                    let v = self.pop();
-                    self.stack.push(match v {
-                        Value::Float(v) => Value::Int(v as i64),
-                        Value::Int(v) => Value::Int(v),
-                        Value::Void => Value::Void,
-                        _ => panic!("TypeError: Wrong type for F2I operation"),
-                    });
-                }
-                Op::INC => {
-                    let v = self.pop();
-                    self.stack.push(match v {
-                        Value::Int(v) => Value::Int(v.wrapping_add(1)),
-                        Value::Void => Value::Void,
-                        _ => panic!("TypeError: Wrong type for INC operation"),
-                    });
-                }
-                Op::DEC => {
-                    let v = self.pop();
-                    self.stack.push(match v {
-                        Value::Int(v) => Value::Int(v.wrapping_sub(1)),
-                        Value::Void => Value::Void,
-                        _ => panic!("TypeError: Wrong type for DEC operation"),
-                    });
-                }
-                Op::LOGNOT => {
-                    let v = self.pop();
-                    self.stack.push(match v {
-                        Value::Bool(v) => Value::Bool(!v),
-                        Value::Void => Value::Void,
-                        _ => panic!("TypeError: Wrong type for LOG_NOT operation"),
-                    });
-                }
-                Op::LOGAND => {
-                    let right = self.pop();
-                    let left = self.pop();
-                    self.stack.push(match (left, right) {
-                        (Value::Int(l), Value::Int(r)) => Value::Int(l & r),
-                        (Value::Bool(l), Value::Bool(r)) => Value::Bool(l & r),
-                        (Value::Void, _) | (_, Value::Void) => Value::Void,
-                        _ => panic!("TypeError: Wrong types for LOG_AND operation"),
-                    });
-                }
-                Op::LOGOR => {
-                    let right = self.pop();
-                    let left = self.pop();
-                    self.stack.push(match (left, right) {
-                        (Value::Int(l), Value::Int(r)) => Value::Int(l | r),
-                        (Value::Bool(l), Value::Bool(r)) => Value::Bool(l | r),
-                        (Value::Void, _) | (_, Value::Void) => Value::Void,
-                        _ => panic!("TypeError: Wrong types for LOG_OR operation"),
-                    });
-                }
-                Op::LOGXOR => {
-                    let right = self.pop();
-                    let left = self.pop();
-                    self.stack.push(match (left, right) {
-                        (Value::Int(l), Value::Int(r)) => Value::Int(l ^ r),
-                        (Value::Bool(l), Value::Bool(r)) => Value::Bool(l ^ r),
-                        (Value::Void, _) | (_, Value::Void) => Value::Void,
-                        _ => panic!("TypeError: Wrong types for LOG_XOR operation"),
-                    });
-                }
-                Op::SHL => {
-                    let right = self.pop();
-                    let left = self.pop();
-                    self.stack.push(match (left, right) {
-                        (Value::Int(l), Value::Int(r)) => Value::Int(l.wrapping_shl(r as u32)),
-                        (Value::Void, _) | (_, Value::Void) => Value::Void,
-                        _ => panic!("TypeError: Wrong types for SHL operation"),
-                    });
-                }
-                Op::SHR => {
-                    let right = self.pop();
-                    let left = self.pop();
-                    self.stack.push(match (left, right) {
-                        (Value::Int(l), Value::Int(r)) => Value::Int(l.wrapping_shr(r as u32)),
-                        (Value::Void, _) | (_, Value::Void) => Value::Void,
-                        _ => panic!("TypeError: Wrong types for SHR operation"),
-                    });
-                }
-                Op::BNOT => {
-                    let v = self.pop();
-                    self.stack.push(match v {
-                        Value::Int(i) => Value::Int(!i),
-                        Value::Void => Value::Void,
-                        _ => panic!("TypeError: Wrong types for BNOT operation"),
-                    });
-                }
+                Op::NEG => self.unop("NEG", |v| match v {
+                    Value::Int(v) => Some(Value::Int(v.wrapping_neg())),
+                    _ => None,
+                }),
+                Op::FNEG => self.unop("F_NEG", |v| match v {
+                    Value::Float(v) => Some(Value::Float(-*v)),
+                    _ => None,
+                }),
+                Op::I2F => self.unop("I2F", |v| match v {
+                    Value::Int(v) => Some(Value::Float(*v as f64)),
+                    Value::Float(_) => Some(v.clone()),
+                    _ => None,
+                }),
+                Op::F2I => self.unop("F2I", |v| match v {
+                    Value::Float(v) => Some(Value::Int(*v as i64)),
+                    Value::Int(_) => Some(v.clone()),
+                    _ => None,
+                }),
+                Op::INC => self.unop("INC", |v| match v {
+                    Value::Int(v) => Some(Value::Int(v.wrapping_add(1))),
+                    _ => None,
+                }),
+                Op::DEC => self.unop("DEC", |v| match v {
+                    Value::Int(v) => Some(Value::Int(v.wrapping_sub(1))),
+                    _ => None,
+                }),
+                Op::LOGNOT => self.unop("LOG_NOT", |v| match v {
+                    Value::Bool(v) => Some(Value::Bool(!*v)),
+                    _ => None,
+                }),
+                Op::LOGAND => self.binop("LOG_AND", |left, right| match (&left, &right) {
+                    (Value::Int(l), Value::Int(r)) => Some(Value::Int(l & r)),
+                    (Value::Bool(l), Value::Bool(r)) => Some(Value::Bool(l & r)),
+                    _ => None,
+                }),
+                Op::LOGOR => self.binop("LOG_OR", |left, right| match (&left, &right) {
+                    (Value::Int(l), Value::Int(r)) => Some(Value::Int(l | r)),
+                    (Value::Bool(l), Value::Bool(r)) => Some(Value::Bool(l | r)),
+                    _ => None,
+                }),
+                Op::LOGXOR => self.binop("LOG_XOR", |left, right| match (&left, &right) {
+                    (Value::Int(l), Value::Int(r)) => Some(Value::Int(l ^ r)),
+                    (Value::Bool(l), Value::Bool(r)) => Some(Value::Bool(l ^ r)),
+                    _ => None,
+                }),
+                Op::SHL => self.binop("SHL", |left, right| match (&left, &right) {
+                    (Value::Int(l), Value::Int(r)) => Some(Value::Int(l.wrapping_shl(*r as u32))),
+                    _ => None,
+                }),
+                Op::SHR => self.binop("SHR", |left, right| match (&left, &right) {
+                    (Value::Int(l), Value::Int(r)) => Some(Value::Int(l.wrapping_shr(*r as u32))),
+                    _ => None,
+                }),
+                Op::BNOT => self.unop("BNOT", |v| match v {
+                    Value::Int(i) => Some(Value::Int(!*i)),
+                    _ => None,
+                }),
                 Op::JUMP => {
                     self.ip = self.read_u32() as usize;
                 }
@@ -634,14 +492,29 @@ impl GVM {
                         _ => panic!("TypeError: ARRAYLEN on non-array"),
                     }
                 }
-                Op::DUP => {
-                    let v = self.pop();
-                    self.stack.push(v.clone());
-                    self.stack.push(v);
-                }
                 Op::HALT => return,
             }
         }
+    }
+    fn binop(&mut self, name: &str, f: impl FnOnce(&Value, &Value) -> Option<Value>) {
+        let right = self.pop();
+        let left = self.pop();
+        let value = if matches!(left, Value::Void) || matches!(right, Value::Void) {
+            Value::Void
+        } else {
+            f(&left, &right)
+                .unwrap_or_else(|| panic!("TypeError: Wrong types for {} operation", name))
+        };
+        self.stack.push(value);
+    }
+    fn unop(&mut self, name: &str, f: impl FnOnce(&Value) -> Option<Value>) {
+        let v = self.pop();
+        let value = if matches!(v, Value::Void) {
+            Value::Void
+        } else {
+            f(&v).unwrap_or_else(|| panic!("TypeError: Wrong type for {} operation", name))
+        };
+        self.stack.push(value);
     }
 }
 

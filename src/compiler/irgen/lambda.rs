@@ -189,6 +189,56 @@ pub(super) fn hoist_lambdas(
             Box::new(hoist_lambdas(*val, lambda_counter, lambda_map)),
             Span::new(0, 0),
         ),
+        Expr::AddAssign(name, val, _) => Expr::AddAssign(
+            name,
+            Box::new(hoist_lambdas(*val, lambda_counter, lambda_map)),
+            Span::new(0, 0),
+        ),
+        Expr::SubAssign(name, val, _) => Expr::SubAssign(
+            name,
+            Box::new(hoist_lambdas(*val, lambda_counter, lambda_map)),
+            Span::new(0, 0),
+        ),
+        Expr::MulAssign(name, val, _) => Expr::MulAssign(
+            name,
+            Box::new(hoist_lambdas(*val, lambda_counter, lambda_map)),
+            Span::new(0, 0),
+        ),
+        Expr::DivAssign(name, val, _) => Expr::DivAssign(
+            name,
+            Box::new(hoist_lambdas(*val, lambda_counter, lambda_map)),
+            Span::new(0, 0),
+        ),
+        Expr::ModAssign(name, val, _) => Expr::ModAssign(
+            name,
+            Box::new(hoist_lambdas(*val, lambda_counter, lambda_map)),
+            Span::new(0, 0),
+        ),
+        Expr::AndAssign(name, val, _) => Expr::AndAssign(
+            name,
+            Box::new(hoist_lambdas(*val, lambda_counter, lambda_map)),
+            Span::new(0, 0),
+        ),
+        Expr::OrAssign(name, val, _) => Expr::OrAssign(
+            name,
+            Box::new(hoist_lambdas(*val, lambda_counter, lambda_map)),
+            Span::new(0, 0),
+        ),
+        Expr::XorAssign(name, val, _) => Expr::XorAssign(
+            name,
+            Box::new(hoist_lambdas(*val, lambda_counter, lambda_map)),
+            Span::new(0, 0),
+        ),
+        Expr::ShlAssign(name, val, _) => Expr::ShlAssign(
+            name,
+            Box::new(hoist_lambdas(*val, lambda_counter, lambda_map)),
+            Span::new(0, 0),
+        ),
+        Expr::ShrAssign(name, val, _) => Expr::ShrAssign(
+            name,
+            Box::new(hoist_lambdas(*val, lambda_counter, lambda_map)),
+            Span::new(0, 0),
+        ),
         Expr::Call(func, type_args, args, _) => Expr::Call(
             Box::new(hoist_lambdas(*func, lambda_counter, lambda_map)),
             type_args,

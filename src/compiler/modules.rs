@@ -42,7 +42,7 @@ impl ModuleLoader {
         }
     }
 
-    pub fn find_file(&self, name: &str, base_path: &str) -> Option<String> {
+    fn search_dirs(&self, base_path: &str) -> Vec<String> {
         let mut dirs: Vec<String> = Vec::new();
         if !base_path.is_empty() {
             let dir = Path::new(base_path)
@@ -55,8 +55,11 @@ impl ModuleLoader {
         dirs.extend(self.include_paths.iter().cloned());
         dirs.push("/usr/local/include/alum".to_string());
         dirs.push("/usr/local/alum".to_string());
+        dirs
+    }
 
-        for dir in dirs {
+    pub fn find_file(&self, name: &str, base_path: &str) -> Option<String> {
+        for dir in self.search_dirs(base_path) {
             for ext in [".al", ".ah"] {
                 let p = format!("{}/{}{}", dir, name, ext);
                 if Path::new(&p).exists() {
@@ -68,20 +71,9 @@ impl ModuleLoader {
     }
 
     pub fn dir_exists(&self, name: &str, base_path: &str) -> bool {
-        let mut dirs: Vec<String> = Vec::new();
-        if !base_path.is_empty() {
-            let dir = Path::new(base_path)
-                .parent()
-                .and_then(|p| p.to_str())
-                .filter(|s| !s.is_empty())
-                .unwrap_or(".");
-            dirs.push(dir.to_string());
-        }
-        dirs.extend(self.include_paths.iter().cloned());
-        dirs.push("/usr/local/include/alum".to_string());
-        dirs.push("/usr/local/alum".to_string());
-
-        dirs.iter().any(|d| Path::new(d).join(name).is_dir())
+        self.search_dirs(base_path)
+            .iter()
+            .any(|d| Path::new(d).join(name).is_dir())
     }
 
     pub fn build_names_map(

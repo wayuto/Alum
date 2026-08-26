@@ -214,15 +214,15 @@ impl Context {
                 message: format!("variable '{}' already declared in this scope.", name),
             });
         }
-        let slot = if self.var_slots.contains_key(&name) {
-            let depth = self.var_slots.get(&name).map(|v| v.len()).unwrap_or(0);
+        let depth = self.var_slots.get(&name).map_or(0, Vec::len);
+        let slot = if depth > 0 {
             format!("{}${}", name, depth)
         } else {
             name.clone()
         };
         self.var_slots
             .entry(name.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(slot.clone());
 
         self.var_type_history

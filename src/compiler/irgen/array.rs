@@ -28,24 +28,15 @@ impl IRGen {
         }
 
         let ir_const = IRConst::Array(compiled.clone());
-        let ir_type = IRType::Array;
 
-        let res_tmp = ctx.new_tmp(ir_type.clone());
+        let res_tmp = ctx.new_tmp(IRType::Array);
         let const_idx = self.get_const_index(ir_const);
-        match ir_type {
-            IRType::Float => ctx.instructions.push(Instruction {
-                op: Op::FMove,
-                dst: Some(res_tmp.clone()),
-                src1: Some(Operand::ConstIdx(const_idx)),
-                src2: None,
-            }),
-            _ => ctx.instructions.push(Instruction {
-                op: Op::Move,
-                dst: Some(res_tmp.clone()),
-                src1: Some(Operand::ConstIdx(const_idx)),
-                src2: None,
-            }),
-        }
+        ctx.instructions.push(Instruction {
+            op: Op::Move,
+            dst: Some(res_tmp.clone()),
+            src1: Some(Operand::ConstIdx(const_idx)),
+            src2: None,
+        });
         Ok(res_tmp)
     }
 

@@ -43,8 +43,6 @@ fun(pub) vec_new<T>(): Vec<T> {
 					new_data[i] = v.data[i]
 				}
 				var old_data: T[] = v.data
-				var old_ptr: *void = old_data
-				free(old_ptr)
 				v.data = new_data
 				v.capacity = new_capacity
 			}
@@ -79,9 +77,7 @@ fun(pub) vec_new<T>(): Vec<T> {
 			}
 		},
 		clear: \(v: *Vec<T>): void {
-			
-			var ptr: *void = v.data
-			free(ptr)
+			var old: T[] = v.data
 			v.len = 0
 			v.capacity = 0
 			v.data = [T; 0]

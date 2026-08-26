@@ -17,6 +17,27 @@ impl fmt::Display for Expr {
 }
 
 impl Expr {
+    fn fmt_bin(
+        f: &mut fmt::Formatter<'_>,
+        indent: usize,
+        tag: &str,
+        l: &Expr,
+        r: &Expr,
+    ) -> fmt::Result {
+        let pad = "  ".repeat(indent);
+        write!(f, "{pad}{tag}(\n")?;
+        l.fmt_with_indent(f, indent + 1)?;
+        write!(f, "\n")?;
+        r.fmt_with_indent(f, indent + 1)?;
+        write!(f, "\n{pad})")
+    }
+    fn fmt_un(f: &mut fmt::Formatter<'_>, indent: usize, tag: &str, e: &Expr) -> fmt::Result {
+        let pad = "  ".repeat(indent);
+        write!(f, "{pad}{tag}(\n")?;
+        e.fmt_with_indent(f, indent + 1)?;
+        write!(f, "\n{pad})")
+    }
+
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, indent: usize) -> fmt::Result {
         let indent_str = "  ".repeat(indent);
         match self {
@@ -25,240 +46,38 @@ impl Expr {
             Expr::Bool(b, _) => write!(f, "{}Bool({})", indent_str, b),
             Expr::String(s, _) => write!(f, "{}String(\"{}\")", indent_str, s),
             Expr::Nil(_) => write!(f, "{}Nil", indent_str),
-            Expr::Add(l, r, _) => {
-                write!(f, "{}Add(", indent_str)?;
-                write!(f, "\n")?;
-                l.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n")?;
-                r.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
-            Expr::Sub(l, r, _) => {
-                write!(f, "{}Sub(", indent_str)?;
-                write!(f, "\n")?;
-                l.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n")?;
-                r.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
-            Expr::Mul(l, r, _) => {
-                write!(f, "{}Mul(", indent_str)?;
-                write!(f, "\n")?;
-                l.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n")?;
-                r.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
-            Expr::Div(l, r, _) => {
-                write!(f, "{}Div(", indent_str)?;
-                write!(f, "\n")?;
-                l.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n")?;
-                r.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
-            Expr::Mod(l, r, _) => {
-                write!(f, "{}Mod(", indent_str)?;
-                write!(f, "\n")?;
-                l.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n")?;
-                r.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
-            Expr::FAdd(l, r, _) => {
-                write!(f, "{}FAdd(", indent_str)?;
-                write!(f, "\n")?;
-                l.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n")?;
-                r.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
-            Expr::FSub(l, r, _) => {
-                write!(f, "{}FSub(", indent_str)?;
-                write!(f, "\n")?;
-                l.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n")?;
-                r.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
-            Expr::FMul(l, r, _) => {
-                write!(f, "{}FMul(", indent_str)?;
-                write!(f, "\n")?;
-                l.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n")?;
-                r.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
-            Expr::FDiv(l, r, _) => {
-                write!(f, "{}FDiv(", indent_str)?;
-                write!(f, "\n")?;
-                l.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n")?;
-                r.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
-            Expr::Eq(l, r, _) => {
-                write!(f, "{}Eq(", indent_str)?;
-                write!(f, "\n")?;
-                l.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n")?;
-                r.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
-            Expr::Ne(l, r, _) => {
-                write!(f, "{}Ne(", indent_str)?;
-                write!(f, "\n")?;
-                l.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n")?;
-                r.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
-            Expr::Lt(l, r, _) => {
-                write!(f, "{}Lt(", indent_str)?;
-                write!(f, "\n")?;
-                l.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n")?;
-                r.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
-            Expr::Le(l, r, _) => {
-                write!(f, "{}Le(", indent_str)?;
-                write!(f, "\n")?;
-                l.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n")?;
-                r.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
-            Expr::Gt(l, r, _) => {
-                write!(f, "{}Gt(", indent_str)?;
-                write!(f, "\n")?;
-                l.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n")?;
-                r.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
-            Expr::Ge(l, r, _) => {
-                write!(f, "{}Ge(", indent_str)?;
-                write!(f, "\n")?;
-                l.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n")?;
-                r.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
-            Expr::FEq(l, r, _) => {
-                write!(f, "{}FEq(", indent_str)?;
-                write!(f, "\n")?;
-                l.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n")?;
-                r.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
-            Expr::FNe(l, r, _) => {
-                write!(f, "{}FNe(", indent_str)?;
-                write!(f, "\n")?;
-                l.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n")?;
-                r.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
-            Expr::FLt(l, r, _) => {
-                write!(f, "{}FLt(", indent_str)?;
-                write!(f, "\n")?;
-                l.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n")?;
-                r.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
-            Expr::FLe(l, r, _) => {
-                write!(f, "{}FLe(", indent_str)?;
-                write!(f, "\n")?;
-                l.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n")?;
-                r.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
-            Expr::FGt(l, r, _) => {
-                write!(f, "{}FGt(", indent_str)?;
-                write!(f, "\n")?;
-                l.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n")?;
-                r.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
-            Expr::FGe(l, r, _) => {
-                write!(f, "{}FGe(", indent_str)?;
-                write!(f, "\n")?;
-                l.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n")?;
-                r.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
-            Expr::Neg(e, _) => {
-                write!(f, "{}Neg(", indent_str)?;
-                write!(f, "\n")?;
-                e.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
-            Expr::FNeg(e, _) => {
-                write!(f, "{}FNeg(", indent_str)?;
-                write!(f, "\n")?;
-                e.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
-            Expr::Not(e, _) => {
-                write!(f, "{}Not(", indent_str)?;
-                write!(f, "\n")?;
-                e.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
+            Expr::Add(l, r, _) => Self::fmt_bin(f, indent, "Add", l, r),
+            Expr::Sub(l, r, _) => Self::fmt_bin(f, indent, "Sub", l, r),
+            Expr::Mul(l, r, _) => Self::fmt_bin(f, indent, "Mul", l, r),
+            Expr::Div(l, r, _) => Self::fmt_bin(f, indent, "Div", l, r),
+            Expr::Mod(l, r, _) => Self::fmt_bin(f, indent, "Mod", l, r),
+            Expr::FAdd(l, r, _) => Self::fmt_bin(f, indent, "FAdd", l, r),
+            Expr::FSub(l, r, _) => Self::fmt_bin(f, indent, "FSub", l, r),
+            Expr::FMul(l, r, _) => Self::fmt_bin(f, indent, "FMul", l, r),
+            Expr::FDiv(l, r, _) => Self::fmt_bin(f, indent, "FDiv", l, r),
+            Expr::Eq(l, r, _) => Self::fmt_bin(f, indent, "Eq", l, r),
+            Expr::Ne(l, r, _) => Self::fmt_bin(f, indent, "Ne", l, r),
+            Expr::Lt(l, r, _) => Self::fmt_bin(f, indent, "Lt", l, r),
+            Expr::Le(l, r, _) => Self::fmt_bin(f, indent, "Le", l, r),
+            Expr::Gt(l, r, _) => Self::fmt_bin(f, indent, "Gt", l, r),
+            Expr::Ge(l, r, _) => Self::fmt_bin(f, indent, "Ge", l, r),
+            Expr::FEq(l, r, _) => Self::fmt_bin(f, indent, "FEq", l, r),
+            Expr::FNe(l, r, _) => Self::fmt_bin(f, indent, "FNe", l, r),
+            Expr::FLt(l, r, _) => Self::fmt_bin(f, indent, "FLt", l, r),
+            Expr::FLe(l, r, _) => Self::fmt_bin(f, indent, "FLe", l, r),
+            Expr::FGt(l, r, _) => Self::fmt_bin(f, indent, "FGt", l, r),
+            Expr::FGe(l, r, _) => Self::fmt_bin(f, indent, "FGe", l, r),
+            Expr::Neg(e, _) => Self::fmt_un(f, indent, "Neg", e),
+            Expr::FNeg(e, _) => Self::fmt_un(f, indent, "FNeg", e),
+            Expr::Not(e, _) => Self::fmt_un(f, indent, "Not", e),
             Expr::Inc(name, _) => write!(f, "{}Inc(\"{}\")", indent_str, name),
             Expr::Dec(name, _) => write!(f, "{}Dec(\"{}\")", indent_str, name),
-            Expr::Xor(l, r, _) => {
-                write!(f, "{}Xor(", indent_str)?;
-                write!(f, "\n")?;
-                l.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n")?;
-                r.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
-            Expr::Shl(l, r, _) => {
-                write!(f, "{}Shl(", indent_str)?;
-                write!(f, "\n")?;
-                l.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n")?;
-                r.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
-            Expr::Shr(l, r, _) => {
-                write!(f, "{}Shr(", indent_str)?;
-                write!(f, "\n")?;
-                l.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n")?;
-                r.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
-            Expr::BNot(e, _) => {
-                write!(f, "{}BNot(", indent_str)?;
-                write!(f, "\n")?;
-                e.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
-            Expr::LAnd(l, r, _) => {
-                write!(f, "{}LAnd(", indent_str)?;
-                write!(f, "\n")?;
-                l.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n")?;
-                r.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
-            Expr::LOr(l, r, _) => {
-                write!(f, "{}LOr(", indent_str)?;
-                write!(f, "\n")?;
-                l.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n")?;
-                r.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
+            Expr::Xor(l, r, _) => Self::fmt_bin(f, indent, "Xor", l, r),
+            Expr::Shl(l, r, _) => Self::fmt_bin(f, indent, "Shl", l, r),
+            Expr::Shr(l, r, _) => Self::fmt_bin(f, indent, "Shr", l, r),
+            Expr::BNot(e, _) => Self::fmt_un(f, indent, "BNot", e),
+            Expr::LAnd(l, r, _) => Self::fmt_bin(f, indent, "LAnd", l, r),
+            Expr::LOr(l, r, _) => Self::fmt_bin(f, indent, "LOr", l, r),
             Expr::AddAssign(name, val, _) => {
                 write!(f, "{}AddAssign(\"{}\"", indent_str, name)?;
                 write!(f, "\n")?;
@@ -319,14 +138,7 @@ impl Expr {
                 val.fmt_with_indent(f, indent + 1)?;
                 write!(f, "\n{})", indent_str)
             }
-            Expr::StrCat(l, r, _) => {
-                write!(f, "{}StrCat(", indent_str)?;
-                write!(f, "\n")?;
-                l.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n")?;
-                r.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
+            Expr::StrCat(l, r, _) => Self::fmt_bin(f, indent, "StrCat", l, r),
             Expr::Var(name, _) => write!(f, "{}Var(\"{}\")", indent_str, name),
             Expr::VarDecl(name, ty, val, _) => {
                 write!(f, "{}VarDecl(\"{}\": {} =", indent_str, name, ty)?;
@@ -420,12 +232,7 @@ impl Expr {
                 }
                 write!(f, "\n{})", indent_str)
             }
-            Expr::Return(e, _) => {
-                write!(f, "{}Return(", indent_str)?;
-                write!(f, "\n")?;
-                e.fmt_with_indent(f, indent + 1)?;
-                write!(f, "\n{})", indent_str)
-            }
+            Expr::Return(e, _) => Self::fmt_un(f, indent, "Return", e),
             Expr::If(cond, then_branch, else_branch, _) => {
                 write!(f, "{}If(", indent_str)?;
                 cond.fmt_with_indent(f, indent + 1)?;

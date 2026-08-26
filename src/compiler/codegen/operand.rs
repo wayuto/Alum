@@ -204,50 +204,44 @@ impl AsmCodeGen {
     }
 
     pub(super) fn store_dst(&mut self, dst: &IROperand, reg: Reg) -> Result<(), CodeGenError> {
-        let k = dst.key();
-        let alloc_reg = self.alloc_regs.get(&k).copied();
-        if let Some(alloc_reg) = alloc_reg {
-            self.invalidate_cached_operand(dst, Some(alloc_reg));
-            if alloc_reg != reg {
-                self.push_text(Asm::Mov(Operand::Reg(alloc_reg), Operand::Reg(reg)));
-            }
-            self.regs.insert(alloc_reg, dst.clone());
-            return Ok(());
-        }
-        self.invalidate_cached_operand(dst, Some(reg));
-        self.push_text(Asm::Mov(m_rbp(self.get_offset(dst)?), Operand::Reg(reg)));
-        self.regs.insert(reg, dst.clone());
-        Ok(())
+        self.store_dst_inner(dst, reg, false)
     }
 
     pub(super) fn store_dst_xmm(&mut self, dst: &IROperand, reg: Reg) -> Result<(), CodeGenError> {
+        self.store_dst_inner(dst, reg, true)
+    }
+
+    fn store_dst_inner(
+        &mut self,
+        dst: &IROperand,
+        reg: Reg,
+        is_float: bool,
+    ) -> Result<(), CodeGenError> {
+        let mov = |to, from| {
+            if is_float {
+                Asm::Movsd(to, from)
+            } else {
+                Asm::Mov(to, from)
+            }
+        };
         let k = dst.key();
         let alloc_reg = self.alloc_regs.get(&k).copied();
         if let Some(alloc_reg) = alloc_reg {
             self.invalidate_cached_operand(dst, Some(alloc_reg));
             if alloc_reg != reg {
-                self.push_text(Asm::Movsd(Operand::Reg(alloc_reg), Operand::Reg(reg)));
+                self.push_text(mov(Operand::Reg(alloc_reg), Operand::Reg(reg)));
             }
             self.regs.insert(alloc_reg, dst.clone());
             return Ok(());
         }
         self.invalidate_cached_operand(dst, Some(reg));
-        self.push_text(Asm::Movsd(m_rbp(self.get_offset(dst)?), Operand::Reg(reg)));
+        self.push_text(mov(m_rbp(self.get_offset(dst)?), Operand::Reg(reg)));
         self.regs.insert(reg, dst.clone());
         Ok(())
     }
 
     pub(super) fn store_global(&mut self, dst: &IROperand, reg: Reg) -> Result<(), CodeGenError> {
-        let IROperand::Global(name) = dst else {
-            return Err(CodeGenError::InvalidOperand {
-                message: "store_global requires a global operand".to_string(),
-            });
-        };
-        self.invalidate_cached_reg(Reg::R10);
-        self.push_text(Asm::Mov(Operand::Reg(Reg::R10), rel(name.clone())));
-        self.push_text(Asm::Mov(m_base(Reg::R10), Operand::Reg(reg)));
-        self.regs.remove(&reg);
-        Ok(())
+        self.store_global_inner(dst, reg, false)
     }
 
     pub(super) fn store_global_xmm(
@@ -255,14 +249,31 @@ impl AsmCodeGen {
         dst: &IROperand,
         reg: Reg,
     ) -> Result<(), CodeGenError> {
+        self.store_global_inner(dst, reg, true)
+    }
+
+    fn store_global_inner(
+        &mut self,
+        dst: &IROperand,
+        reg: Reg,
+        is_float: bool,
+    ) -> Result<(), CodeGenError> {
+        let kind = if is_float { "global_xmm" } else { "global" };
         let IROperand::Global(name) = dst else {
             return Err(CodeGenError::InvalidOperand {
-                message: "store_global_xmm requires a global operand".to_string(),
+                message: format!("store_{kind} requires a global operand"),
             });
+        };
+        let mov = |to, from| {
+            if is_float {
+                Asm::Movsd(to, from)
+            } else {
+                Asm::Mov(to, from)
+            }
         };
         self.invalidate_cached_reg(Reg::R10);
         self.push_text(Asm::Mov(Operand::Reg(Reg::R10), rel(name.clone())));
-        self.push_text(Asm::Movsd(m_base(Reg::R10), Operand::Reg(reg)));
+        self.push_text(mov(m_base(Reg::R10), Operand::Reg(reg)));
         self.regs.remove(&reg);
         Ok(())
     }
@@ -280,15 +291,10 @@ impl AsmCodeGen {
             let lbl = format!("L.S.{}", self.lbl_cnt);
             self.str_cache.insert(s.clone(), lbl.clone());
             self.lbl_cnt += 1;
-            let bytes = s.as_bytes();
+            let mut db_bytes = s.as_bytes().to_vec();
+            db_bytes.push(0);
             self.push_data(Asm::Label(lbl.clone()));
-            if bytes.is_empty() {
-                self.push_data(Asm::Db(vec![0]));
-            } else {
-                let mut db_bytes = bytes.to_vec();
-                db_bytes.push(0);
-                self.push_data(Asm::Db(db_bytes));
-            }
+            self.push_data(Asm::Db(db_bytes));
             lbl
         }
     }

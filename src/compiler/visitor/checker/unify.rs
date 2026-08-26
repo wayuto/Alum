@@ -6,33 +6,6 @@ use crate::compiler::{
 };
 
 impl TypeChecker {
-    pub(super) fn resolve_type_var(&self, ty: &Type) -> Type {
-        match ty {
-            Type::TypeVar(id) => {
-                if let Some(bound_type) = self.type_bindings.get(id) {
-                    self.resolve_type_var(bound_type)
-                } else {
-                    ty.clone()
-                }
-            }
-            Type::Array(inner) => Type::Array(Box::new(self.resolve_type_var(inner))),
-            Type::Pointer(inner) => Type::Pointer(Box::new(self.resolve_type_var(inner))),
-            Type::Function(params, ret) => Type::Function(
-                params.iter().map(|p| self.resolve_type_var(p)).collect(),
-                Box::new(self.resolve_type_var(ret)),
-            ),
-            Type::Struct(name, args) => Type::Struct(
-                name.clone(),
-                args.iter().map(|t| self.resolve_type_var(t)).collect(),
-            ),
-            Type::Union(name, args) => Type::Union(
-                name.clone(),
-                args.iter().map(|t| self.resolve_type_var(t)).collect(),
-            ),
-            _ => ty.clone(),
-        }
-    }
-
     pub(super) fn occurs_check(&self, var_id: usize, ty: &Type) -> bool {
         match ty {
             Type::TypeVar(id) => {
@@ -57,16 +30,15 @@ impl TypeChecker {
     }
 
     pub(super) fn bind_type_var(&mut self, var_id: usize, ty: &Type) {
-        let resolved_ty = self.resolve_type_var(ty);
+        let resolved_ty = self.resolve_type(ty);
         if self.occurs_check(var_id, &resolved_ty) {
             return;
         }
         self.type_bindings.insert(var_id, resolved_ty);
     }
-
     pub(super) fn unify_types(&mut self, t1: &Type, t2: &Type) -> Result<(), CheckerError> {
-        let t1 = self.resolve_type_var(t1);
-        let t2 = self.resolve_type_var(t2);
+        let t1 = self.resolve_type(t1);
+        let t2 = self.resolve_type(t2);
 
         match (&t1, &t2) {
             (Type::Primitive(Primitive::Void), Type::Primitive(Primitive::Void)) => Ok(()),

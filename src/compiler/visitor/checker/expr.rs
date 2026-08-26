@@ -7,6 +7,156 @@ use crate::compiler::{
 use std::collections::HashMap;
 
 impl TypeChecker {
+    fn check_composite_literal(
+        &mut self,
+        name: &str,
+        type_args: &mut Vec<Type>,
+        field_values: &mut [(String, Expr)],
+        span: Span,
+        is_union: bool,
+    ) -> Result<Type, CheckerError> {
+        let tag = if is_union { "union" } else { "struct" };
+        let (tp_names, fields) = if is_union {
+            self.unions.get(name)
+        } else {
+            self.structs.get(name)
+        }
+        .ok_or_else(|| {
+            if is_union {
+                CheckerError::UndefinedUnion(name.to_string(), span)
+            } else {
+                CheckerError::UndefinedStruct(name.to_string(), span)
+            }
+        })?
+        .clone();
+
+        let inferred = type_args.is_empty() && !tp_names.is_empty();
+        let resolved_args: Vec<Type> = if inferred {
+            let mut subst = HashMap::new();
+            let args: Vec<Type> = (0..tp_names.len())
+                .map(|i| self.fresh_instantiate(&Type::Param(i), &mut subst))
+                .collect();
+
+            for (field_name, expected_ty) in &fields {
+                let expected = expected_ty.substitute(&args);
+                if let Some((idx, _)) = field_values
+                    .iter()
+                    .enumerate()
+                    .find(|(_, (n, _))| n == field_name)
+                {
+                    let expr_type = self.check_expr(&mut field_values[idx].1)?;
+                    if let Err(e) = self.unify_types(&expected, &expr_type) {
+                        let _ = e;
+                        return Err(CheckerError::TypeMismatch {
+                            expected: expected.clone(),
+                            found: expr_type,
+                            context: format!("{tag} '{name}' field '{field_name}'"),
+                            span,
+                        });
+                    }
+                }
+            }
+
+            args.iter().map(|t| self.resolve_type(t)).collect()
+        } else {
+            type_args.clone()
+        };
+
+        let resolved_args: Vec<Type> = resolved_args
+            .iter()
+            .map(|t| self.normalize_type(t))
+            .collect();
+        *type_args = resolved_args.clone();
+
+        for (field_name, expected_ty) in &fields {
+            let expected = expected_ty.substitute(&resolved_args);
+            if let Some((idx, _)) = field_values
+                .iter()
+                .enumerate()
+                .find(|(_, (n, _))| n == field_name)
+            {
+                let expr_type = self.check_expr(&mut field_values[idx].1)?;
+                if !self.types_compatible(&expected, &expr_type) {
+                    return Err(CheckerError::TypeMismatch {
+                        expected: expected.clone(),
+                        found: expr_type,
+                        context: format!("{tag} '{name}' field '{field_name}'"),
+                        span,
+                    });
+                }
+            }
+        }
+
+        {
+            let mut seen: Vec<&str> = Vec::new();
+            for (n, _) in field_values.iter() {
+                if !fields.iter().any(|(fname, _)| fname == n) {
+                    return Err(CheckerError::UndefinedField {
+                        struct_name: name.to_string(),
+                        field: n.clone(),
+                        span,
+                    });
+                }
+                if seen.contains(&n.as_str()) {
+                    return Err(CheckerError::InvalidOperation {
+                        op: format!("duplicate field '{n}' in {tag} literal"),
+                        type_name: name.to_string(),
+                        span,
+                    });
+                }
+                seen.push(n.as_str());
+            }
+            if is_union {
+                if seen.len() != 1 && !fields.is_empty() {
+                    return Err(CheckerError::InvalidOperation {
+                        op: format!(
+                            "union literal must specify exactly one field, got {}",
+                            seen.len()
+                        ),
+                        type_name: name.to_string(),
+                        span,
+                    });
+                }
+            } else {
+                for (fname, _) in &fields {
+                    if !seen.contains(&fname.as_str()) {
+                        return Err(CheckerError::InvalidOperation {
+                            op: format!("missing field '{fname}' in struct literal"),
+                            type_name: name.to_string(),
+                            span,
+                        });
+                    }
+                }
+            }
+        }
+
+        Ok(if is_union {
+            Type::Union(name.to_string(), resolved_args)
+        } else {
+            Type::Struct(name.to_string(), resolved_args)
+        })
+    }
+    fn lookup_assignable(&self, name: &str, op: &str, span: Span) -> Result<Type, CheckerError> {
+        match self
+            .lookup_var(name)
+            .or_else(|| self.extern_vars.get(name).cloned())
+            .or_else(|| self.globals.get(name).cloned())
+        {
+            Some(t) if !self.nearest_decl_is_const(name) => Ok(t),
+            Some(_) => Err(CheckerError::InvalidOperation {
+                op: op.to_string(),
+                type_name: format!("constant '{name}'"),
+                span,
+            }),
+            None if self.is_constant(name) => Err(CheckerError::InvalidOperation {
+                op: op.to_string(),
+                type_name: format!("constant '{name}'"),
+                span,
+            }),
+            None => Err(CheckerError::UndefinedVariable(name.to_string(), span)),
+        }
+    }
+
     pub(super) fn check_expr(&mut self, expr: &mut Expr) -> Result<Type, CheckerError> {
         const MAX_DEPTH: usize = 8000;
         if self.expr_depth > MAX_DEPTH {
@@ -187,31 +337,7 @@ impl TypeChecker {
                 Ok(resolved_ty)
             }
             Expr::VarAssign(name, value, _) => {
-                let var_type = match self
-                    .lookup_var(name)
-                    .or_else(|| self.extern_vars.get(name).cloned())
-                    .or_else(|| self.globals.get(name).cloned())
-                {
-                    Some(t) => t,
-                    None => {
-                        if self.is_constant(name) {
-                            return Err(CheckerError::InvalidOperation {
-                                op: "assignment".to_string(),
-                                type_name: format!("constant '{}'", name),
-                                span,
-                            });
-                        }
-                        return Err(CheckerError::UndefinedVariable(name.clone(), span));
-                    }
-                };
-
-                if self.nearest_decl_is_const(name) {
-                    return Err(CheckerError::InvalidOperation {
-                        op: "assignment".to_string(),
-                        type_name: format!("constant '{}'", name),
-                        span,
-                    });
-                }
+                let var_type = self.lookup_assignable(name, "assignment", span)?;
                 let value_type = self.check_expr(value)?;
 
                 if !matches!(value.as_ref(), Expr::Nil(_)) {
@@ -511,31 +637,7 @@ impl TypeChecker {
                 Ok(Type::Primitive(Primitive::Int))
             }
             Expr::Inc(name, _) | Expr::Dec(name, _) => {
-                let var_type = match self
-                    .lookup_var(name)
-                    .or_else(|| self.extern_vars.get(name).cloned())
-                    .or_else(|| self.globals.get(name).cloned())
-                {
-                    Some(t) => t,
-                    None => {
-                        if self.is_constant(name) {
-                            return Err(CheckerError::InvalidOperation {
-                                op: "increment/decrement".to_string(),
-                                type_name: format!("constant '{}'", name),
-                                span,
-                            });
-                        }
-                        return Err(CheckerError::UndefinedVariable(name.clone(), span));
-                    }
-                };
-
-                if self.nearest_decl_is_const(name) {
-                    return Err(CheckerError::InvalidOperation {
-                        op: "increment/decrement".to_string(),
-                        type_name: format!("constant '{}'", name),
-                        span,
-                    });
-                }
+                let var_type = self.lookup_assignable(name, "increment/decrement", span)?;
                 if !var_type.is_numeric() {
                     return Err(CheckerError::InvalidOperation {
                         op: "increment/decrement".to_string(),
@@ -546,31 +648,7 @@ impl TypeChecker {
                 Ok(var_type)
             }
             Expr::AddAssign(name, value, _) | Expr::SubAssign(name, value, _) => {
-                let var_type = match self
-                    .lookup_var(name)
-                    .or_else(|| self.extern_vars.get(name).cloned())
-                    .or_else(|| self.globals.get(name).cloned())
-                {
-                    Some(t) => t,
-                    None => {
-                        if self.is_constant(name) {
-                            return Err(CheckerError::InvalidOperation {
-                                op: "compound assignment".to_string(),
-                                type_name: format!("constant '{}'", name),
-                                span,
-                            });
-                        }
-                        return Err(CheckerError::UndefinedVariable(name.clone(), span));
-                    }
-                };
-
-                if self.nearest_decl_is_const(name) {
-                    return Err(CheckerError::InvalidOperation {
-                        op: "compound assignment".to_string(),
-                        type_name: format!("constant '{}'", name),
-                        span,
-                    });
-                }
+                let var_type = self.lookup_assignable(name, "compound assignment", span)?;
                 let value_type = self.check_expr(value)?;
                 if var_type.is_pointer() {
                     if !matches!(
@@ -604,31 +682,7 @@ impl TypeChecker {
             | Expr::XorAssign(name, value, _)
             | Expr::ShlAssign(name, value, _)
             | Expr::ShrAssign(name, value, _) => {
-                let var_type = match self
-                    .lookup_var(name)
-                    .or_else(|| self.extern_vars.get(name).cloned())
-                    .or_else(|| self.globals.get(name).cloned())
-                {
-                    Some(t) => t,
-                    None => {
-                        if self.is_constant(name) {
-                            return Err(CheckerError::InvalidOperation {
-                                op: "compound assignment".to_string(),
-                                type_name: format!("constant '{}'", name),
-                                span,
-                            });
-                        }
-                        return Err(CheckerError::UndefinedVariable(name.clone(), span));
-                    }
-                };
-
-                if self.nearest_decl_is_const(name) {
-                    return Err(CheckerError::InvalidOperation {
-                        op: "compound assignment".to_string(),
-                        type_name: format!("constant '{}'", name),
-                        span,
-                    });
-                }
+                let var_type = self.lookup_assignable(name, "compound assignment", span)?;
                 if var_type.is_pointer() {
                     return Err(CheckerError::InvalidOperation {
                         op: "compound assignment".to_string(),
@@ -835,12 +889,12 @@ impl TypeChecker {
                                         .get(&i)
                                         .cloned()
                                         .unwrap_or_else(|| Type::Primitive(Primitive::Int));
-                                    self.resolve_type_var(&tv)
+                                    self.resolve_type(&tv)
                                 })
                                 .collect();
                             *type_args = resolved_args.clone();
 
-                            let ret = self.resolve_type_var(&inst_ret);
+                            let ret = self.resolve_type(&inst_ret);
                             return Ok(ret);
                         }
                     }
@@ -990,10 +1044,14 @@ impl TypeChecker {
                                 span: span,
                             })?;
                         match maybe {
-                            Type::Struct(mname, margs) if mname == "Maybe" => margs
-                                .into_iter()
-                                .next()
-                                .unwrap_or(Type::Primitive(Primitive::Int)),
+                            Type::Struct(mname, margs)
+                                if crate::compiler::is_maybe_type_name(&mname) =>
+                            {
+                                { margs }
+                                    .into_iter()
+                                    .next()
+                                    .unwrap_or(Type::Primitive(Primitive::Int))
+                            }
                             _ => {
                                 return Err(CheckerError::InvalidOperation {
                                     op: "for loop".to_string(),
@@ -1376,203 +1434,10 @@ impl TypeChecker {
                 Ok(Type::Primitive(Primitive::Void))
             }
             Expr::StructLiteral(name, type_args, field_values, _) => {
-                let (tp_names, fields) = self
-                    .structs
-                    .get(name)
-                    .ok_or_else(|| CheckerError::UndefinedStruct(name.clone(), span))?
-                    .clone();
-
-                let inferred = type_args.is_empty() && !tp_names.is_empty();
-                let resolved_args: Vec<Type> = if inferred {
-                    let mut subst = HashMap::new();
-                    let args: Vec<Type> = (0..tp_names.len())
-                        .map(|i| self.fresh_instantiate(&Type::Param(i), &mut subst))
-                        .collect();
-
-                    for (field_name, expected_ty) in &fields {
-                        let expected = expected_ty.substitute(&args);
-                        if let Some((idx, _)) = field_values
-                            .iter()
-                            .enumerate()
-                            .find(|(_, (n, _))| n == field_name)
-                        {
-                            let expr_type = self.check_expr(&mut field_values[idx].1)?;
-                            if let Err(e) = self.unify_types(&expected, &expr_type) {
-                                let _ = e;
-                                return Err(CheckerError::TypeMismatch {
-                                    expected: expected.clone(),
-                                    found: expr_type,
-                                    context: format!("struct '{}' field '{}'", name, field_name),
-                                    span: span,
-                                });
-                            }
-                        }
-                    }
-
-                    args.iter().map(|t| self.resolve_type(t)).collect()
-                } else {
-                    type_args.clone()
-                };
-
-                let resolved_args: Vec<Type> = resolved_args
-                    .iter()
-                    .map(|t| match self.resolve_type(t) {
-                        Type::TypeVar(_) => Type::Primitive(Primitive::Int),
-                        t => t,
-                    })
-                    .collect();
-                *type_args = resolved_args.clone();
-
-                for (field_name, expected_ty) in &fields {
-                    let expected = expected_ty.substitute(&resolved_args);
-                    if let Some((idx, _)) = field_values
-                        .iter()
-                        .enumerate()
-                        .find(|(_, (n, _))| n == field_name)
-                    {
-                        let expr_type = self.check_expr(&mut field_values[idx].1)?;
-                        if !self.types_compatible(&expected, &expr_type) {
-                            return Err(CheckerError::TypeMismatch {
-                                expected: expected.clone(),
-                                found: expr_type,
-                                context: format!("struct '{}' field '{}'", name, field_name),
-                                span: span,
-                            });
-                        }
-                    }
-                }
-
-                {
-                    let mut seen: Vec<&str> = Vec::new();
-                    for (n, _) in field_values.iter() {
-                        if !fields.iter().any(|(fname, _)| fname == n) {
-                            return Err(CheckerError::UndefinedField {
-                                struct_name: name.clone(),
-                                field: n.clone(),
-                                span,
-                            });
-                        }
-                        if seen.contains(&n.as_str()) {
-                            return Err(CheckerError::InvalidOperation {
-                                op: format!("duplicate field '{}' in struct literal", n),
-                                type_name: name.clone(),
-                                span,
-                            });
-                        }
-                        seen.push(n.as_str());
-                    }
-                    for (fname, _) in &fields {
-                        if !seen.contains(&fname.as_str()) {
-                            return Err(CheckerError::InvalidOperation {
-                                op: format!("missing field '{}' in struct literal", fname),
-                                type_name: name.clone(),
-                                span,
-                            });
-                        }
-                    }
-                }
-
-                Ok(Type::Struct(name.clone(), resolved_args))
+                self.check_composite_literal(name, type_args, field_values, span, false)
             }
             Expr::UnionLiteral(name, type_args, field_values, _) => {
-                let (tp_names, fields) = self
-                    .unions
-                    .get(name)
-                    .ok_or_else(|| CheckerError::UndefinedUnion(name.clone(), span))?
-                    .clone();
-
-                let inferred = type_args.is_empty() && !tp_names.is_empty();
-                let resolved_args: Vec<Type> = if inferred {
-                    let mut subst = HashMap::new();
-                    let args: Vec<Type> = (0..tp_names.len())
-                        .map(|i| self.fresh_instantiate(&Type::Param(i), &mut subst))
-                        .collect();
-
-                    for (field_name, expected_ty) in &fields {
-                        let expected = expected_ty.substitute(&args);
-                        if let Some((idx, _)) = field_values
-                            .iter()
-                            .enumerate()
-                            .find(|(_, (n, _))| n == field_name)
-                        {
-                            let expr_type = self.check_expr(&mut field_values[idx].1)?;
-                            if let Err(e) = self.unify_types(&expected, &expr_type) {
-                                let _ = e;
-                                return Err(CheckerError::TypeMismatch {
-                                    expected: expected.clone(),
-                                    found: expr_type,
-                                    context: format!("union '{}' field '{}'", name, field_name),
-                                    span: span,
-                                });
-                            }
-                        }
-                    }
-
-                    args.iter().map(|t| self.resolve_type(t)).collect()
-                } else {
-                    type_args.clone()
-                };
-
-                let resolved_args: Vec<Type> = resolved_args
-                    .iter()
-                    .map(|t| match self.resolve_type(t) {
-                        Type::TypeVar(_) => Type::Primitive(Primitive::Int),
-                        t => t,
-                    })
-                    .collect();
-                *type_args = resolved_args.clone();
-
-                for (field_name, expected_ty) in &fields {
-                    let expected = expected_ty.substitute(&resolved_args);
-                    if let Some((idx, _)) = field_values
-                        .iter()
-                        .enumerate()
-                        .find(|(_, (n, _))| n == field_name)
-                    {
-                        let expr_type = self.check_expr(&mut field_values[idx].1)?;
-                        if !self.types_compatible(&expected, &expr_type) {
-                            return Err(CheckerError::TypeMismatch {
-                                expected: expected.clone(),
-                                found: expr_type,
-                                context: format!("union '{}' field '{}'", name, field_name),
-                                span: span,
-                            });
-                        }
-                    }
-                }
-
-                {
-                    let mut seen: Vec<&str> = Vec::new();
-                    for (n, _) in field_values.iter() {
-                        if !fields.iter().any(|(fname, _)| fname == n) {
-                            return Err(CheckerError::UndefinedField {
-                                struct_name: name.clone(),
-                                field: n.clone(),
-                                span,
-                            });
-                        }
-                        if seen.contains(&n.as_str()) {
-                            return Err(CheckerError::InvalidOperation {
-                                op: format!("duplicate field '{}' in union literal", n),
-                                type_name: name.clone(),
-                                span,
-                            });
-                        }
-                        seen.push(n.as_str());
-                    }
-                    if seen.len() != 1 && !fields.is_empty() {
-                        return Err(CheckerError::InvalidOperation {
-                            op: format!(
-                                "union literal must specify exactly one field, got {}",
-                                seen.len()
-                            ),
-                            type_name: name.clone(),
-                            span,
-                        });
-                    }
-                }
-
-                Ok(Type::Union(name.clone(), resolved_args))
+                self.check_composite_literal(name, type_args, field_values, span, true)
             }
             Expr::MemberAccess(obj, field_name, _) => {
                 if let Expr::Var(name, _) = obj.as_ref() {
@@ -1622,11 +1487,7 @@ impl TypeChecker {
                 for (name, ty) in &fields {
                     if name == field_name {
                         let substituted = ty.substitute(&type_args);
-                        let resolved_ty = self.resolve_type(&substituted);
-                        return Ok(match resolved_ty {
-                            Type::TypeVar(_) => Type::Primitive(Primitive::Int),
-                            t => t,
-                        });
+                        return Ok(self.normalize_type(&substituted));
                     }
                 }
 

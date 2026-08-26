@@ -9,6 +9,148 @@ use crate::compiler::{
 use ordered_float::OrderedFloat;
 
 impl IRGen {
+    fn compile_local_decl(
+        &mut self,
+        name: &str,
+        typ: &Type,
+        value: Expr,
+        ctx: &mut Context,
+        allow_move: bool,
+    ) -> Result<Operand, CodeGenError> {
+        let resolved_typ = if matches!(typ, Type::Unknown | Type::TypeVar(_) | Type::Param(_)) {
+            self.expr_high_type(&value, ctx)
+                .unwrap_or_else(|| typ.clone())
+        } else {
+            typ.clone()
+        };
+        let is_struct = matches!(&resolved_typ, Type::Struct(_, _) | Type::Union(_, _));
+
+        let copy_info = if allow_move && self.is_resource_type(&resolved_typ) {
+            self.resource_copy_info(&value, ctx)
+        } else {
+            None
+        };
+
+        let moved_src = if !allow_move {
+            None
+        } else {
+            self.detect_move_source(
+                &value,
+                ctx,
+                super::expr_resource::MoveOpts {
+                    exclude: Some(name.to_string()),
+                    binding_ty: Some(resolved_typ.clone()),
+                },
+            )
+        };
+        let is_whole_name_move = moved_src.is_some();
+        let mut value: Operand = if is_whole_name_move || is_struct {
+            self.compile_expr(value, ctx)?
+        } else if allow_move && Self::array_has_string_elems(&value) {
+            self.compile_expr(value, ctx)?
+        } else {
+            match self.eval_const(&value, Some(&*ctx)) {
+                Some((cv, IRType::Int | IRType::Float | IRType::Bool | IRType::Array)) => {
+                    Operand::ConstIdx(self.get_const_index(cv))
+                }
+                _ => self.compile_expr(value, ctx)?,
+            }
+        };
+        if let Some(copy_ty) = copy_info {
+            if !is_whole_name_move {
+                value = self.copy_resource(ctx, value, &copy_ty)?;
+            }
+        }
+        let var_ir_type = Context::type_to_ir_type(&resolved_typ);
+
+        ctx.declare_var_with_type(name.to_string(), var_ir_type.clone(), resolved_typ)?;
+        if matches!(var_ir_type, IRType::Array) {
+            if let Some(len) = self.const_array_len(&value, ctx) {
+                ctx.array_lengths.insert(name.to_string(), len);
+            } else if let Operand::ConstIdx(idx) = &value {
+                if let IRConst::Array(elems) = &self.constants[*idx] {
+                    ctx.array_lengths.insert(name.to_string(), elems.len());
+                }
+            }
+        }
+
+        let result = value.clone();
+        match var_ir_type {
+            IRType::Float => ctx.instructions.push(Instruction {
+                op: Op::FStore,
+                dst: Some(Operand::Var(ctx.slot(name))),
+                src1: Some(value),
+                src2: None,
+            }),
+            _ => ctx.instructions.push(Instruction {
+                op: Op::Store,
+                dst: Some(Operand::Var(ctx.slot(name))),
+                src1: Some(value),
+                src2: None,
+            }),
+        }
+
+        if let Some(msrc) = &moved_src {
+            self.invalidate_and_mark_move(msrc, ctx)?;
+        }
+        Ok(result)
+    }
+
+    fn emit_int_inc_dec(
+        &mut self,
+        name: &str,
+        op: Op,
+        ctx: &mut Context,
+    ) -> Result<Operand, CodeGenError> {
+        if self.is_float_var(name, ctx) {
+            return self.emit_float_inc_dec(name, op == Op::Inc, ctx);
+        }
+        if let Some(load_op) = self.extern_load_op(name) {
+            let dst = self.extern_op(name).unwrap();
+            let res_tmp = ctx.new_tmp(IRType::Int);
+            ctx.instructions.push(Instruction {
+                op: load_op,
+                dst: Some(res_tmp.clone()),
+                src1: Some(dst.clone()),
+                src2: None,
+            });
+            ctx.instructions.push(Instruction {
+                op: op.clone(),
+                dst: Some(res_tmp.clone()),
+                src1: Some(res_tmp.clone()),
+                src2: None,
+            });
+            ctx.instructions.push(Instruction {
+                op: Op::GlobStore,
+                dst: Some(dst),
+                src1: Some(res_tmp.clone()),
+                src2: None,
+            });
+            return Ok(res_tmp);
+        }
+        let var_op = Operand::Var(ctx.slot(name));
+        let res_tmp = ctx.new_tmp(IRType::Int);
+        ctx.instructions.push(Instruction {
+            op: Op::Load,
+            dst: Some(res_tmp.clone()),
+            src1: Some(var_op.clone()),
+            src2: None,
+        });
+        ctx.instructions.push(Instruction {
+            op,
+            dst: Some(res_tmp.clone()),
+            src1: Some(res_tmp.clone()),
+            src2: None,
+        });
+        ctx.instructions.push(Instruction {
+            op: Op::Store,
+            dst: Some(var_op),
+            src1: Some(res_tmp.clone()),
+            src2: None,
+        });
+        Ok(res_tmp)
+    }
+
     fn get_binop_parts(expr: Expr) -> Result<(Op, Box<Expr>, Box<Expr>), CodeGenError> {
         match expr {
             Expr::Add(l, r, _) => Ok((Op::Add, l, r)),
@@ -133,149 +275,11 @@ impl IRGen {
             }
 
             Expr::VarDecl(name, typ, value, _) => {
-                let resolved_typ =
-                    if matches!(typ, Type::Unknown | Type::TypeVar(_) | Type::Param(_)) {
-                        self.expr_high_type(&value, ctx)
-                            .unwrap_or_else(|| typ.clone())
-                    } else {
-                        typ.clone()
-                    };
-                let is_struct = matches!(&resolved_typ, Type::Struct(_, _) | Type::Union(_, _));
-
-                let copy_info = if self.is_resource_type(&resolved_typ) {
-                    self.resource_copy_info(&value, ctx)
-                } else {
-                    None
-                };
-
-                let moved_src: Option<(String, Span)> = match &*value {
-                    Expr::Var(src, sp)
-                        if src.as_str() != name
-                            && self.can_move_var(src, ctx)
-                            && ctx
-                                .get_var_high_type(src)
-                                .map(|t| self.is_resource_type(t))
-                                .unwrap_or(false)
-                            && !matches!(resolved_typ, Type::Pointer(_)) =>
-                    {
-                        Some((src.clone(), *sp))
-                    }
-                    _ => None,
-                };
-                let is_whole_name_move = moved_src.is_some();
-                let mut value: Operand = if is_whole_name_move {
-                    self.compile_expr(*value, ctx)?
-                } else if is_struct {
-                    self.compile_expr(*value, ctx)?
-                } else if Self::array_has_string_elems(&value) {
-                    self.compile_expr(*value, ctx)?
-                } else {
-                    match self.eval_const(&value, Some(&*ctx)) {
-                        Some((cv, IRType::Int | IRType::Float | IRType::Bool | IRType::Array)) => {
-                            Operand::ConstIdx(self.get_const_index(cv))
-                        }
-                        _ => self.compile_expr(*value, ctx)?,
-                    }
-                };
-                if let Some(copy_ty) = copy_info {
-                    if !is_whole_name_move {
-                        value = self.copy_resource(ctx, value, &copy_ty)?;
-                    }
-                }
-                let var_ir_type = Context::type_to_ir_type(&resolved_typ);
-
-                ctx.declare_var_with_type(name.clone(), var_ir_type.clone(), resolved_typ)?;
-                if matches!(var_ir_type, IRType::Array) {
-                    if let Some(len) = self.const_array_len(&value, ctx) {
-                        ctx.array_lengths.insert(name.clone(), len);
-                    } else if let Operand::ConstIdx(idx) = &value {
-                        if let IRConst::Array(elems) = &self.constants[*idx] {
-                            ctx.array_lengths.insert(name.clone(), elems.len());
-                        }
-                    }
-                }
-
-                let result = value.clone();
-                match var_ir_type {
-                    IRType::Float => ctx.instructions.push(Instruction {
-                        op: Op::FStore,
-                        dst: Some(Operand::Var(ctx.slot(&name))),
-                        src1: Some(value),
-                        src2: None,
-                    }),
-                    _ => ctx.instructions.push(Instruction {
-                        op: Op::Store,
-                        dst: Some(Operand::Var(ctx.slot(&name))),
-                        src1: Some(value),
-                        src2: None,
-                    }),
-                }
-
-                if is_whole_name_move {
-                    let zero_idx = self.get_const_index(IRConst::Int(0));
-                    if let Some((src_name, _)) = &moved_src {
-                        ctx.instructions.push(Instruction {
-                            op: Op::Store,
-                            dst: Some(Operand::Var(ctx.slot(src_name.as_str()))),
-                            src1: Some(Operand::ConstIdx(zero_idx)),
-                            src2: None,
-                        });
-                    }
-                }
-                if let Some((src_name, src_span)) = &moved_src {
-                    ctx.mark_moved(src_name, *src_span);
-                }
-                Ok(result)
+                self.compile_local_decl(&name, &typ, *value, ctx, true)
             }
 
             Expr::ConstDecl(name, typ, value, _, _) => {
-                let resolved_typ =
-                    if matches!(typ, Type::Unknown | Type::TypeVar(_) | Type::Param(_)) {
-                        self.expr_high_type(&value, ctx)
-                            .unwrap_or_else(|| typ.clone())
-                    } else {
-                        typ.clone()
-                    };
-                let is_struct = matches!(&resolved_typ, Type::Struct(_, _) | Type::Union(_, _));
-                let value = if is_struct {
-                    self.compile_expr(*value, ctx)?
-                } else {
-                    match self.eval_const(&value, Some(&*ctx)) {
-                        Some((cv, IRType::Int | IRType::Float | IRType::Bool | IRType::Array)) => {
-                            Operand::ConstIdx(self.get_const_index(cv))
-                        }
-                        _ => self.compile_expr(*value, ctx)?,
-                    }
-                };
-                let var_ir_type = Context::type_to_ir_type(&resolved_typ);
-
-                ctx.declare_var_with_type(name.clone(), var_ir_type.clone(), resolved_typ)?;
-                if matches!(var_ir_type, IRType::Array) {
-                    if let Some(len) = self.const_array_len(&value, ctx) {
-                        ctx.array_lengths.insert(name.clone(), len);
-                    } else if let Operand::ConstIdx(idx) = &value {
-                        if let IRConst::Array(elems) = &self.constants[*idx] {
-                            ctx.array_lengths.insert(name.clone(), elems.len());
-                        }
-                    }
-                }
-
-                let result = value.clone();
-                match var_ir_type {
-                    IRType::Float => ctx.instructions.push(Instruction {
-                        op: Op::FStore,
-                        dst: Some(Operand::Var(ctx.slot(&name))),
-                        src1: Some(value),
-                        src2: None,
-                    }),
-                    _ => ctx.instructions.push(Instruction {
-                        op: Op::Store,
-                        dst: Some(Operand::Var(ctx.slot(&name))),
-                        src1: Some(value),
-                        src2: None,
-                    }),
-                }
-                Ok(result)
+                self.compile_local_decl(&name, &typ, *value, ctx, false)
             }
 
             Expr::GlobalVar(_, _, _, _, _) => Ok(ctx.new_tmp(IRType::Void)),
@@ -283,19 +287,14 @@ impl IRGen {
             Expr::VarAssign(name, value, _) => {
                 ctx.unmark_moved(&name);
 
-                let moved_src: Option<(String, Span)> = match &*value {
-                    Expr::Var(src, sp)
-                        if src.as_str() != name.as_str()
-                            && self.can_move_var(src, ctx)
-                            && ctx
-                                .get_var_high_type(src)
-                                .map(|t| self.is_resource_type(t))
-                                .unwrap_or(false) =>
-                    {
-                        Some((src.clone(), *sp))
-                    }
-                    _ => None,
-                };
+                let moved_src = self.detect_move_source(
+                    &value,
+                    ctx,
+                    super::expr_resource::MoveOpts {
+                        exclude: Some(name.clone()),
+                        binding_ty: None,
+                    },
+                );
                 let value_copy_info = self.resource_copy_info(&value, ctx);
                 let value = self.compile_expr(*value, ctx)?;
                 let typ = ctx.get_operand_type(&value, &self.constants)?;
@@ -326,15 +325,8 @@ impl IRGen {
                             src2: None,
                         });
 
-                        if let Some((src_name, src_span)) = &moved_src {
-                            let zero_idx = self.get_const_index(IRConst::Int(0));
-                            ctx.instructions.push(Instruction {
-                                op: Op::Store,
-                                dst: Some(Operand::Var(ctx.slot(src_name.as_str()))),
-                                src1: Some(Operand::ConstIdx(zero_idx)),
-                                src2: None,
-                            });
-                            ctx.mark_moved(src_name, *src_span);
+                        if let Some(msrc) = &moved_src {
+                            self.invalidate_and_mark_move(msrc, ctx)?;
                         }
 
                         ctx.unmark_moved(&name);
@@ -401,15 +393,8 @@ impl IRGen {
                             }),
                         }
 
-                        if let Some((src_name, src_span)) = &moved_src {
-                            let zero_idx = self.get_const_index(IRConst::Int(0));
-                            ctx.instructions.push(Instruction {
-                                op: Op::Store,
-                                dst: Some(Operand::Var(ctx.slot(src_name.as_str()))),
-                                src1: Some(Operand::ConstIdx(zero_idx)),
-                                src2: None,
-                            });
-                            ctx.mark_moved(src_name, *src_span);
+                        if let Some(msrc) = &moved_src {
+                            self.invalidate_and_mark_move(msrc, ctx)?;
                         }
 
                         ctx.unmark_moved(&name);
@@ -467,8 +452,8 @@ impl IRGen {
                         src2: None,
                     });
                     Ok(res_tmp)
-                } else if let Ok(func) = self.find_func(&name) {
-                    Ok(Operand::Function(func.name))
+                } else if let Some(func) = self.lookup_func(&name) {
+                    Ok(Operand::Function(func.name.clone()))
                 } else if let Some((ir_const, ir_type)) = self.globals.get(&name).cloned() {
                     let const_idx = self.get_const_index(ir_const);
                     let res_tmp = ctx.new_tmp(ir_type);
@@ -790,105 +775,9 @@ impl IRGen {
                 Ok(res_tmp)
             }
 
-            Expr::Inc(name, _) => {
-                if self.is_float_var(&name, ctx) {
-                    return self.emit_float_inc_dec(&name, true, ctx);
-                }
-                if let Some(load_op) = self.extern_load_op(&name) {
-                    let dst = self.extern_op(&name).unwrap();
-                    let res_tmp = ctx.new_tmp(IRType::Int);
-                    ctx.instructions.push(Instruction {
-                        op: load_op,
-                        dst: Some(res_tmp.clone()),
-                        src1: Some(dst.clone()),
-                        src2: None,
-                    });
-                    ctx.instructions.push(Instruction {
-                        op: Op::Inc,
-                        dst: Some(res_tmp.clone()),
-                        src1: Some(res_tmp.clone()),
-                        src2: None,
-                    });
-                    ctx.instructions.push(Instruction {
-                        op: Op::GlobStore,
-                        dst: Some(dst),
-                        src1: Some(res_tmp.clone()),
-                        src2: None,
-                    });
-                    return Ok(res_tmp);
-                }
-                let var_op = Operand::Var(ctx.slot(&name));
-                let res_tmp = ctx.new_tmp(IRType::Int);
-                ctx.instructions.push(Instruction {
-                    op: Op::Load,
-                    dst: Some(res_tmp.clone()),
-                    src1: Some(var_op.clone()),
-                    src2: None,
-                });
-                ctx.instructions.push(Instruction {
-                    op: Op::Inc,
-                    dst: Some(res_tmp.clone()),
-                    src1: Some(res_tmp.clone()),
-                    src2: None,
-                });
-                ctx.instructions.push(Instruction {
-                    op: Op::Store,
-                    dst: Some(var_op),
-                    src1: Some(res_tmp.clone()),
-                    src2: None,
-                });
-                Ok(res_tmp)
-            }
+            Expr::Inc(name, _) => self.emit_int_inc_dec(&name, Op::Inc, ctx),
 
-            Expr::Dec(name, _) => {
-                if self.is_float_var(&name, ctx) {
-                    return self.emit_float_inc_dec(&name, false, ctx);
-                }
-                if let Some(load_op) = self.extern_load_op(&name) {
-                    let dst = self.extern_op(&name).unwrap();
-                    let res_tmp = ctx.new_tmp(IRType::Int);
-                    ctx.instructions.push(Instruction {
-                        op: load_op,
-                        dst: Some(res_tmp.clone()),
-                        src1: Some(dst.clone()),
-                        src2: None,
-                    });
-                    ctx.instructions.push(Instruction {
-                        op: Op::Dec,
-                        dst: Some(res_tmp.clone()),
-                        src1: Some(res_tmp.clone()),
-                        src2: None,
-                    });
-                    ctx.instructions.push(Instruction {
-                        op: Op::GlobStore,
-                        dst: Some(dst),
-                        src1: Some(res_tmp.clone()),
-                        src2: None,
-                    });
-                    return Ok(res_tmp);
-                }
-                let var_op = Operand::Var(ctx.slot(&name));
-                let res_tmp = ctx.new_tmp(IRType::Int);
-                ctx.instructions.push(Instruction {
-                    op: Op::Load,
-                    dst: Some(res_tmp.clone()),
-                    src1: Some(var_op.clone()),
-                    src2: None,
-                });
-                ctx.instructions.push(Instruction {
-                    op: Op::Dec,
-                    dst: Some(res_tmp.clone()),
-                    src1: Some(res_tmp.clone()),
-                    src2: None,
-                });
-                ctx.instructions.push(Instruction {
-                    op: Op::Store,
-                    dst: Some(var_op),
-                    src1: Some(res_tmp.clone()),
-                    src2: None,
-                });
-                Ok(res_tmp)
-            }
+            Expr::Dec(name, _) => self.emit_int_inc_dec(&name, Op::Dec, ctx),
 
             Expr::AddAssign(name, value, _) => {
                 self.emit_compound_assign(name, *value, Op::Add, ctx)
@@ -954,18 +843,14 @@ impl IRGen {
             }
 
             Expr::Return(val, _) => {
-                let moved_src: Option<(String, Span)> = match &*val {
-                    Expr::Var(src, sp)
-                        if self.can_move_var(src, ctx)
-                            && ctx
-                                .get_var_high_type(src)
-                                .map(|t| self.is_resource_type(t))
-                                .unwrap_or(false) =>
-                    {
-                        Some((src.clone(), *sp))
-                    }
-                    _ => None,
-                };
+                let moved_src = self.detect_move_source(
+                    &val,
+                    ctx,
+                    super::expr_resource::MoveOpts {
+                        exclude: None,
+                        binding_ty: None,
+                    },
+                );
                 let copy_info = self.resource_copy_info(&val, ctx);
                 let res_op = self.compile_expr(*val, ctx)?;
                 let res_op = match (&moved_src, copy_info) {
@@ -974,15 +859,8 @@ impl IRGen {
                     (None, None) => res_op,
                 };
 
-                if let Some((src_name, src_span)) = &moved_src {
-                    let zero_idx = self.get_const_index(IRConst::Int(0));
-                    ctx.instructions.push(Instruction {
-                        op: Op::Store,
-                        dst: Some(Operand::Var(ctx.slot(src_name.as_str()))),
-                        src1: Some(Operand::ConstIdx(zero_idx)),
-                        src2: None,
-                    });
-                    ctx.mark_moved(src_name, *src_span);
+                if let Some(msrc) = &moved_src {
+                    self.invalidate_and_mark_move(msrc, ctx)?;
                 }
                 self.emit_all_scope_frees(ctx)?;
                 match ctx.get_operand_type(&res_op, &self.constants)? {
@@ -1073,6 +951,17 @@ impl IRGen {
                         });
                     }
                 }
+
+                if let Expr::Var(base, mspan) = obj.as_ref() {
+                    let path = format!("{base}.{field_name}");
+                    if ctx.moved.contains(&path) {
+                        return Err(CodeGenError::UseAfterMove {
+                            moved_at: ctx.moved_at.get(&path).copied().unwrap_or(*mspan),
+                            span: *mspan,
+                            name: path,
+                        });
+                    }
+                }
                 let (obj_addr, obj_type) = self.member_addr(&obj, ctx)?;
                 let (offset, field_type) = self.member_offset_and_type(&obj_type, &field_name)?;
                 let field_ir_type = Context::type_to_ir_type(&field_type);
@@ -1107,6 +996,9 @@ impl IRGen {
             }
 
             Expr::MemberAssign(obj, _field_name, value, _) => {
+                if let Expr::Var(base, _) = obj.as_ref() {
+                    ctx.unmark_moved(&format!("{base}.{_field_name}"));
+                }
                 let value_copy_info = self.resource_copy_info(&value, ctx);
                 let val_op = self.compile_expr(*value, ctx)?;
                 let (obj_addr, obj_type) = self.member_addr(&obj, ctx)?;
@@ -1279,8 +1171,10 @@ impl IRGen {
             Expr::TypeDef(_)
             | Expr::Struct(_, _, _, _)
             | Expr::Union(_, _, _, _)
-            | Expr::Enum(_, _, _)
-            | Expr::Lambda(_, _, _, _) => Ok(ctx.new_tmp(IRType::Void)),
+            | Expr::Enum(_, _, _) => Ok(ctx.new_tmp(IRType::Void)),
+            Expr::Lambda(_, _, _, _) => Err(CodeGenError::UnsupportedOperation {
+                message: "internal error: unhoisted lambda reached code generation".to_string(),
+            }),
 
             Expr::Match(target, branches, default, _) => {
                 self.compile_match(target, branches, default, ctx)

@@ -110,16 +110,23 @@ impl IRGen {
         Ok(())
     }
 
+    pub(super) fn lookup_func(&self, name: &str) -> Option<&IRFunction> {
+        self.functions
+            .iter()
+            .rev()
+            .find(|f| f.name == *name || f.aliases.iter().any(|a| a == name))
+    }
+    pub(super) fn has_func(&self, name: &str) -> bool {
+        self.lookup_func(name).is_some()
+    }
+
     pub(super) fn find_func(&self, name: &str) -> Result<IRFunction, CodeGenError> {
-        for func in self.functions.iter().rev() {
-            if func.name == *name || func.aliases.iter().any(|a| a == name) {
-                return Ok(func.to_owned());
-            }
-        }
-        Err(CodeGenError::UndefinedFunction {
-            name: name.to_string(),
-            span: Span::new(0, 0),
-        })
+        self.lookup_func(name)
+            .cloned()
+            .ok_or_else(|| CodeGenError::UndefinedFunction {
+                name: name.to_string(),
+                span: Span::new(0, 0),
+            })
     }
 
     pub(super) fn monomorphize(
@@ -157,7 +164,7 @@ impl IRGen {
                 .join("_")
         );
 
-        if self.find_func(&mangled).is_ok() {
+        if self.has_func(&mangled) {
             return Ok(mangled);
         }
 

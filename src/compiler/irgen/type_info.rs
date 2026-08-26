@@ -249,12 +249,6 @@ impl IRGen {
                 }
                 Some(Type::Struct(sname, ta)) => (sname.clone(), ta.clone(), None),
                 Some(Type::Union(sname, ta)) => (sname.clone(), ta.clone(), None),
-                #[allow(warnings)]
-                Some(Type::Pointer(box_ty)) => match box_ty.as_ref() {
-                    Type::Struct(sname, ta) => (sname.clone(), ta.clone(), None),
-                    Type::Union(sname, ta) => (sname.clone(), ta.clone(), None),
-                    _ => return (None, false),
-                },
                 _ => return (None, false),
             },
             Expr::MemberAccess(obj, field_name, _) => match &**obj {
@@ -281,43 +275,18 @@ impl IRGen {
             _ => return (None, false),
         };
 
-        if let Some((_, fields)) = self.structs.get(&sname) {
+        if let Some((_, fields)) = self.structs.get(&sname).or_else(|| self.unions.get(&sname)) {
             for (fname, ftype) in fields {
                 if Some(fname.as_str()) == field_name.as_deref() {
                     let byte = match ftype {
                         Type::Primitive(Primitive::String) => true,
                         Type::Array(_elem) => false,
-                        Type::Pointer(inner) => Self::ptr_scale(&inner) == 1,
+                        Type::Pointer(inner) => Self::ptr_scale(inner) == 1,
                         _ => false,
                     };
                     let elem = match ftype {
                         Type::Pointer(inner) => *inner.clone(),
-                        Type::Array(elem) => {
-                            let concrete = elem.substitute(&type_args);
-                            concrete
-                        }
-                        Type::Primitive(Primitive::String) => Type::Primitive(Primitive::String),
-                        _ => Type::Primitive(Primitive::Int),
-                    };
-                    return (Some(elem), byte);
-                }
-            }
-        }
-        if let Some((_, fields)) = self.unions.get(&sname) {
-            for (fname, ftype) in fields {
-                if Some(fname.as_str()) == field_name.as_deref() {
-                    let byte = match ftype {
-                        Type::Primitive(Primitive::String) => true,
-                        Type::Array(_elem) => false,
-                        Type::Pointer(inner) => Self::ptr_scale(&inner) == 1,
-                        _ => false,
-                    };
-                    let elem = match ftype {
-                        Type::Pointer(inner) => *inner.clone(),
-                        Type::Array(elem) => {
-                            let concrete = elem.substitute(&type_args);
-                            concrete
-                        }
+                        Type::Array(elem) => elem.substitute(&type_args),
                         Type::Primitive(Primitive::String) => Type::Primitive(Primitive::String),
                         _ => Type::Primitive(Primitive::Int),
                     };

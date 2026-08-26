@@ -222,10 +222,6 @@ pub enum Asm {
     Seta(Reg),
     Setae(Reg),
 
-    #[allow(dead_code)]
-    Setb(Reg),
-    #[allow(dead_code)]
-    Setbe(Reg),
     Setp(Reg),
     Setnp(Reg),
 

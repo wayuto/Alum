@@ -1,7 +1,6 @@
 use super::context::Context;
 use super::ir::{IRConst, IRType, Instruction, Op, Operand};
 use crate::compiler::{
-    Span,
     codegen::CodeGenError,
     irgen::IRGen,
     parser::{Expr, Primitive, Type},
@@ -30,7 +29,7 @@ impl IRGen {
 
         let func_name = match &*callee {
             Expr::Var(name, _) => {
-                if self.find_func(name).is_ok() {
+                if self.has_func(name) {
                     Some(name.clone())
                 } else if self.generic_funcs.contains_key(name) {
                     Some(self.monomorphize(name, &type_args)?)
@@ -42,6 +41,7 @@ impl IRGen {
         };
         if let Some(ref name) = func_name {
             let func = self.find_func(name)?;
+
             if args.len() != func.params.len() {
                 return Err(CodeGenError::TypeError {
                     message: format!(
@@ -53,7 +53,7 @@ impl IRGen {
             }
             let mut evaluated: Vec<(Operand, IRType)> = Vec::new();
 
-            let mut moved_args: Vec<(String, Span)> = Vec::new();
+            let mut moved_args: Vec<super::expr_resource::MoveSource> = Vec::new();
             let mut n = 0;
             for (arg, param) in zip(args.iter(), func.params.iter()) {
                 let operand = self.compile_expr(arg.clone(), ctx)?;
@@ -71,16 +71,29 @@ impl IRGen {
                 }
                 let operand = match self.expr_high_type(arg, ctx) {
                     Some(hty) if self.is_resource_type(&hty) && !self.is_fresh_expr(arg) => {
-                        if let Expr::Var(src, sp) = arg {
-                            if self.can_move_var(src, ctx) {
+                        match arg {
+                            Expr::Var(src, sp) if self.can_move_var(src, ctx) => {
                                 ctx.mark_moved(src, *sp);
-                                moved_args.push((src.clone(), *sp));
+                                moved_args
+                                    .push(super::expr_resource::MoveSource::Var(src.clone(), *sp));
                                 operand
-                            } else {
-                                self.copy_resource(ctx, operand, &hty)?
                             }
-                        } else {
-                            self.copy_resource(ctx, operand, &hty)?
+                            _ => {
+                                if let Some(msrc) = self.detect_move_source(
+                                    arg,
+                                    ctx,
+                                    super::expr_resource::MoveOpts {
+                                        exclude: None,
+                                        binding_ty: None,
+                                    },
+                                ) {
+                                    ctx.mark_moved(msrc.path().as_str(), msrc.span());
+                                    moved_args.push(msrc);
+                                    operand
+                                } else {
+                                    self.copy_resource(ctx, operand, &hty)?
+                                }
+                            }
                         }
                     }
                     _ => operand,
@@ -113,14 +126,21 @@ impl IRGen {
                 }
             }
 
-            let zero_idx = self.get_const_index(IRConst::Int(0));
-            for (src_name, _) in &moved_args {
-                ctx.instructions.push(Instruction {
-                    op: Op::Store,
-                    dst: Some(Operand::Var(ctx.slot(src_name.as_str()))),
-                    src1: Some(Operand::ConstIdx(zero_idx)),
-                    src2: None,
-                });
+            for msrc in &moved_args {
+                match msrc {
+                    super::expr_resource::MoveSource::Var(src_name, _) => {
+                        let zero_idx = self.get_const_index(IRConst::Int(0));
+                        ctx.instructions.push(Instruction {
+                            op: Op::Store,
+                            dst: Some(Operand::Var(ctx.slot(src_name.as_str()))),
+                            src1: Some(Operand::ConstIdx(zero_idx)),
+                            src2: None,
+                        });
+                    }
+                    super::expr_resource::MoveSource::Field { base, field, .. } => {
+                        self.emit_move_field_invalidate(base, field, ctx)?;
+                    }
+                }
             }
             let res_tmp = ctx.new_tmp(func.ret_type);
             ctx.instructions.push(Instruction {
@@ -139,27 +159,38 @@ impl IRGen {
 
                 let operand = match self.resource_copy_info(arg, ctx) {
                     Some(ty) => {
-                        if let Expr::Var(src, arg_span) = arg {
-                            if self.can_move_var(src, ctx) {
-                                let h = ctx.new_tmp(IRType::Int);
-                                ctx.instructions.push(Instruction {
-                                    op: Op::Load,
-                                    dst: Some(h.clone()),
-                                    src1: Some(operand.clone()),
-                                    src2: None,
-                                });
-                                let zero_idx = self.get_const_index(IRConst::Int(0));
-                                let src_name = src.clone();
-                                ctx.instructions.push(Instruction {
-                                    op: Op::Store,
-                                    dst: Some(Operand::Var(ctx.slot(&src_name))),
-                                    src1: Some(Operand::ConstIdx(zero_idx)),
-                                    src2: None,
-                                });
-                                ctx.mark_moved(src, *arg_span);
-                                evaluated.push(h);
-                                continue;
+                        if let Some(msrc) = self.detect_move_source(
+                            arg,
+                            ctx,
+                            super::expr_resource::MoveOpts {
+                                exclude: None,
+                                binding_ty: None,
+                            },
+                        ) {
+                            let h = ctx.new_tmp(IRType::Int);
+                            ctx.instructions.push(Instruction {
+                                op: Op::Load,
+                                dst: Some(h.clone()),
+                                src1: Some(operand.clone()),
+                                src2: None,
+                            });
+                            match &msrc {
+                                super::expr_resource::MoveSource::Var(src_name, _) => {
+                                    let zero_idx = self.get_const_index(IRConst::Int(0));
+                                    ctx.instructions.push(Instruction {
+                                        op: Op::Store,
+                                        dst: Some(Operand::Var(ctx.slot(src_name.as_str()))),
+                                        src1: Some(Operand::ConstIdx(zero_idx)),
+                                        src2: None,
+                                    });
+                                }
+                                super::expr_resource::MoveSource::Field { base, field, .. } => {
+                                    self.emit_move_field_invalidate(base, field, ctx)?
+                                }
                             }
+                            ctx.mark_moved(msrc.path().as_str(), msrc.span());
+                            evaluated.push(h);
+                            continue;
                         }
                         self.copy_resource(ctx, operand, &ty)?
                     }
@@ -204,6 +235,18 @@ impl IRGen {
         idx: Box<Expr>,
         ctx: &mut Context,
     ) -> Result<Operand, CodeGenError> {
+        if let Expr::MemberAccess(obj, fname, mspan) = arr.as_ref() {
+            if let Expr::Var(base, _) = obj.as_ref() {
+                let path = format!("{base}.{fname}");
+                if ctx.moved.contains(&path) {
+                    return Err(CodeGenError::UseAfterMove {
+                        moved_at: ctx.moved_at.get(&path).copied().unwrap_or(*mspan),
+                        span: *mspan,
+                        name: path,
+                    });
+                }
+            }
+        }
         if let Some(Type::Struct(sname, ta)) = self.expr_high_type(&arr, ctx) {
             let ret_ty = self
                 .struct_field_fn_ret(&sname, &ta, "nth")

@@ -55,6 +55,7 @@ pub struct Allocation {
     pub stack_size: usize,
     pub used_callee_saved: Vec<Reg>,
     pub xmm_saved: Vec<(Reg, usize)>,
+    pub is_leaf: bool,
 }
 
 fn build_label_map(instructions: &[Instruction]) -> HashMap<String, usize> {
@@ -201,12 +202,7 @@ fn compute_liveness(
     instructions: &[Instruction],
     label_map: &HashMap<String, usize>,
     constants: &[IRConst],
-) -> (
-    Vec<HashSet<String>>,
-    Vec<HashSet<String>>,
-    HashMap<String, usize>,
-    HashMap<String, usize>,
-) {
+) -> (HashMap<String, usize>, HashMap<String, usize>) {
     let inst_count = instructions.len();
     let mut live_in: Vec<HashSet<String>> = vec![HashSet::new(); inst_count];
     let mut live_out: Vec<HashSet<String>> = vec![HashSet::new(); inst_count];
@@ -323,7 +319,7 @@ fn compute_liveness(
         }
     }
 
-    (live_in, live_out, first_def_or_use, last_live)
+    (first_def_or_use, last_live)
 }
 
 fn compute_intervals(
@@ -481,7 +477,7 @@ pub fn allocate_registers(func: &IRFunction, program_constants: &[IRConst]) -> A
         )
     });
     let label_map = build_label_map(&func.instructions);
-    let (_live_in, _live_out, first_def_or_use, last_live) =
+    let (first_def_or_use, last_live) =
         compute_liveness(&func.instructions, &label_map, program_constants);
     let intervals = compute_intervals(
         &func.instructions,
@@ -491,12 +487,11 @@ pub fn allocate_registers(func: &IRFunction, program_constants: &[IRConst]) -> A
         program_constants,
     );
 
-    const VOLATILE_GPR: [Reg; 10] = [
+    const VOLATILE_GPR: [Reg; 9] = [
         Reg::R8,
         Reg::R9,
         Reg::R10,
         Reg::R11,
-        Reg::R15,
         Reg::Rax,
         Reg::Rcx,
         Reg::Rdx,
@@ -504,11 +499,7 @@ pub fn allocate_registers(func: &IRFunction, program_constants: &[IRConst]) -> A
         Reg::Rdi,
     ];
 
-    let volatile_pool: Vec<Reg> = VOLATILE_GPR
-        .iter()
-        .copied()
-        .filter(|r| *r != Reg::R15)
-        .collect();
+    let volatile_pool: Vec<Reg> = VOLATILE_GPR.to_vec();
     const CALLEE_GPR: [Reg; 3] = [Reg::R12, Reg::R13, Reg::R14];
     const FLOAT_POOL: [Reg; 8] = [
         Reg::Xmm8,
@@ -608,6 +599,7 @@ pub fn allocate_registers(func: &IRFunction, program_constants: &[IRConst]) -> A
         stack_size,
         used_callee_saved,
         xmm_saved,
+        is_leaf,
     };
     if std::env::var("ALC_DEBUG_ALLOC").is_ok() {
         eprintln!("=== ALLOC {} ===", func.name);

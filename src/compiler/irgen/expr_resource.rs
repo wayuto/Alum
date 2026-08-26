@@ -8,6 +8,35 @@ use crate::compiler::{
 };
 use ordered_float::OrderedFloat;
 
+pub(super) enum MoveSource {
+    Var(String, Span),
+    Field {
+        base: String,
+        field: String,
+        span: Span,
+    },
+}
+
+impl MoveSource {
+    pub(super) fn path(&self) -> String {
+        match self {
+            MoveSource::Var(n, _) => n.clone(),
+            MoveSource::Field { base, field, .. } => format!("{base}.{field}"),
+        }
+    }
+    pub(super) fn span(&self) -> Span {
+        match self {
+            MoveSource::Var(_, sp) | MoveSource::Field { span: sp, .. } => *sp,
+        }
+    }
+}
+
+pub(super) struct MoveOpts {
+    pub exclude: Option<String>,
+
+    pub binding_ty: Option<Type>,
+}
+
 impl IRGen {
     pub(super) fn is_resource_type(&self, ty: &Type) -> bool {
         match ty {
@@ -17,6 +46,112 @@ impl IRGen {
             Type::Primitive(Primitive::String) => true,
             _ => false,
         }
+    }
+
+    fn pointer_binding(ty: Option<&Type>) -> bool {
+        matches!(ty, Some(Type::Pointer(_)))
+    }
+
+    pub(super) fn detect_move_source(
+        &self,
+        value: &Expr,
+        ctx: &Context,
+        opts: MoveOpts,
+    ) -> Option<MoveSource> {
+        match value {
+            Expr::Var(src, sp)
+                if opts.exclude.as_deref() != Some(src.as_str())
+                    && self.can_move_var(src, ctx)
+                    && ctx
+                        .get_var_high_type(src)
+                        .map(|t| self.is_resource_type(t))
+                        .unwrap_or(false) =>
+            {
+                if Self::pointer_binding(opts.binding_ty.as_ref()) {
+                    return None;
+                }
+                Some(MoveSource::Var(src.clone(), *sp))
+            }
+            Expr::MemberAccess(obj, field, sp) if matches!(obj.as_ref(), Expr::Var(_, _)) => {
+                let base = match obj.as_ref() {
+                    Expr::Var(b, _) => b.clone(),
+                    _ => unreachable!(),
+                };
+                if opts.exclude.as_deref() == Some(base.as_str())
+                    || ctx.get_var_type(&base).is_err()
+                    || ctx.borrowed.contains(&base)
+                {
+                    return None;
+                }
+                if Self::pointer_binding(opts.binding_ty.as_ref()) {
+                    return None;
+                }
+                let is_res = self
+                    .expr_high_type(value, ctx)
+                    .map(|t| self.is_resource_type(&t))
+                    .unwrap_or(false);
+                if is_res {
+                    Some(MoveSource::Field {
+                        base,
+                        field: field.clone(),
+                        span: *sp,
+                    })
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    pub(super) fn emit_move_field_invalidate(
+        &mut self,
+        base: &str,
+        field: &str,
+        ctx: &mut Context,
+    ) -> Result<(), CodeGenError> {
+        let base_expr = Expr::Var(base.to_string(), Span::new(0, 0));
+        let Some(obj_ty) = self.expr_high_type(&base_expr, ctx) else {
+            return Ok(());
+        };
+        let Ok((offset, _fty)) = self.member_offset_and_type(&obj_ty, field) else {
+            return Ok(());
+        };
+        let Ok((obj_addr, _)) = self.member_addr(&base_expr, ctx) else {
+            return Ok(());
+        };
+        let addr = self.emit_field_addr(ctx, obj_addr, offset);
+        let zero_idx = self.get_const_index(IRConst::Int(0));
+        ctx.instructions.push(Instruction {
+            op: Op::StoreAt,
+            dst: Some(addr),
+            src1: Some(Operand::ConstIdx(zero_idx)),
+            src2: Some(Operand::ConstIdx(zero_idx)),
+        });
+        Ok(())
+    }
+
+    pub(super) fn invalidate_and_mark_move(
+        &mut self,
+        msrc: &MoveSource,
+        ctx: &mut Context,
+    ) -> Result<(), CodeGenError> {
+        match msrc {
+            MoveSource::Var(src_name, _) => {
+                let zero_idx = self.get_const_index(IRConst::Int(0));
+                ctx.instructions.push(Instruction {
+                    op: Op::Store,
+                    dst: Some(Operand::Var(ctx.slot(src_name))),
+                    src1: Some(Operand::ConstIdx(zero_idx)),
+                    src2: None,
+                });
+            }
+            MoveSource::Field { base, field, .. } => {
+                self.emit_move_field_invalidate(base, field, ctx)?
+            }
+        }
+        ctx.mark_moved(msrc.path().as_str(), msrc.span());
+        Ok(())
     }
 
     pub(super) fn can_move_var(&self, name: &str, ctx: &Context) -> bool {
@@ -397,7 +532,7 @@ impl IRGen {
         mut body: F,
     ) -> Result<(), CodeGenError>
     where
-        F: FnMut(&mut IRGen, &mut Context, Operand, Operand),
+        F: FnMut(&mut IRGen, &mut Context, Operand, Operand) -> Result<(), CodeGenError>,
     {
         let label_cond = ctx.new_label("raii_cond");
         let label_inc = ctx.new_label("raii_inc");
@@ -447,7 +582,7 @@ impl IRGen {
             src1: Some(arr.clone()),
             src2: Some(curr.clone()),
         });
-        body(ir, ctx, curr, elem);
+        body(ir, ctx, curr, elem)?;
         ctx.instructions.push(Instruction {
             op: Op::Label(label_inc.clone()),
             dst: None,
@@ -563,7 +698,8 @@ impl IRGen {
                         len,
                         elem_ir,
                         |ir, c, _, e| {
-                            let _ = ir.emit_free(c, e, &elem_ty);
+                            ir.emit_free(c, e, &elem_ty)?;
+                            Ok(())
                         },
                     )?;
                 }
@@ -759,10 +895,7 @@ impl IRGen {
                 let dst_c = dst.clone();
                 Self::emit_array_elem_loop(self, ctx, src, len, elem_ir, |ir, c, idx, e| {
                     let ev = if deep_elem {
-                        match ir.copy_resource(c, e.clone(), &elem_ty) {
-                            Ok(copied) => copied,
-                            Err(_) => e,
-                        }
+                        ir.copy_resource(c, e.clone(), &elem_ty)?
                     } else {
                         e
                     };
@@ -772,6 +905,7 @@ impl IRGen {
                         src1: Some(idx),
                         src2: Some(ev),
                     });
+                    Ok(())
                 })?;
                 Ok(dst)
             }

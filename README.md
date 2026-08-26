@@ -329,7 +329,7 @@ Options:
   -c, --compile-only        Compile only, do not link
   -r, --run                 Compile and run immediately
   -E                        Preprocess only; do not compile, assemble or link
-  --ast                     Output AST representation
+  --emit-ast                Output AST representation
   -I <DIR>                  Add include directory (can be used multiple times)
   --nostdlib                Do not link with standard library
   --cte-lib <PATH>          Shared library dlopened for compile-time evaluation of `fun(extern, pure)` (can be repeated; also linked into the final executable)

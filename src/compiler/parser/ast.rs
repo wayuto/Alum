@@ -80,21 +80,6 @@ impl Type {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn contains_param(&self) -> bool {
-        match self {
-            Type::Param(_) => true,
-            Type::Pointer(inner) => inner.contains_param(),
-            Type::Array(inner) => inner.contains_param(),
-            Type::Function(params, ret) => {
-                params.iter().any(|p| p.contains_param()) || ret.contains_param()
-            }
-            Type::Struct(_, args) => args.iter().any(|t| t.contains_param()),
-            Type::Union(_, args) => args.iter().any(|t| t.contains_param()),
-            _ => false,
-        }
-    }
-
     pub fn mangle(&self) -> String {
         match self {
             Type::Primitive(p) => match p {

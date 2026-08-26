@@ -346,12 +346,6 @@ impl Assembler {
             Setae(reg) => {
                 self.emit_setcc(0x0f93, *reg, section);
             }
-            Setb(reg) => {
-                self.emit_setcc(0x0f92, *reg, section);
-            }
-            Setbe(reg) => {
-                self.emit_setcc(0x0f96, *reg, section);
-            }
             Setp(reg) => {
                 self.emit_setcc(0x0f9a, *reg, section);
             }
@@ -381,10 +375,7 @@ impl Assembler {
                         self.emit_modrm_sib(section, d.reg_id() & 7, m, offset)?;
                     }
                     Operand::DataLabel(l) => {
-                        self.emit_rex(section, false, d.rex_b(), false, false);
-                        self.emit_slice(section, &[0x0f, 0x57]);
-                        self.emit_rm_disp32(section, d.reg_id() & 7);
-                        self.emit_reloc(section, RelocKind::Pc32, l.clone(), -4);
+                        self.emit_rip_rel(section, &[], false, *d, &[0x0f, 0x57], l);
                     }
                     _ => return Err(format!("unsupported xorpd src: {:?}", src)),
                 }
@@ -439,10 +430,7 @@ impl Assembler {
                     self.emit_modrm_sib(section, r.reg_id() & 7, m, offset)?;
                 }
                 Operand::DataLabel(l) => {
-                    self.emit_rex(section, true, r.rex_b(), false, false);
-                    self.emit_slice(section, &[0x8d]);
-                    self.emit_rm_disp32(section, r.reg_id() & 7);
-                    self.emit_reloc(section, RelocKind::Pc32, l.clone(), -4);
+                    self.emit_rip_rel(section, &[], true, *r, &[0x8d], l);
                 }
                 _ => return Err(format!("unsupported lea src: {:?}", src)),
             },
@@ -467,11 +455,23 @@ impl Assembler {
     fn emit_rm_disp32(&mut self, section: &str, reg: u8) {
         self.emit_slice(section, &[self.modrm(0, reg & 7, 5)]);
     }
-    fn emit_mov_label(&mut self, r: Reg, lbl: &str, section: &str, _offset: u64) {
-        self.emit_rex(section, true, r.rex_b(), false, false);
-        self.emit_slice(section, &[0x8d]);
-        self.emit_rm_disp32(section, r.reg_id() & 7);
+    fn emit_rip_rel(
+        &mut self,
+        section: &str,
+        prefix: &[u8],
+        rex_w: bool,
+        reg: Reg,
+        opcodes: &[u8],
+        lbl: &str,
+    ) {
+        self.emit_slice(section, prefix);
+        self.emit_rex(section, rex_w, reg.rex_b(), false, false);
+        self.emit_slice(section, opcodes);
+        self.emit_rm_disp32(section, reg.reg_id() & 7);
         self.emit_reloc(section, RelocKind::Pc32, lbl.to_string(), -4);
+    }
+    fn emit_mov_label(&mut self, r: Reg, lbl: &str, section: &str, _offset: u64) {
+        self.emit_rip_rel(section, &[], true, r, &[0x8d], lbl);
     }
     fn emit_r64_rm64(
         &mut self,
@@ -643,12 +643,7 @@ impl Assembler {
                 );
             }
             (Operand::Reg(r), Operand::DataLabel(l)) => {
-                self.emit_slice(section, &[f2]);
-
-                self.emit_rex(section, false, r.rex_b(), false, false);
-                self.emit_slice(section, &[0x0f, 0x10]);
-                self.emit_rm_disp32(section, r.reg_id() & 7);
-                self.emit_reloc(section, RelocKind::Pc32, l.clone(), -4);
+                self.emit_rip_rel(section, &[f2], false, *r, &[0x0f, 0x10], l);
             }
             _ => return Err(format!("unsupported movsd: {:?} {:?}", dst, src)),
         }
@@ -681,12 +676,7 @@ impl Assembler {
                 );
             }
             (Operand::Reg(r), Operand::DataLabel(l)) => {
-                self.emit_slice(section, &[f2]);
-
-                self.emit_rex(section, false, r.rex_b(), false, false);
-                self.emit_slice(section, &[0x0f, opcode]);
-                self.emit_rm_disp32(section, r.reg_id() & 7);
-                self.emit_reloc(section, RelocKind::Pc32, l.clone(), -4);
+                self.emit_rip_rel(section, &[f2], false, *r, &[0x0f, opcode], l);
             }
             _ => return Err(format!("unsupported fp binop: {:?} {:?}", dst, src)),
         }

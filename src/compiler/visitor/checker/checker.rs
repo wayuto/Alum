@@ -144,27 +144,6 @@ impl TypeChecker {
         }
     }
 
-    pub fn check(mut self, program: &mut Program) -> Result<(), CheckerError> {
-        self.collect_declarations(program);
-
-        for expr in &mut program.body {
-            match self.check_expr(expr) {
-                Ok(_) => {}
-                Err(e) => self.errors.push(e),
-            }
-
-            if self.errors.first().is_some() {
-                return Err(self.errors.remove(0));
-            }
-        }
-
-        for expr in &mut program.body {
-            self.resolve_call_type_args(expr);
-        }
-
-        Ok(())
-    }
-
     pub fn check_collect(mut self, program: &mut Program) -> Vec<CheckerError> {
         self.collect_declarations(program);
 
@@ -413,7 +392,10 @@ impl TypeChecker {
 
     pub(super) fn resolve_type(&self, ty: &Type) -> Type {
         match ty {
-            Type::TypeVar(_) => self.resolve_type_var(ty),
+            Type::TypeVar(id) => match self.type_bindings.get(id) {
+                Some(bound_type) => self.resolve_type(bound_type),
+                None => ty.clone(),
+            },
             Type::Array(inner) => Type::Array(Box::new(self.resolve_type(inner))),
             Type::Pointer(inner) => Type::Pointer(Box::new(self.resolve_type(inner))),
             Type::Function(params, ret) => Type::Function(
@@ -431,42 +413,35 @@ impl TypeChecker {
             _ => ty.clone(),
         }
     }
+    pub(super) fn normalize_type(&self, ty: &Type) -> Type {
+        match self.resolve_type(ty) {
+            Type::TypeVar(_) => Type::Primitive(Primitive::Int),
+            t => t,
+        }
+    }
+    pub(super) fn normalize_type_args(&self, args: &mut [Type]) {
+        for ty in args.iter_mut() {
+            *ty = self.normalize_type(ty);
+        }
+    }
 
     pub(super) fn resolve_call_type_args(&mut self, expr: &mut Expr) {
         match expr {
             Expr::Call(callee, type_args, args, _) => {
-                for ty in type_args.iter_mut() {
-                    let resolved = self.resolve_type_var(ty);
-                    *ty = match resolved {
-                        Type::TypeVar(_) => Type::Primitive(Primitive::Int),
-                        t => t,
-                    };
-                }
+                self.normalize_type_args(type_args);
                 self.resolve_call_type_args(callee);
                 for arg in args.iter_mut() {
                     self.resolve_call_type_args(arg);
                 }
             }
             Expr::StructLiteral(_, type_args, fields, _) => {
-                for ty in type_args.iter_mut() {
-                    let resolved = self.resolve_type_var(ty);
-                    *ty = match resolved {
-                        Type::TypeVar(_) => Type::Primitive(Primitive::Int),
-                        t => t,
-                    };
-                }
+                self.normalize_type_args(type_args);
                 for (_, value) in fields.iter_mut() {
                     self.resolve_call_type_args(value);
                 }
             }
             Expr::UnionLiteral(_, type_args, fields, _) => {
-                for ty in type_args.iter_mut() {
-                    let resolved = self.resolve_type_var(ty);
-                    *ty = match resolved {
-                        Type::TypeVar(_) => Type::Primitive(Primitive::Int),
-                        t => t,
-                    };
-                }
+                self.normalize_type_args(type_args);
                 for (_, value) in fields.iter_mut() {
                     self.resolve_call_type_args(value);
                 }
@@ -590,7 +565,6 @@ impl TypeChecker {
             _ => {}
         }
     }
-
     pub(super) fn types_compatible(&self, expected: &Type, found: &Type) -> bool {
         let expected = self.resolve_type(expected);
         let found = self.resolve_type(found);

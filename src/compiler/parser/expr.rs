@@ -43,6 +43,87 @@ impl<'a> Parser<'a> {
         self.has_fstring |= sub.has_fstring;
         r
     }
+    fn parse_record_decl(&mut self, kw: &str, union: bool) -> Result<Expr, ParserError> {
+        self.next()?;
+        self.decl_pub = self.parse_global_annotation(kw)?;
+        let (token, span) = self.next()?;
+        let name = match token {
+            Token::IDENT(s) => s,
+            token => {
+                return Err(ParserError::UnexpectedToken {
+                    expected: Some(Token::IDENT(format!("{} NAME", kw.to_uppercase()))),
+                    found: token,
+                    span,
+                });
+            }
+        };
+        let type_params = if matches!(self.peek(), Some(Ok((Token::LT, _)))) {
+            self.next()?;
+            let params = self.get_type_params_list()?;
+            self.expect(Token::GT)?;
+            params
+        } else {
+            Vec::new()
+        };
+        if !type_params.is_empty() {
+            self.push_type_params(&type_params);
+        }
+        let parsed_fields = self.parse_field_list();
+        if !type_params.is_empty() {
+            self.type_param_scopes.pop();
+        }
+        let fields = parsed_fields?;
+        if union {
+            self.unions
+                .insert(name.clone(), (type_params.clone(), fields.clone()));
+            Ok(Expr::Union(name, type_params, fields, span))
+        } else {
+            self.structs
+                .insert(name.clone(), (type_params.clone(), fields.clone()));
+            Ok(Expr::Struct(name, type_params, fields, span))
+        }
+    }
+    fn parse_literal_fields(&mut self) -> Result<Vec<(String, Expr)>, ParserError> {
+        let mut fields = Vec::new();
+        loop {
+            match self.peek().cloned() {
+                Some(Ok((Token::RBRACE, _))) => {
+                    self.next()?;
+                    break;
+                }
+                Some(Ok((Token::IDENT(field_name), _))) => {
+                    self.next()?;
+                    self.expect(Token::COLON)?;
+                    let field_value = self.expr()?;
+                    fields.push((field_name, field_value));
+                    match self.peek().cloned() {
+                        Some(Ok((Token::COMMA, _))) => {
+                            self.next()?;
+                        }
+                        Some(Ok((Token::RBRACE, _))) => {
+                            self.next()?;
+                            break;
+                        }
+                        _ => {
+                            return Err(ParserError::UnexpectedToken {
+                                expected: Some(Token::COMMA),
+                                found: self.found_token_or_eof(),
+                                span: self.last_span,
+                            });
+                        }
+                    }
+                }
+                _ => {
+                    return Err(ParserError::UnexpectedToken {
+                        expected: Some(Token::IDENT("FIELD NAME".to_string())),
+                        found: self.found_token_or_eof(),
+                        span: self.last_span,
+                    });
+                }
+            }
+        }
+        Ok(fields)
+    }
 
     pub(super) fn expr(&mut self) -> Result<Expr, ParserError> {
         const MAX_EXPR_DEPTH: usize = 2000;
@@ -318,7 +399,7 @@ impl<'a> Parser<'a> {
                                 self.next()?;
                                 break;
                             }
-                            Some(Ok((Token::IDENT(s), _))) if s == "_".to_string() => {
+                            Some(Ok((Token::IDENT(s), _))) if s == "_" => {
                                 self.next()?;
                                 self.expect(Token::COLON)?;
                                 default = Some(Box::new(self.expr()?));
@@ -412,75 +493,9 @@ impl<'a> Parser<'a> {
                         span,
                     ))
                 }
-                Ok((Token::STRUCT, _)) => {
-                    self.next()?;
-                    self.decl_pub = self.parse_global_annotation("struct")?;
-                    let (token, span) = self.next()?;
-                    let name = match token {
-                        Token::IDENT(s) => s,
-                        token => {
-                            return Err(ParserError::UnexpectedToken {
-                                expected: Some(Token::IDENT("STRUCT NAME".to_string())),
-                                found: token,
-                                span,
-                            });
-                        }
-                    };
-                    let type_params = if matches!(self.peek(), Some(Ok((Token::LT, _)))) {
-                        self.next()?;
-                        let params = self.get_type_params_list()?;
-                        self.expect(Token::GT)?;
-                        params
-                    } else {
-                        Vec::new()
-                    };
-                    if !type_params.is_empty() {
-                        self.push_type_params(&type_params);
-                    }
-                    let parsed_fields = self.parse_field_list();
-                    if !type_params.is_empty() {
-                        self.type_param_scopes.pop();
-                    }
-                    let fields = parsed_fields?;
-                    self.structs
-                        .insert(name.clone(), (type_params.clone(), fields.clone()));
-                    Ok(Expr::Struct(name, type_params, fields, span))
-                }
+                Ok((Token::STRUCT, _)) => self.parse_record_decl("struct", false),
 
-                Ok((Token::UNION, _)) => {
-                    self.next()?;
-                    self.decl_pub = self.parse_global_annotation("union")?;
-                    let (token, span) = self.next()?;
-                    let name = match token {
-                        Token::IDENT(s) => s,
-                        token => {
-                            return Err(ParserError::UnexpectedToken {
-                                expected: Some(Token::IDENT("UNION NAME".to_string())),
-                                found: token,
-                                span,
-                            });
-                        }
-                    };
-                    let type_params = if matches!(self.peek(), Some(Ok((Token::LT, _)))) {
-                        self.next()?;
-                        let params = self.get_type_params_list()?;
-                        self.expect(Token::GT)?;
-                        params
-                    } else {
-                        Vec::new()
-                    };
-                    if !type_params.is_empty() {
-                        self.push_type_params(&type_params);
-                    }
-                    let parsed_fields = self.parse_field_list();
-                    if !type_params.is_empty() {
-                        self.type_param_scopes.pop();
-                    }
-                    let fields = parsed_fields?;
-                    self.unions
-                        .insert(name.clone(), (type_params.clone(), fields.clone()));
-                    Ok(Expr::Union(name, type_params, fields, span))
-                }
+                Ok((Token::UNION, _)) => self.parse_record_decl("union", true),
 
                 Ok((Token::ENUM, span)) => {
                     self.next()?;
@@ -1160,46 +1175,7 @@ impl<'a> Parser<'a> {
                             self.expect(Token::GT)?;
                             if let Some(Ok((Token::LBRACE, _))) = self.peek() {
                                 self.next()?;
-                                let mut fields = Vec::new();
-                                loop {
-                                    match self.peek().cloned() {
-                                        Some(Ok((Token::RBRACE, _))) => {
-                                            self.next()?;
-                                            break;
-                                        }
-                                        Some(Ok((Token::IDENT(field_name), _))) => {
-                                            self.next()?;
-                                            self.expect(Token::COLON)?;
-                                            let field_value = self.expr()?;
-                                            fields.push((field_name, field_value));
-                                            match self.peek().cloned() {
-                                                Some(Ok((Token::COMMA, _))) => {
-                                                    self.next()?;
-                                                }
-                                                Some(Ok((Token::RBRACE, _))) => {
-                                                    self.next()?;
-                                                    break;
-                                                }
-                                                _ => {
-                                                    return Err(ParserError::UnexpectedToken {
-                                                        expected: Some(Token::COMMA),
-                                                        found: self.found_token_or_eof(),
-                                                        span: self.last_span,
-                                                    });
-                                                }
-                                            }
-                                        }
-                                        _ => {
-                                            return Err(ParserError::UnexpectedToken {
-                                                expected: Some(Token::IDENT(
-                                                    "FIELD NAME".to_string(),
-                                                )),
-                                                found: self.found_token_or_eof(),
-                                                span: self.last_span,
-                                            });
-                                        }
-                                    }
-                                }
+                                let fields = self.parse_literal_fields()?;
                                 if is_union {
                                     return Ok(Expr::UnionLiteral(name, type_args, fields, span));
                                 } else {
@@ -1208,44 +1184,7 @@ impl<'a> Parser<'a> {
                             }
                         } else if let Some(Ok((Token::LBRACE, _))) = self.peek() {
                             self.next()?;
-                            let mut fields = Vec::new();
-                            loop {
-                                match self.peek().cloned() {
-                                    Some(Ok((Token::RBRACE, _))) => {
-                                        self.next()?;
-                                        break;
-                                    }
-                                    Some(Ok((Token::IDENT(field_name), _))) => {
-                                        self.next()?;
-                                        self.expect(Token::COLON)?;
-                                        let field_value = self.expr()?;
-                                        fields.push((field_name, field_value));
-                                        match self.peek().cloned() {
-                                            Some(Ok((Token::COMMA, _))) => {
-                                                self.next()?;
-                                            }
-                                            Some(Ok((Token::RBRACE, _))) => {
-                                                self.next()?;
-                                                break;
-                                            }
-                                            _ => {
-                                                return Err(ParserError::UnexpectedToken {
-                                                    expected: Some(Token::COMMA),
-                                                    found: self.found_token_or_eof(),
-                                                    span: self.last_span,
-                                                });
-                                            }
-                                        }
-                                    }
-                                    _ => {
-                                        return Err(ParserError::UnexpectedToken {
-                                            expected: Some(Token::IDENT("FIELD NAME".to_string())),
-                                            found: self.found_token_or_eof(),
-                                            span: self.last_span,
-                                        });
-                                    }
-                                }
-                            }
+                            let fields = self.parse_literal_fields()?;
                             if is_union {
                                 return Ok(Expr::UnionLiteral(name, Vec::new(), fields, span));
                             } else {
@@ -1283,8 +1222,7 @@ impl<'a> Parser<'a> {
                 }
                 Ok((Token::PLUS, _span)) => {
                     self.next()?;
-                    let operand = self.call();
-                    return Ok(operand?);
+                    return self.call();
                 }
                 Ok((Token::PLUSPLUS, span)) => {
                     self.next()?;

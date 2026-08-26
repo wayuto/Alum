@@ -70,6 +70,10 @@ fn run() -> Result<(), Box<dyn Error>> {
             cli.include_paths,
             cli.verbose,
             cli.cte_lib.clone(),
+            alc::compiler::codegen::DumpOptions {
+                ir: cli.emit_ir,
+                asm: cli.emit_asm,
+            },
         );
     }
 
@@ -79,6 +83,10 @@ fn run() -> Result<(), Box<dyn Error>> {
 
     let all_obj_files = cli.input.iter().all(|input| is_object_file(input));
 
+    let dumps = alc::compiler::codegen::DumpOptions {
+        ir: cli.emit_ir,
+        asm: cli.emit_asm,
+    };
     let mut obj_files = Vec::new();
     let mut generated_objs = Vec::new();
 
@@ -105,12 +113,13 @@ fn run() -> Result<(), Box<dyn Error>> {
 
         let obj_file = build(
             input.clone(),
-            cli.ast,
+            cli.emit_ast,
             obj_output,
             cli.include_paths.clone(),
             cli.preprocess_only,
             cli.verbose,
             cli.cte_lib.clone(),
+            dumps,
         )?;
 
         if !obj_file.is_empty() {
@@ -140,7 +149,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
-    if cli.compile_only || cli.ast || cli.preprocess_only {
+    if cli.compile_only || cli.emit_ast || cli.preprocess_only {
         return Ok(());
     }
 

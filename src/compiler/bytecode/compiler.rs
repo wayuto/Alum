@@ -51,8 +51,17 @@ pub struct Compiler {
 
     global_consts: HashMap<String, Value>,
 }
-
 impl Compiler {
+    fn resolve_member_index(&self, obj: &Expr, field_name: &str) -> (String, usize) {
+        let type_name = self
+            .resolve_struct_type(obj)
+            .unwrap_or_else(|| panic!("unsupported member access in CTE"));
+        let idx = self.field_index(&type_name, field_name).unwrap_or_else(|| {
+            panic!("Compiler: type {type_name} has no field {field_name} (CTE)")
+        });
+        (type_name, idx)
+    }
+
     pub fn new() -> Self {
         Self {
             constants: Vec::new(),
@@ -76,6 +85,14 @@ impl Compiler {
         let mut c = Self::new();
         c.global_consts = map;
         c
+    }
+    fn patch_loop(&mut self, targets: LoopTargets, break_pos: u32, continue_pos: u32) {
+        for j in targets.break_jumps {
+            self.patch_jump_addr(j + 1, break_pos);
+        }
+        for j in targets.continue_jumps {
+            self.patch_jump_addr(j + 1, continue_pos);
+        }
     }
 
     fn emit(&mut self, op: Op, args: &[u32]) -> () {
@@ -353,7 +370,6 @@ impl Compiler {
                 match target_ty {
                     Type::Primitive(Primitive::Float) => self.emit(Op::I2F, &[]),
                     Type::Primitive(Primitive::Int) => self.emit(Op::F2I, &[]),
-                    Type::Primitive(Primitive::Boolean) => {}
                     _ => {}
                 }
             }
@@ -420,17 +436,7 @@ impl Compiler {
                 self.emit(Op::ARRAYGET, &[]);
             }
 
-            Expr::VarDecl(name, _, value, _) => {
-                if let Expr::StructLiteral(tname, _, _, _) | Expr::UnionLiteral(tname, _, _, _) =
-                    value.as_ref()
-                {
-                    self.track_var_type(name, tname);
-                }
-                self.compile_expr(value);
-                let slot = self.decl_var(name);
-                self.emit(Op::STOREVAR, &[slot]);
-            }
-            Expr::ConstDecl(name, _, value, _, _) => {
+            Expr::VarDecl(name, _, value, _) | Expr::ConstDecl(name, _, value, _, _) => {
                 if let Expr::StructLiteral(tname, _, _, _) | Expr::UnionLiteral(tname, _, _, _) =
                     value.as_ref()
                 {
@@ -544,13 +550,7 @@ impl Compiler {
                 let targets = self.loop_targets.pop().unwrap();
                 self.emit(Op::JUMP, &[loop_pos]);
                 let break_pos = self.code.len() as u32;
-                for j in targets.break_jumps {
-                    self.patch_jump_addr(j + 1, break_pos);
-                }
-
-                for j in targets.continue_jumps {
-                    self.patch_jump_addr(j + 1, loop_pos);
-                }
+                self.patch_loop(targets, break_pos, loop_pos);
                 self.patch_jump_addr(iff + 1, break_pos);
                 self.exit_scope();
             }
@@ -750,12 +750,7 @@ impl Compiler {
                     self.emit(Op::JUMP, &[loop_pos]);
                     let break_pos = self.code.len() as u32;
                     let targets = self.loop_targets.pop().unwrap();
-                    for j in targets.break_jumps {
-                        self.patch_jump_addr(j + 1, break_pos);
-                    }
-                    for j in targets.continue_jumps {
-                        self.patch_jump_addr(j + 1, inc_pos);
-                    }
+                    self.patch_loop(targets, break_pos, inc_pos);
                     self.patch_jump_addr(exit_loop + 1, break_pos);
                 } else {
                     self.compile_expr(iterable);
@@ -804,12 +799,7 @@ impl Compiler {
                     self.emit(Op::JUMP, &[loop_pos]);
                     let break_pos = self.code.len() as u32;
                     let targets = self.loop_targets.pop().unwrap();
-                    for j in targets.break_jumps {
-                        self.patch_jump_addr(j + 1, break_pos);
-                    }
-                    for j in targets.continue_jumps {
-                        self.patch_jump_addr(j + 1, inc_pos);
-                    }
+                    self.patch_loop(targets, break_pos, inc_pos);
                     self.patch_jump_addr(exit_loop + 1, break_pos);
                 }
                 self.exit_scope();
@@ -856,24 +846,14 @@ impl Compiler {
                 self.emit(Op::NEWARRAY, &[1]);
             }
             Expr::MemberAccess(obj, field_name, _) => {
-                let type_name = self
-                    .resolve_struct_type(obj)
-                    .unwrap_or_else(|| panic!("unsupported member access in CTE"));
-                let idx = self.field_index(&type_name, field_name).unwrap_or_else(|| {
-                    panic!("Compiler: type {type_name} has no field {field_name} (CTE)")
-                });
+                let (_, idx) = self.resolve_member_index(obj, field_name);
                 self.compile_expr(obj);
                 let idx_const = self.add_const(Value::Int(idx as i64));
                 self.emit(Op::LOADCONST, &[idx_const]);
                 self.emit(Op::ARRAYGET, &[]);
             }
             Expr::MemberAssign(obj, field_name, value, _) => {
-                let type_name = self
-                    .resolve_struct_type(obj)
-                    .unwrap_or_else(|| panic!("unsupported member access in CTE"));
-                let idx = self.field_index(&type_name, field_name).unwrap_or_else(|| {
-                    panic!("Compiler: type {type_name} has no field {field_name} (CTE)")
-                });
+                let (_, idx) = self.resolve_member_index(obj, field_name);
                 let Expr::Var(name, _) = obj.as_ref() else {
                     panic!("Compiler: unsupported member assignment target in CTE");
                 };

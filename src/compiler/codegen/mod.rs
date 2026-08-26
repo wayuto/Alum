@@ -13,14 +13,31 @@ use crate::compiler::{
     parser::Program,
 };
 
+#[derive(Clone, Copy, Default)]
+pub struct DumpOptions {
+    pub ir: bool,
+
+    pub asm: bool,
+}
+
 pub struct CodeGen {
     ast: Program,
     cte_libs: Vec<String>,
+    dumps: DumpOptions,
 }
 
 impl CodeGen {
     pub fn new(ast: Program, cte_libs: Vec<String>) -> Self {
-        Self { ast, cte_libs }
+        Self {
+            ast,
+            cte_libs,
+            dumps: DumpOptions::default(),
+        }
+    }
+
+    pub fn with_dumps(mut self, dumps: DumpOptions) -> Self {
+        self.dumps = dumps;
+        self
     }
 
     pub fn generate(self) -> Result<Vec<u8>, CodeGenError> {
@@ -31,8 +48,23 @@ impl CodeGen {
             optimizer::optimize(&mut ir_program);
         }
 
+        if self.dumps.ir {
+            for func in &ir_program.functions {
+                eprintln!("=== IR {} ===", func.name);
+                for (i, inst) in func.instructions.iter().enumerate() {
+                    eprintln!("{:4}: {:?}", i, inst);
+                }
+            }
+        }
+
         let mut asm_gen = codegen::AsmCodeGen::new(ir_program);
         let asm_items = asm_gen.compile()?;
+
+        if self.dumps.asm {
+            for asm in &asm_items {
+                eprintln!("{:?}", asm);
+            }
+        }
 
         asm::assemble2obj(&asm_items).map_err(|e| CodeGenError::AssemblyError(e))
     }

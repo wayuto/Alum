@@ -1,5 +1,5 @@
 use super::encoder::Assembler;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub fn write_elf(asm: &Assembler) -> Vec<u8> {
     let text_data = asm.text_bytes();
@@ -10,7 +10,7 @@ pub fn write_elf(asm: &Assembler) -> Vec<u8> {
 
     let mut local_syms: Vec<(String, u64, u16)> = Vec::new();
     let mut global_syms: Vec<(String, u64, u16, bool)> = Vec::new();
-    let mut sym_map: HashMap<String, u32> = HashMap::new();
+    let mut seen: HashSet<String> = HashSet::new();
 
     let shndx_for = |section: &str| -> u16 {
         if section == "text" {
@@ -23,56 +23,50 @@ pub fn write_elf(asm: &Assembler) -> Vec<u8> {
     };
 
     for e in externs {
-        if sym_map.contains_key(e) {
+        if seen.contains(e) {
             continue;
         }
         if asm.labels().contains_key(e) {
             continue;
         }
-        let idx = (1 + local_syms.len() + global_syms.len()) as u32;
-        sym_map.insert(e.clone(), idx);
+        seen.insert(e.clone());
         global_syms.push((e.clone(), 0, 0, true));
     }
 
     for g in globals {
-        if sym_map.contains_key(g) {
+        if seen.contains(g) {
             continue;
         }
         if let Some((section, offset)) = asm.labels().get(g) {
             let shndx = shndx_for(section);
-            let idx = (1 + local_syms.len() + global_syms.len()) as u32;
-            sym_map.insert(g.clone(), idx);
+            seen.insert(g.clone());
             global_syms.push((g.clone(), *offset, shndx, false));
         } else {
         }
     }
 
     for r in relocs {
-        if sym_map.contains_key(&r.target) {
+        if seen.contains(&r.target) {
             continue;
         }
         if let Some((section, offset)) = asm.labels().get(&r.target) {
             let shndx = shndx_for(section);
             if globals.contains(&r.target) {
-                let idx = (1 + local_syms.len() + global_syms.len()) as u32;
-                sym_map.insert(r.target.clone(), idx);
+                seen.insert(r.target.clone());
                 global_syms.push((r.target.clone(), *offset, shndx, false));
             } else {
+                seen.insert(r.target.clone());
                 local_syms.push((r.target.clone(), *offset, shndx));
-
-                let idx = (1 + local_syms.len() + global_syms.len()) as u32;
-                sym_map.insert(r.target.clone(), idx);
             }
         } else {
-            let idx = (1 + local_syms.len() + global_syms.len()) as u32;
-            sym_map.insert(r.target.clone(), idx);
+            seen.insert(r.target.clone());
             global_syms.push((r.target.clone(), 0, 0, true));
         }
     }
 
     let mut syms: Vec<(String, u8, u64, u16)> = Vec::new();
     syms.push((String::new(), 0, 0, 0));
-    sym_map.clear();
+    let mut sym_map: HashMap<String, u32> = HashMap::new();
 
     for (name, value, shndx) in &local_syms {
         let idx = syms.len() as u32;
@@ -298,9 +292,7 @@ fn write_shdr(
 }
 
 fn fill_to(buf: &mut Vec<u8>, target: u64) {
-    while (buf.len() as u64) < target {
-        buf.push(0);
-    }
+    buf.resize(target as usize, 0);
 }
 
 fn align_up(x: u64, align: u64) -> u64 {

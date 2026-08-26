@@ -7,7 +7,7 @@ use crate::compiler::{
     parser::{Expr, Primitive, Program, Type},
 };
 use ordered_float::OrderedFloat;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 impl IRGen {
     pub(super) fn eval_const(
@@ -342,16 +342,15 @@ fn order_vm_functions(selected: &mut Vec<(String, Expr)>) -> Vec<Expr> {
     if selected.is_empty() {
         return Vec::new();
     }
-
     selected.sort_by(|a, b| a.0.cmp(&b.0));
-    let decls: HashMap<String, Expr> = selected.drain(..).collect();
+    let decls: BTreeMap<String, Expr> = selected.drain(..).collect();
     let mut ordered: Vec<Expr> = Vec::new();
     let mut done: HashSet<String> = HashSet::new();
     let mut in_progress: HashSet<String> = HashSet::new();
 
     fn emit(
         name: &str,
-        decls: &HashMap<String, Expr>,
+        decls: &BTreeMap<String, Expr>,
         ordered: &mut Vec<Expr>,
         done: &mut HashSet<String>,
         in_progress: &mut HashSet<String>,
@@ -363,7 +362,7 @@ fn order_vm_functions(selected: &mut Vec<(String, Expr)>) -> Vec<Expr> {
             return;
         };
         in_progress.insert(name.to_string());
-        let mut deps: HashSet<String> = HashSet::new();
+        let mut deps: BTreeSet<String> = BTreeSet::new();
         collect_var_refs(decl, &mut deps);
         for dep in deps {
             emit(&dep, decls, ordered, done, in_progress);
@@ -380,7 +379,7 @@ fn order_vm_functions(selected: &mut Vec<(String, Expr)>) -> Vec<Expr> {
     ordered
 }
 
-fn collect_var_refs(expr: &Expr, out: &mut HashSet<String>) {
+fn collect_var_refs(expr: &Expr, out: &mut BTreeSet<String>) {
     use Expr::*;
     match expr {
         Int(..) | Float(..) | Bool(..) | String(..) | Nil(_) | Break(_) | Continue(_)

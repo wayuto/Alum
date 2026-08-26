@@ -47,21 +47,7 @@ impl IRGen {
         }
 
         if let Some(d) = default {
-            ctx.enter_scope();
-            let d_info = self.resource_copy_info(&d, ctx);
-            let ret = self.compile_expr(*d, ctx)?;
-            let ret = match d_info {
-                Some(ty) => self.copy_resource(ctx, ret, &ty)?,
-                None => ret,
-            };
-            ctx.instructions.push(Instruction {
-                op: Op::Move,
-                dst: Some(res_tmp.clone()),
-                src1: Some(ret),
-                src2: None,
-            });
-            self.emit_scope_frees(ctx)?;
-            ctx.exit_scope()?;
+            self.compile_scoped_value(*d, &res_tmp, ctx)?;
         } else {
             let zero_idx = self.get_const_index(super::ir::IRConst::Int(0));
             ctx.instructions.push(Instruction {
@@ -86,21 +72,7 @@ impl IRGen {
                 src1: None,
                 src2: None,
             });
-            ctx.enter_scope();
-            let ret_info = self.resource_copy_info(&ret, ctx);
-            let ret = self.compile_expr(ret, ctx)?;
-            let ret = match ret_info {
-                Some(ty) => self.copy_resource(ctx, ret, &ty)?,
-                None => ret,
-            };
-            ctx.instructions.push(Instruction {
-                op: Op::Move,
-                dst: Some(res_tmp.clone()),
-                src1: Some(ret),
-                src2: None,
-            });
-            self.emit_scope_frees(ctx)?;
-            ctx.exit_scope()?;
+            self.compile_scoped_value(ret, &res_tmp, ctx)?;
             ctx.instructions.push(Instruction {
                 op: Op::Jump,
                 dst: None,

@@ -7,6 +7,30 @@ use crate::compiler::{
 };
 
 impl IRGen {
+    pub(super) fn compile_scoped_value(
+        &mut self,
+        expr: Expr,
+        res_tmp: &Operand,
+        ctx: &mut Context,
+    ) -> Result<(), CodeGenError> {
+        ctx.enter_scope();
+        let info = self.resource_copy_info(&expr, ctx);
+        let value = self.compile_expr(expr, ctx)?;
+        let value = match info {
+            Some(ty) => self.copy_resource(ctx, value, &ty)?,
+            None => value,
+        };
+        ctx.instructions.push(Instruction {
+            op: Op::Move,
+            dst: Some(res_tmp.clone()),
+            src1: Some(value),
+            src2: None,
+        });
+        self.emit_scope_frees(ctx)?;
+        ctx.exit_scope()?;
+        Ok(())
+    }
+
     pub(super) fn compile_if(
         &mut self,
         condition: Box<Expr>,
@@ -28,21 +52,7 @@ impl IRGen {
 
         let res_tmp = ctx.new_tmp(IRType::Void);
 
-        ctx.enter_scope();
-        let then_info = self.resource_copy_info(&then_branch, ctx);
-        let then_op = self.compile_expr(*then_branch, ctx)?;
-        let then_op = match then_info {
-            Some(ty) => self.copy_resource(ctx, then_op, &ty)?,
-            None => then_op,
-        };
-        ctx.instructions.push(Instruction {
-            op: Op::Move,
-            dst: Some(res_tmp.clone()),
-            src1: Some(then_op),
-            src2: None,
-        });
-        self.emit_scope_frees(ctx)?;
-        ctx.exit_scope()?;
+        self.compile_scoped_value(*then_branch, &res_tmp, ctx)?;
 
         ctx.instructions.push(Instruction {
             op: Op::Jump,
@@ -59,21 +69,7 @@ impl IRGen {
         });
 
         if let Some(else_expr) = else_branch {
-            ctx.enter_scope();
-            let else_info = self.resource_copy_info(&else_expr, ctx);
-            let else_op = self.compile_expr(*else_expr, ctx)?;
-            let else_op = match else_info {
-                Some(ty) => self.copy_resource(ctx, else_op, &ty)?,
-                None => else_op,
-            };
-            ctx.instructions.push(Instruction {
-                op: Op::Move,
-                dst: Some(res_tmp.clone()),
-                src1: Some(else_op),
-                src2: None,
-            });
-            self.emit_scope_frees(ctx)?;
-            ctx.exit_scope()?;
+            self.compile_scoped_value(*else_expr, &res_tmp, ctx)?;
         }
 
         ctx.instructions.push(Instruction {
@@ -93,7 +89,6 @@ impl IRGen {
         ctx: &mut Context,
     ) -> Result<Operand, CodeGenError> {
         let label_start = ctx.new_label("while_start");
-        let label_body = ctx.new_label("while_body");
         let label_cont = ctx.new_label("while_cont");
         let label_end = ctx.new_label("while_end");
 
@@ -115,13 +110,6 @@ impl IRGen {
             dst: None,
             src1: Some(cond),
             src2: Some(Operand::Label(label_end.clone())),
-        });
-
-        ctx.instructions.push(Instruction {
-            op: Op::Label(label_body.clone()),
-            dst: None,
-            src1: None,
-            src2: None,
         });
 
         let moved_before = ctx.moved.clone();
@@ -276,7 +264,7 @@ impl IRGen {
                     message: format!("type '{}' has no 'next' method", sname),
                 })?;
             let elem_ir = match &maybe_ty {
-                Type::Struct(mname, margs) if mname == "Maybe" => margs
+                Type::Struct(mname, margs) if crate::compiler::is_maybe_type_name(mname) => margs
                     .first()
                     .map(Context::type_to_ir_type)
                     .unwrap_or(IRType::Int),
@@ -290,7 +278,9 @@ impl IRGen {
                 }
             };
             let elem_hty = match &maybe_ty {
-                Type::Struct(mname, margs) if mname == "Maybe" => margs.first().cloned(),
+                Type::Struct(mname, margs) if crate::compiler::is_maybe_type_name(mname) => {
+                    margs.first().cloned()
+                }
                 _ => None,
             };
             let s_op = self.compile_expr(*iter, ctx)?;

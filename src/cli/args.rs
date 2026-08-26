@@ -17,8 +17,17 @@ pub struct Cli {
     #[arg(short = 'c', long, help = "Compile only, do not link")]
     pub compile_only: bool,
 
-    #[arg(long, help = "Output AST representation")]
-    pub ast: bool,
+    #[arg(long = "emit-ast", help = "Output AST representation")]
+    pub emit_ast: bool,
+
+    #[arg(long, help = "Dump optimized IR to stderr, then continue compiling")]
+    pub emit_ir: bool,
+
+    #[arg(
+        long,
+        help = "Dump generated assembly to stderr, then continue compiling"
+    )]
+    pub emit_asm: bool,
 
     #[arg(short = 'r', long, help = "Compile and run immediately")]
     pub run: bool,

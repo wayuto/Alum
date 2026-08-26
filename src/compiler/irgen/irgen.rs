@@ -17,7 +17,6 @@ impl IRGen {
     }
 
     pub fn compile(&mut self, program: Program) -> Result<IRProgram, CodeGenError> {
-        super::purity::check_lambda_params(&program.body)?;
         let program = self.lambda2function(program);
         self.program_body = program.body.clone();
 

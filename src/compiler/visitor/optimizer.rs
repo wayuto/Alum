@@ -84,7 +84,6 @@ impl Optimizer {
             Expr::ConstDecl(name, _, init, is_pub, _) => {
                 *is_pub || const_used.contains(name) || matches!(init.as_ref(), Expr::FuncDecl(..))
             }
-            Expr::GlobalVar(_, _, _, _, _) => true,
             _ => true,
         });
         before - program.body.len()
@@ -1010,9 +1009,8 @@ impl Optimizer {
             _ => {}
         }
     }
-
     fn is_pure_dead(&self, expr: &Expr, pure_fns: &HashSet<String>) -> bool {
-        self.is_pure(expr, pure_fns) && !self.has_side_effect(expr, pure_fns)
+        self.is_pure(expr, pure_fns)
     }
 
     fn is_pure(&self, expr: &Expr, pure_fns: &HashSet<String>) -> bool {
@@ -1061,14 +1059,6 @@ impl Optimizer {
             Expr::AddressOf(expr, _) => self.is_pure(expr, pure_fns),
             Expr::Deref(expr, _) => self.is_pure(expr, pure_fns),
             Expr::Cast(expr, _, _) => self.is_pure(expr, pure_fns),
-            Expr::DerefAssign(ptr, val, _) => {
-                self.is_pure(ptr, pure_fns) && self.is_pure(val, pure_fns)
-            }
-            Expr::ConstDecl(_, _, v, _, _) => self.is_pure(v, pure_fns),
-            Expr::GlobalVar(_, _, _, v, _) => match v {
-                Some(v) => self.is_pure(v, pure_fns),
-                None => true,
-            },
             Expr::Call(callee, _, args, _) => match callee.as_ref() {
                 Expr::Var(name, _) => {
                     pure_fns.contains(name) && args.iter().all(|a| self.is_pure(a, pure_fns))
@@ -1076,40 +1066,6 @@ impl Optimizer {
                 _ => false,
             },
             _ => false,
-        }
-    }
-
-    fn has_side_effect(&self, expr: &Expr, pure_fns: &HashSet<String>) -> bool {
-        match expr {
-            Expr::Call(callee, _, _, _) => match callee.as_ref() {
-                Expr::Var(name, _) => !pure_fns.contains(name),
-                _ => true,
-            },
-            _ => matches!(
-                expr,
-                Expr::VarDecl(_, _, _, _)
-                    | Expr::VarAssign(_, _, _)
-                    | Expr::ConstDecl(_, _, _, _, _)
-                    | Expr::GlobalVar(_, _, _, _, _)
-                    | Expr::AddAssign(_, _, _)
-                    | Expr::SubAssign(_, _, _)
-                    | Expr::MulAssign(_, _, _)
-                    | Expr::DivAssign(_, _, _)
-                    | Expr::ModAssign(_, _, _)
-                    | Expr::AndAssign(_, _, _)
-                    | Expr::OrAssign(_, _, _)
-                    | Expr::XorAssign(_, _, _)
-                    | Expr::ShlAssign(_, _, _)
-                    | Expr::ShrAssign(_, _, _)
-                    | Expr::Inc(_, _)
-                    | Expr::Dec(_, _)
-                    | Expr::IndexAssign(_, _, _)
-                    | Expr::MemberAssign(_, _, _, _)
-                    | Expr::DerefAssign(_, _, _)
-                    | Expr::Return(_, _)
-                    | Expr::Break(_)
-                    | Expr::Continue(_)
-            ),
         }
     }
 }

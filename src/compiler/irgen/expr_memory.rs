@@ -91,7 +91,12 @@ impl IRGen {
 
         for (field_name, _) in &fields {
             if let Some((_, field_expr)) = field_values.iter().find(|(n, _)| n == field_name) {
+                let copy_info = self.resource_copy_info(field_expr, ctx);
                 let val = self.compile_expr(field_expr.clone(), ctx)?;
+                let val = match copy_info {
+                    Some(ty) => self.copy_resource(ctx, val, &ty)?,
+                    None => val,
+                };
                 let offset_idx = self.get_const_index(IRConst::Int(0));
                 ctx.instructions.push(Instruction {
                     op: Op::StoreAt,
