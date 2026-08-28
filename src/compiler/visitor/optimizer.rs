@@ -190,8 +190,11 @@ impl Optimizer {
             | Expr::FNeg(e, _) => self.prune_locals(e, used, pure_fns),
             Expr::Match(t, br, default, _) => {
                 self.prune_locals(t, used, pure_fns);
-                for (c, r) in br {
+                for (c, g, r) in br {
                     self.prune_locals(c, used, pure_fns);
+                    if let Some(g) = g {
+                        self.prune_locals(g, used, pure_fns);
+                    }
                     self.prune_locals(r, used, pure_fns);
                 }
                 if let Some(d) = default {
@@ -333,8 +336,11 @@ impl Optimizer {
             }
             Expr::Match(t, br, default, _) => {
                 self.for_each_name(t, f);
-                for (c, r) in br {
+                for (c, g, r) in br {
                     self.for_each_name(c, f);
+                    if let Some(g) = g {
+                        self.for_each_name(g, f);
+                    }
                     self.for_each_name(r, f);
                 }
                 if let Some(d) = default {
@@ -564,8 +570,11 @@ impl Optimizer {
             Expr::FString(segs, _) => segs.iter_mut().for_each(|s| self.optimize_expr(s)),
             Expr::Match(target, branches, default, _) => {
                 self.optimize_expr(target);
-                for (c, v) in branches.iter_mut() {
+                for (c, g, v) in branches.iter_mut() {
                     self.optimize_expr(c);
+                    if let Some(g) = g {
+                        self.optimize_expr(g);
+                    }
                     self.optimize_expr(v);
                 }
                 if let Some(d) = default {
@@ -601,8 +610,8 @@ impl Optimizer {
             | Expr::FuncDecl(..)
             | Expr::GlobalVar(..)
             | Expr::ExternVar(..)
-            | Expr::Break(_)
             | Expr::Continue(_) => false,
+            Expr::Break(v, _) => v.as_ref().map(|v| self.is_effect_free(v)).unwrap_or(true),
             Expr::Int(_, _)
             | Expr::Float(_, _)
             | Expr::Bool(_, _)
@@ -624,9 +633,11 @@ impl Optimizer {
             Expr::Range(s, e, _) => self.is_effect_free(s) && self.is_effect_free(e),
             Expr::Match(t, br, d, _) => {
                 self.is_effect_free(t)
-                    && br
-                        .iter()
-                        .all(|(c, r)| self.is_effect_free(c) && self.is_effect_free(r))
+                    && br.iter().all(|(c, g, r)| {
+                        self.is_effect_free(c)
+                            && g.as_ref().map(|g| self.is_effect_free(g)).unwrap_or(true)
+                            && self.is_effect_free(r)
+                    })
                     && d.as_ref().map(|d| self.is_effect_free(d)).unwrap_or(true)
             }
             Expr::StructLiteral(_, _, fs, _) | Expr::UnionLiteral(_, _, fs, _) => {

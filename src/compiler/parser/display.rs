@@ -73,6 +73,8 @@ impl Expr {
             Expr::Inc(name, _) => write!(f, "{}Inc(\"{}\")", indent_str, name),
             Expr::Dec(name, _) => write!(f, "{}Dec(\"{}\")", indent_str, name),
             Expr::Xor(l, r, _) => Self::fmt_bin(f, indent, "Xor", l, r),
+            Expr::BAnd(l, r, _) => Self::fmt_bin(f, indent, "BAnd", l, r),
+            Expr::BOr(l, r, _) => Self::fmt_bin(f, indent, "BOr", l, r),
             Expr::Shl(l, r, _) => Self::fmt_bin(f, indent, "Shl", l, r),
             Expr::Shr(l, r, _) => Self::fmt_bin(f, indent, "Shr", l, r),
             Expr::BNot(e, _) => Self::fmt_un(f, indent, "BNot", e),
@@ -251,7 +253,13 @@ impl Expr {
                 body.fmt_with_indent(f, indent + 1)?;
                 write!(f, "\n{})", indent_str)
             }
-            Expr::Break(_) => write!(f, "{}Break", indent_str),
+            Expr::Break(value, _) => match value {
+                Some(v) => {
+                    write!(f, "{}Break ", indent_str)?;
+                    v.fmt_with_indent(f, 0)
+                }
+                None => write!(f, "{}Break", indent_str),
+            },
             Expr::Continue(_) => write!(f, "{}Continue", indent_str),
             Expr::Block(exprs, _) => {
                 write!(f, "{}Block(", indent_str)?;
@@ -315,9 +323,13 @@ impl Expr {
                 write!(f, "{}Match(", indent_str)?;
                 target.fmt_with_indent(f, 0)?;
                 write!(f, " {{")?;
-                for (case, value) in branches {
+                for (case, guard, value) in branches {
                     write!(f, "\n{}  Case:", indent_str)?;
                     case.fmt_with_indent(f, 0)?;
+                    if let Some(g) = guard {
+                        write!(f, " if")?;
+                        g.fmt_with_indent(f, 0)?;
+                    }
                     write!(f, " =>")?;
                     value.fmt_with_indent(f, indent + 2)?;
                 }

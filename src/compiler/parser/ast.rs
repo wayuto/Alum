@@ -193,7 +193,7 @@ impl Expr {
             | Expr::Return(_, s)
             | Expr::If(_, _, _, s)
             | Expr::While(_, _, s)
-            | Expr::Break(s)
+            | Expr::Break(_, s)
             | Expr::Continue(s)
             | Expr::Block(_, s)
             | Expr::Index(_, _, s)
@@ -218,6 +218,8 @@ impl Expr {
             | Expr::Inc(_, s)
             | Expr::Dec(_, s)
             | Expr::Xor(_, _, s)
+            | Expr::BAnd(_, _, s)
+            | Expr::BOr(_, _, s)
             | Expr::LAnd(_, _, s)
             | Expr::LOr(_, _, s)
             | Expr::AddAssign(_, _, s)
@@ -281,6 +283,8 @@ pub enum Expr {
     Inc(String, Span),
     Dec(String, Span),
     Xor(Box<Expr>, Box<Expr>, Span),
+    BAnd(Box<Expr>, Box<Expr>, Span),
+    BOr(Box<Expr>, Box<Expr>, Span),
     LAnd(Box<Expr>, Box<Expr>, Span),
     LOr(Box<Expr>, Box<Expr>, Span),
     Shl(Box<Expr>, Box<Expr>, Span),
@@ -316,7 +320,7 @@ pub enum Expr {
     Return(Box<Expr>, Span),
     If(Box<Expr>, Box<Expr>, Option<Box<Expr>>, Span),
     While(Box<Expr>, Box<Expr>, Span),
-    Break(Span),
+    Break(Option<Box<Expr>>, Span),
     Continue(Span),
     Block(Vec<Expr>, Span),
     Index(Box<Expr>, Box<Expr>, Span),
@@ -326,7 +330,12 @@ pub enum Expr {
     Range(Box<Expr>, Box<Expr>, Span),
     For(String, Box<Expr>, Box<Expr>, Span),
     TypeDef(Span),
-    Match(Box<Expr>, Vec<(Expr, Expr)>, Option<Box<Expr>>, Span),
+    Match(
+        Box<Expr>,
+        Vec<(Expr, Option<Box<Expr>>, Expr)>,
+        Option<Box<Expr>>,
+        Span,
+    ),
     Struct(String, Vec<String>, Vec<(String, Type)>, Span),
     StructLiteral(String, Vec<Type>, Vec<(String, Expr)>, Span),
     Union(String, Vec<String>, Vec<(String, Type)>, Span),

@@ -96,6 +96,7 @@ impl IRGen {
         ctx.loop_inc_labels.push(label_cont.clone());
 
         ctx.loop_scope_depths.push(ctx.scope.len());
+        ctx.loop_results.push(None);
 
         ctx.instructions.push(Instruction {
             op: Op::Label(label_start.clone()),
@@ -144,7 +145,7 @@ impl IRGen {
         ctx.loop_inc_labels.pop();
         ctx.loop_scope_depths.pop();
 
-        Ok(ctx.new_tmp(IRType::Void))
+        Ok(self.take_loop_result(ctx))
     }
 
     pub(super) fn compile_for(
@@ -163,6 +164,7 @@ impl IRGen {
             ctx.loop_end_labels.push(label_end.clone());
             ctx.loop_inc_labels.push(label_inc.clone());
             ctx.loop_scope_depths.push(ctx.scope.len());
+            ctx.loop_results.push(None);
             let moved_before = ctx.moved.clone();
             ctx.enter_scope();
             let idx_name = ctx.new_label("idx");
@@ -255,7 +257,7 @@ impl IRGen {
             ctx.loop_end_labels.pop();
             ctx.loop_inc_labels.pop();
             ctx.loop_scope_depths.pop();
-            return Ok(ctx.new_tmp(IRType::Void));
+            return Ok(self.take_loop_result(ctx));
         }
         if let Some(Type::Struct(sname, ta)) = self.expr_high_type(&iter, ctx) {
             let maybe_ty = self
@@ -294,6 +296,7 @@ impl IRGen {
             ctx.loop_inc_labels.push(label_cond.clone());
 
             ctx.loop_scope_depths.push(ctx.scope.len());
+            ctx.loop_results.push(None);
             let moved_before = ctx.moved.clone();
             ctx.enter_scope();
 
@@ -384,7 +387,7 @@ impl IRGen {
             ctx.loop_inc_labels.pop();
             ctx.loop_scope_depths.pop();
 
-            return Ok(ctx.new_tmp(IRType::Void));
+            return Ok(self.take_loop_result(ctx));
         }
         let is_string = matches!(
             self.expr_high_type(&iter, ctx),
@@ -439,6 +442,7 @@ impl IRGen {
         ctx.loop_inc_labels.push(label_inc.clone());
 
         ctx.loop_scope_depths.push(ctx.scope.len());
+        ctx.loop_results.push(None);
         let moved_before = ctx.moved.clone();
         ctx.enter_scope();
         let idx_name = ctx.new_label("idx");
@@ -559,10 +563,21 @@ impl IRGen {
         ctx.loop_inc_labels.pop();
         ctx.loop_scope_depths.pop();
 
-        Ok(ctx.new_tmp(IRType::Void))
+        Ok(self.take_loop_result(ctx))
     }
 
-    pub(super) fn compile_break(&mut self, ctx: &mut Context) -> Result<Operand, CodeGenError> {
+    fn take_loop_result(&mut self, ctx: &mut Context) -> Operand {
+        match ctx.loop_results.pop().flatten() {
+            Some(op) => op,
+            None => ctx.new_tmp(IRType::Void),
+        }
+    }
+
+    pub(super) fn compile_break(
+        &mut self,
+        value: Option<Box<Expr>>,
+        ctx: &mut Context,
+    ) -> Result<Operand, CodeGenError> {
         let end = ctx
             .loop_end_labels
             .last()
@@ -570,6 +585,32 @@ impl IRGen {
                 message: "break outside of loop".to_string(),
             })?
             .clone();
+
+        if let Some(v) = value {
+            let val_op = self.compile_expr(*v, ctx)?;
+            let has_loop = ctx.loop_results.last().is_some();
+            if !has_loop {
+                return Err(CodeGenError::SyntaxError {
+                    message: "break outside of loop".to_string(),
+                });
+            }
+            let already = ctx.loop_results.last().cloned().flatten();
+            let slot = match already {
+                Some(op) => op,
+                None => {
+                    let ty = ctx.get_operand_type(&val_op, &self.constants)?;
+                    let tmp = ctx.new_tmp(ty);
+                    *ctx.loop_results.last_mut().unwrap() = Some(tmp.clone());
+                    tmp
+                }
+            };
+            ctx.instructions.push(Instruction {
+                op: Op::Move,
+                dst: Some(slot),
+                src1: Some(val_op),
+                src2: None,
+            });
+        }
 
         if let Some(depth) = ctx.loop_scope_depths.last() {
             self.emit_scope_frees_from(ctx, *depth)?;

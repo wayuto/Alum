@@ -132,6 +132,8 @@ impl IRGen {
             | Expr::FGt(_, _, _)
             | Expr::FGe(_, _, _) => Some(Type::Primitive(Primitive::Boolean)),
             Expr::Xor(_, _, _)
+            | Expr::BAnd(_, _, _)
+            | Expr::BOr(_, _, _)
             | Expr::LAnd(_, _, _)
             | Expr::LOr(_, _, _)
             | Expr::Inc(_, _)
@@ -148,7 +150,7 @@ impl IRGen {
             }
             Expr::Match(_, branches, default, _) => branches
                 .iter()
-                .find_map(|(_, ret)| self.expr_high_type(ret, ctx))
+                .find_map(|(_, _, ret)| self.expr_high_type(ret, ctx))
                 .or_else(|| default.as_ref().and_then(|e| self.expr_high_type(e, ctx))),
             Expr::Lambda(params, _, ret_type, _) => {
                 let param_types = params.iter().map(|(_, t)| t.clone()).collect();

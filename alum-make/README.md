@@ -9,9 +9,12 @@ An Alum build tool
 | ------------- | --------- |
 | Rust && Cargo | >= 1.93.0 |
 | clap          | >= 4.5.54 |
-| serde         | >= 1.0.22 |
+| serde         | >= 1.0.228 |
 | toml          | >= 0.9.11 |
 | walkdir       | >= 2.5.0  |
+| git2          | >= 0.20.3 |
+| ureq          | >= 2.9.6  |
+| zip           | >= 7.2.0  |
 
 ### Install from source
 ```bash

@@ -350,6 +350,8 @@ pub(super) fn substitute_expr(expr: Expr, args: &[Type]) -> Expr {
         FGt(l, r, span) => FGt(sub_box(l), sub_box(r), span),
         FGe(l, r, span) => FGe(sub_box(l), sub_box(r), span),
         Xor(l, r, span) => Xor(sub_box(l), sub_box(r), span),
+        BAnd(l, r, span) => BAnd(sub_box(l), sub_box(r), span),
+        BOr(l, r, span) => BOr(sub_box(l), sub_box(r), span),
         LAnd(l, r, span) => LAnd(sub_box(l), sub_box(r), span),
         LOr(l, r, span) => LOr(sub_box(l), sub_box(r), span),
         StrCat(l, r, span) => StrCat(sub_box(l), sub_box(r), span),
@@ -387,7 +389,7 @@ pub(super) fn substitute_expr(expr: Expr, args: &[Type]) -> Expr {
             sub_box(target),
             branches
                 .into_iter()
-                .map(|(c, v)| (sub_val(c), sub_val(v)))
+                .map(|(c, g, v)| (sub_val(c), g.map(|g| Box::new(sub_val(*g))), sub_val(v)))
                 .collect(),
             default.map(sub_box),
             span,

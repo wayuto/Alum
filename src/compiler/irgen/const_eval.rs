@@ -249,8 +249,9 @@ impl IRGen {
     fn expr_has_var(&self, expr: &Expr) -> bool {
         use Expr::*;
         match expr {
-            Int(..) | Float(..) | Bool(..) | String(..) | Nil(_) | Break(_) | Continue(_)
-            | TypeDef(_) | Struct(..) | Union(..) | Enum(..) => false,
+            Int(..) | Float(..) | Bool(..) | String(..) | Nil(_) | Continue(_) | TypeDef(_)
+            | Struct(..) | Union(..) | Enum(..) => false,
+            Break(v, _) => v.as_ref().map(|v| self.expr_has_var(v)).unwrap_or(false),
             Var(..) => true,
             Call(f, _, args, _) => {
                 if !matches!(f.as_ref(), Var(..)) && self.expr_has_var(f) {
@@ -269,9 +270,11 @@ impl IRGen {
             Range(l, r, _) => self.expr_has_var(l) || self.expr_has_var(r),
             Match(s, arms, d, _) => {
                 self.expr_has_var(s)
-                    || arms
-                        .iter()
-                        .any(|(p, a)| self.expr_has_var(p) || self.expr_has_var(a))
+                    || arms.iter().any(|(p, g, a)| {
+                        self.expr_has_var(p)
+                            || g.as_ref().map(|g| self.expr_has_var(g)).unwrap_or(false)
+                            || self.expr_has_var(a)
+                    })
                     || d.as_ref().map(|x| self.expr_has_var(x)).unwrap_or(false)
             }
             Return(v, _) => self.expr_has_var(v),
@@ -304,6 +307,8 @@ impl IRGen {
             | FGt(l, r, _)
             | FGe(l, r, _)
             | Xor(l, r, _)
+            | BAnd(l, r, _)
+            | BOr(l, r, _)
             | LAnd(l, r, _)
             | LOr(l, r, _)
             | Shl(l, r, _)
@@ -382,8 +387,13 @@ fn order_vm_functions(selected: &mut Vec<(String, Expr)>) -> Vec<Expr> {
 fn collect_var_refs(expr: &Expr, out: &mut BTreeSet<String>) {
     use Expr::*;
     match expr {
-        Int(..) | Float(..) | Bool(..) | String(..) | Nil(_) | Break(_) | Continue(_)
-        | TypeDef(_) | Struct(..) | Union(..) | Enum(..) | GlobalVar(..) | ExternVar(..) => {}
+        Int(..) | Float(..) | Bool(..) | String(..) | Nil(_) | Continue(_) | TypeDef(_)
+        | Struct(..) | Union(..) | Enum(..) | GlobalVar(..) | ExternVar(..) => {}
+        Break(v, _) => {
+            if let Some(v) = v {
+                collect_var_refs(v, out);
+            }
+        }
         Var(name, _) => {
             out.insert(name.clone());
         }
@@ -418,8 +428,11 @@ fn collect_var_refs(expr: &Expr, out: &mut BTreeSet<String>) {
         }
         Match(s, arms, d, _) => {
             collect_var_refs(s, out);
-            for (p, a) in arms {
+            for (p, g, a) in arms {
                 collect_var_refs(p, out);
+                if let Some(g) = g {
+                    collect_var_refs(g, out);
+                }
                 collect_var_refs(a, out);
             }
             if let Some(x) = d {
@@ -457,6 +470,8 @@ fn collect_var_refs(expr: &Expr, out: &mut BTreeSet<String>) {
         | FGt(l, r, _)
         | FGe(l, r, _)
         | Xor(l, r, _)
+        | BAnd(l, r, _)
+        | BOr(l, r, _)
         | LAnd(l, r, _)
         | LOr(l, r, _)
         | Shl(l, r, _)

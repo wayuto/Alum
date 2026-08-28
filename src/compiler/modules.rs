@@ -152,6 +152,10 @@ fn rename_expr(e: &mut Expr, map: &HashMap<String, String>, locals: &mut Vec<Str
     match e {
         Expr::Var(name, _) => ren(name, map, locals),
         Expr::Inc(name, _) | Expr::Dec(name, _) => ren(name, map, locals),
+        Expr::BAnd(l, r, _) | Expr::BOr(l, r, _) => {
+            rename_expr(l, map, locals);
+            rename_expr(r, map, locals);
+        }
         Expr::VarAssign(name, v, _)
         | Expr::AddAssign(name, v, _)
         | Expr::SubAssign(name, v, _)
@@ -277,8 +281,11 @@ fn rename_expr(e: &mut Expr, map: &HashMap<String, String>, locals: &mut Vec<Str
         Expr::TypeDef(_) => {}
         Expr::Match(t, br, default, _) => {
             rename_expr(t, map, locals);
-            for (c, r) in br {
+            for (c, g, r) in br {
                 rename_expr(c, map, locals);
+                if let Some(g) = g {
+                    rename_expr(g, map, locals);
+                }
                 rename_expr(r, map, locals);
             }
             if let Some(d) = default {
@@ -345,12 +352,16 @@ fn rename_expr(e: &mut Expr, map: &HashMap<String, String>, locals: &mut Vec<Str
             rename_expr(r, map, locals);
         }
         Expr::Neg(x, _) | Expr::FNeg(x, _) | Expr::Not(x, _) => rename_expr(x, map, locals),
+        Expr::Break(v, _) => {
+            if let Some(v) = v {
+                rename_expr(v, map, locals);
+            }
+        }
         Expr::Int(_, _)
         | Expr::Float(_, _)
         | Expr::Bool(_, _)
         | Expr::String(_, _)
         | Expr::Nil(_)
-        | Expr::Break(_)
         | Expr::Continue(_) => {}
     }
 }

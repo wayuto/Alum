@@ -69,6 +69,8 @@ pub enum Op {
     FLe,
     LAnd,
     LOr,
+    And,
+    Or,
     Xor,
     Shl,
     Shr,

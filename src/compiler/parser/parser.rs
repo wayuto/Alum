@@ -379,10 +379,34 @@ impl<'a> Parser<'a> {
                 }
                 Err(e) => return Err(ParserError::LexerError(e.to_owned())),
                 _ => {
-                    exprs.push(self.expr()?);
-                    if let Some(Ok((Token::SEMICOLON, _))) = self.peek() {
+                    let e = self.expr()?;
+                    if matches!(self.peek(), Some(Ok((Token::SEMICOLON, _)))) {
                         self.next()?;
+                        if !matches!(
+                            e,
+                            Expr::Return(..)
+                                | Expr::Break(..)
+                                | Expr::Continue(_)
+                                | Expr::VarDecl(..)
+                                | Expr::ConstDecl(..)
+                                | Expr::FuncDecl(..)
+                                | Expr::Struct(..)
+                                | Expr::Union(..)
+                                | Expr::Enum(..)
+                                | Expr::TypeDef(_)
+                                | Expr::ExternVar(..)
+                                | Expr::GlobalVar(..)
+                        ) {
+                            let span = e.span();
+                            exprs.push(Expr::Cast(
+                                Box::new(e),
+                                Type::Primitive(Primitive::Void),
+                                span,
+                            ));
+                            continue;
+                        }
                     }
+                    exprs.push(e);
                 }
             }
         }

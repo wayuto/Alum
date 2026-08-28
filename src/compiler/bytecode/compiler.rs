@@ -32,6 +32,111 @@ struct Func {
 struct LoopTargets {
     break_jumps: Vec<u32>,
     continue_jumps: Vec<u32>,
+    break_slot: Option<u32>,
+}
+
+fn has_break_value(expr: &Expr) -> bool {
+    match expr {
+        Expr::Break(Some(_), _) => true,
+        Expr::Break(None, _)
+        | Expr::Continue(_)
+        | Expr::While(..)
+        | Expr::For(..)
+        | Expr::Lambda(..)
+        | Expr::FuncDecl(..) => false,
+        Expr::Block(body, _) => body.iter().any(has_break_value),
+        Expr::If(c, t, e, _) => {
+            has_break_value(c)
+                || has_break_value(t)
+                || e.as_ref().map(|e| has_break_value(e)).unwrap_or(false)
+        }
+        Expr::Match(t, arms, d, _) => {
+            has_break_value(t)
+                || arms.iter().any(|(p, g, b)| {
+                    has_break_value(p)
+                        || g.as_ref().map(|e| has_break_value(e)).unwrap_or(false)
+                        || has_break_value(b)
+                })
+                || d.as_ref().map(|e| has_break_value(e)).unwrap_or(false)
+        }
+        Expr::Add(l, r, _)
+        | Expr::Sub(l, r, _)
+        | Expr::Mul(l, r, _)
+        | Expr::Div(l, r, _)
+        | Expr::Mod(l, r, _)
+        | Expr::FAdd(l, r, _)
+        | Expr::FSub(l, r, _)
+        | Expr::FMul(l, r, _)
+        | Expr::FDiv(l, r, _)
+        | Expr::Eq(l, r, _)
+        | Expr::Ne(l, r, _)
+        | Expr::Lt(l, r, _)
+        | Expr::Le(l, r, _)
+        | Expr::Gt(l, r, _)
+        | Expr::Ge(l, r, _)
+        | Expr::FEq(l, r, _)
+        | Expr::FNe(l, r, _)
+        | Expr::FLt(l, r, _)
+        | Expr::FLe(l, r, _)
+        | Expr::FGt(l, r, _)
+        | Expr::FGe(l, r, _)
+        | Expr::Xor(l, r, _)
+        | Expr::BAnd(l, r, _)
+        | Expr::BOr(l, r, _)
+        | Expr::LAnd(l, r, _)
+        | Expr::LOr(l, r, _)
+        | Expr::Shl(l, r, _)
+        | Expr::Shr(l, r, _)
+        | Expr::StrCat(l, r, _)
+        | Expr::Range(l, r, _)
+        | Expr::Index(l, r, _)
+        | Expr::IndexAssign(l, r, _)
+        | Expr::DerefAssign(l, r, _) => has_break_value(l) || has_break_value(r),
+        Expr::Not(e, _)
+        | Expr::Neg(e, _)
+        | Expr::FNeg(e, _)
+        | Expr::BNot(e, _)
+        | Expr::Return(e, _)
+        | Expr::VarDecl(_, _, e, _)
+        | Expr::ConstDecl(_, _, e, _, _)
+        | Expr::VarAssign(_, e, _)
+        | Expr::Cast(e, _, _)
+        | Expr::Deref(e, _)
+        | Expr::AddressOf(e, _) => has_break_value(e),
+        Expr::AddAssign(_, e, _)
+        | Expr::SubAssign(_, e, _)
+        | Expr::MulAssign(_, e, _)
+        | Expr::DivAssign(_, e, _)
+        | Expr::ModAssign(_, e, _)
+        | Expr::AndAssign(_, e, _)
+        | Expr::OrAssign(_, e, _)
+        | Expr::XorAssign(_, e, _)
+        | Expr::ShlAssign(_, e, _)
+        | Expr::ShrAssign(_, e, _) => has_break_value(e),
+        Expr::Inc(..)
+        | Expr::Dec(..)
+        | Expr::Int(..)
+        | Expr::Float(..)
+        | Expr::Bool(..)
+        | Expr::String(..)
+        | Expr::Nil(_)
+        | Expr::Var(..)
+        | Expr::TypeDef(_)
+        | Expr::Struct(..)
+        | Expr::Union(..)
+        | Expr::Enum(..)
+        | Expr::ExternVar(..)
+        | Expr::GlobalVar(..)
+        | Expr::FString(..) => false,
+        Expr::Call(f, _, args, _) => has_break_value(f) || args.iter().any(has_break_value),
+        Expr::ArrayLiteral(es, _) => es.iter().any(has_break_value),
+        Expr::ArrayFill(_, len, _) => has_break_value(len),
+        Expr::MemberAccess(o, _, _) => has_break_value(o),
+        Expr::MemberAssign(o, _, v, _) => has_break_value(o) || has_break_value(v),
+        Expr::StructLiteral(_, _, fs, _) | Expr::UnionLiteral(_, _, fs, _) => {
+            fs.iter().any(|(_, v)| has_break_value(v))
+        }
+    }
 }
 
 pub struct Compiler {
@@ -378,6 +483,16 @@ impl Compiler {
                 self.compile_expr(r);
                 self.emit(Op::LOGXOR, &[]);
             }
+            Expr::BAnd(l, r, _) => {
+                self.compile_expr(l);
+                self.compile_expr(r);
+                self.emit(Op::LOGAND, &[]);
+            }
+            Expr::BOr(l, r, _) => {
+                self.compile_expr(l);
+                self.compile_expr(r);
+                self.emit(Op::LOGOR, &[]);
+            }
             Expr::LAnd(l, r, _) => {
                 self.compile_expr(l);
                 self.compile_expr(r);
@@ -540,11 +655,21 @@ impl Compiler {
             }
             Expr::While(cond, body, _) => {
                 self.enter_scope();
+                let break_slot = has_break_value(&body).then(|| self.decl_var("_break_val"));
+                if let Some(slot) = break_slot {
+                    let void_const = self.add_const(Value::Void);
+                    self.emit(Op::LOADCONST, &[void_const]);
+                    self.emit(Op::STOREVAR, &[slot]);
+                    self.emit(Op::POP, &[]);
+                }
                 let loop_pos = self.code.len() as u32;
                 self.compile_expr(cond);
                 let iff = self.code.len() as u32;
                 self.emit(Op::JUMPIFFALSE, &[0]);
-                self.loop_targets.push(LoopTargets::default());
+                self.loop_targets.push(LoopTargets {
+                    break_slot,
+                    ..LoopTargets::default()
+                });
                 self.compile_expr(body);
                 self.emit(Op::POP, &[]);
                 let targets = self.loop_targets.pop().unwrap();
@@ -552,9 +677,19 @@ impl Compiler {
                 let break_pos = self.code.len() as u32;
                 self.patch_loop(targets, break_pos, loop_pos);
                 self.patch_jump_addr(iff + 1, break_pos);
+                if let Some(slot) = break_slot {
+                    self.emit(Op::LOADVAR, &[slot]);
+                }
                 self.exit_scope();
             }
-            Expr::Break(_) => {
+            Expr::Break(value, _) => {
+                if let Some(slot) = self.loop_targets.last().and_then(|t| t.break_slot) {
+                    if let Some(v) = value {
+                        self.compile_expr(&v);
+                        self.emit(Op::STOREVAR, &[slot]);
+                        self.emit(Op::POP, &[]);
+                    }
+                }
                 if let Some(targets) = self.loop_targets.last_mut() {
                     let j = self.code.len() as u32;
                     targets.break_jumps.push(j);
@@ -730,8 +865,18 @@ impl Compiler {
                     self.emit(Op::STOREVAR, &[var_slot]);
                     self.emit(Op::POP, &[]);
 
+                    let break_slot = has_break_value(&body).then(|| self.decl_var("_break_val"));
+                    if let Some(slot) = break_slot {
+                        let void_const = self.add_const(Value::Void);
+                        self.emit(Op::LOADCONST, &[void_const]);
+                        self.emit(Op::STOREVAR, &[slot]);
+                        self.emit(Op::POP, &[]);
+                    }
                     let loop_pos = self.code.len() as u32;
-                    self.loop_targets.push(LoopTargets::default());
+                    self.loop_targets.push(LoopTargets {
+                        break_slot,
+                        ..LoopTargets::default()
+                    });
                     self.emit(Op::LOADVAR, &[var_slot]);
                     self.emit(Op::LOADVAR, &[end_slot]);
                     self.emit(Op::LT, &[]);
@@ -752,6 +897,9 @@ impl Compiler {
                     let targets = self.loop_targets.pop().unwrap();
                     self.patch_loop(targets, break_pos, inc_pos);
                     self.patch_jump_addr(exit_loop + 1, break_pos);
+                    if let Some(slot) = break_slot {
+                        self.emit(Op::LOADVAR, &[slot]);
+                    }
                 } else {
                     self.compile_expr(iterable);
                     let arr_slot = self.decl_var("_for_arr");
@@ -772,8 +920,18 @@ impl Compiler {
 
                     let var_slot = self.decl_var(var);
 
+                    let break_slot = has_break_value(&body).then(|| self.decl_var("_break_val"));
+                    if let Some(slot) = break_slot {
+                        let void_const = self.add_const(Value::Void);
+                        self.emit(Op::LOADCONST, &[void_const]);
+                        self.emit(Op::STOREVAR, &[slot]);
+                        self.emit(Op::POP, &[]);
+                    }
                     let loop_pos = self.code.len() as u32;
-                    self.loop_targets.push(LoopTargets::default());
+                    self.loop_targets.push(LoopTargets {
+                        break_slot,
+                        ..LoopTargets::default()
+                    });
 
                     self.emit(Op::LOADVAR, &[idx_slot]);
                     self.emit(Op::LOADVAR, &[len_slot]);
@@ -801,6 +959,9 @@ impl Compiler {
                     let targets = self.loop_targets.pop().unwrap();
                     self.patch_loop(targets, break_pos, inc_pos);
                     self.patch_jump_addr(exit_loop + 1, break_pos);
+                    if let Some(slot) = break_slot {
+                        self.emit(Op::LOADVAR, &[slot]);
+                    }
                 }
                 self.exit_scope();
             }
@@ -874,12 +1035,27 @@ impl Compiler {
                 self.emit(Op::POP, &[]);
 
                 let mut end_jumps: Vec<u32> = Vec::new();
-                for (case_expr, result_expr) in branches {
+                for (case_expr, guard, result_expr) in branches {
                     self.emit(Op::LOADVAR, &[target_slot]);
-                    self.compile_expr(case_expr);
-                    self.emit(Op::EQ, &[]);
-                    let skip_addr = self.code.len() as u32;
+                    if let Expr::Range(lo, hi, _) = case_expr {
+                        self.compile_expr(&lo);
+                        self.emit(Op::GE, &[]);
+                        self.emit(Op::LOADVAR, &[target_slot]);
+                        self.compile_expr(&hi);
+                        self.emit(Op::LT, &[]);
+                        self.emit(Op::LOGAND, &[]);
+                    } else {
+                        self.compile_expr(case_expr);
+                        self.emit(Op::EQ, &[]);
+                    }
+                    let mut skip_addrs: Vec<u32> = Vec::new();
+                    skip_addrs.push(self.code.len() as u32);
                     self.emit(Op::JUMPIFFALSE, &[0]);
+                    if let Some(guard) = guard {
+                        self.compile_expr(&guard);
+                        skip_addrs.push(self.code.len() as u32);
+                        self.emit(Op::JUMPIFFALSE, &[0]);
+                    }
 
                     self.compile_expr(result_expr);
 
@@ -887,7 +1063,9 @@ impl Compiler {
                     self.emit(Op::JUMP, &[0]);
 
                     let next_addr = self.code.len() as u32;
-                    self.patch_jump_addr(skip_addr + 1, next_addr);
+                    for skip_addr in skip_addrs {
+                        self.patch_jump_addr(skip_addr + 1, next_addr);
+                    }
                 }
 
                 if let Some(default_expr) = default {

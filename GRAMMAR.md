@@ -33,10 +33,12 @@ keyword      = "fun" | "var" | "cst" | "struct" | "union" | "enum" | "typedef"
              | "int" | "float" | "bool" | "string" | "void" ;
 
 (* "pub" and "pure" are ordinary identifiers used contextually, not keywords.
-   Newlines carry no syntactic meaning; ";" is tolerated as an optional
-   separator inside blocks only (a ";" at top level is a syntax error).
-   A single "&"/"|" is a logical operator, identical to "&&"/"||";
-   bitwise operators are limited to "^" "~" "<<" ">>". *)
+   Newlines carry no syntactic meaning; ";" inside blocks either discards
+   the preceding expression's value or (after return/break/continue and
+   declarations) is a tolerated separator. A ";" at top level is a syntax
+   error.
+   "&" and "|" are bitwise operators (precedence: & > ^ > |); "&&" and "||"
+   are the short-circuit logical operators. *)
 
 (* ===== Preprocessor (standalone text layer) ===== *)
 
@@ -75,10 +77,12 @@ assign_expr  = logical , [ assign_op , expr ] ;
    assignment is right-associative *)
 
 (* binary operators, lowest to highest precedence *)
-logical      = logical_and , { ( "|" | "||" ) , logical_and } ;
-logical_and  = comparison , { ( "&" | "&&" ) , comparison } ;
-comparison   = bitwise , { ( "==" | "!=" | "<" | "<=" | ">" | ">=" ) , bitwise } ;
-bitwise      = shift , { "^" , shift } ;
+logical      = logical_and , { "||" , logical_and } ;
+logical_and  = comparison , { "&&" , comparison } ;
+comparison   = bit_or , { ( "==" | "!=" | "<" | "<=" | ">" | ">=" ) , bit_or } ;
+bit_or       = bit_xor , { "|" , bit_xor } ;
+bit_xor      = bit_and , { "^" , bit_and } ;
+bit_and      = shift , { "&" , shift } ;
 shift        = additive , { ( "<<" | ">>" ) , additive } ;
 additive     = sum | range ;
 range        = term , ".." , additive ;           (* left side stops at term level;
@@ -115,9 +119,13 @@ primary      = int_lit | float_lit | bool_lit | nil_lit | string_lit | fstring_l
 (* parentheses wrap operator expressions only:
    control constructs, declarations and assignments cannot be parenthesized *)
 
-block        = "{" , [ expr , { [ ";" ] , expr } ] , "}" ;
+block        = "{" , [ block_item , { [ ";" ] , block_item } ] , "}" ;
+(* an expression followed by ";" discards its value (desugars to "@void"):
+   `println(x);` evaluates and drops. After return/break/continue and after
+   declarations, ";" remains a tolerated separator. *)
 
-lambda       = "\" , "(" , params , ")" , ":" , type , expr ;
+lambda       = "\" , "(" , params , ")" , [ ":" , type ] , expr ;
+             (* omitted return type defaults to void *)
 
 array_literal = "[" , [ expr , { "," , expr } ] , "]" ;
 array_fill   = "[" , type , ";" , expr , "]" ;
@@ -140,9 +148,19 @@ if_expr      = "if" , expr , expr , [ "else" , expr ] ;
 while_expr   = "while" , expr , expr ;
 for_expr     = "for" , identifier , "in" , expr , expr ;
 match_expr   = "match" , expr , "{" , { match_arm } , [ default_arm ] , "}" ;
-match_arm    = expr , ":" , expr ;
+match_arm    = expr , [ "if" , expr ] , ":" , expr ;
+(* an optional guard after the pattern must be bool and may only reference
+   variables from the enclosing scope (patterns do not bind);
+   a failed guard falls through to the next arm, not to the default *)
+(* a pattern of the form n..m is a range pattern: it matches when
+   n <= target < m (same exclusive upper bound as for-in ranges);
+   the target must be int *)
 default_arm  = "_" , ":" , expr ;                (* must be the last arm *)
 return_expr  = "return" , [ expr ] ;
+(* "break" may carry a value: `break` | `break` , expr ; the innermost loop's
+   value is the value of the `break expr` that exits it (void if the loop
+   ends normally). `break` followed by a declaration/control keyword starts a
+   new statement, not a value. *)
 
 (* ===== Declarations ===== *)
 
@@ -150,7 +168,9 @@ fun_def      = "fun" , [ "(" , fn_anns , ")" ] , identifier ,
                [ generic_params ] ,
                "(" , params , ")" ,
                [ ":" , type ] ,
-               [ expr ] ;                        (* body omitted iff annotated extern *)
+               [ expr ] ;                        (* body omitted iff annotated extern;
+                                                    a void function's body must evaluate
+                                                    to void (use "@void" to discard) *)
 fn_anns      = fn_ann , { "," , fn_ann } ;
 fn_ann       = "pub" | "extern" | "pure" ;
 params       = [ param , { "," , param } ] ;

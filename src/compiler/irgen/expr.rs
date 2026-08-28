@@ -175,6 +175,8 @@ impl IRGen {
             Expr::FGt(l, r, _) => Ok((Op::FGt, l, r)),
             Expr::FGe(l, r, _) => Ok((Op::FGe, l, r)),
             Expr::Xor(l, r, _) => Ok((Op::Xor, l, r)),
+            Expr::BAnd(l, r, _) => Ok((Op::And, l, r)),
+            Expr::BOr(l, r, _) => Ok((Op::Or, l, r)),
             Expr::LAnd(l, r, _) => Ok((Op::LAnd, l, r)),
             Expr::LOr(l, r, _) => Ok((Op::LOr, l, r)),
             Expr::Shl(l, r, _) => Ok((Op::Shl, l, r)),
@@ -686,6 +688,8 @@ impl IRGen {
             | Expr::FGt(_, _, _)
             | Expr::FGe(_, _, _)
             | Expr::Xor(_, _, _)
+            | Expr::BAnd(_, _, _)
+            | Expr::BOr(_, _, _)
             | Expr::Shl(_, _, _)
             | Expr::Shr(_, _, _)
             | Expr::StrCat(_, _, _) => {
@@ -800,10 +804,10 @@ impl IRGen {
             }
 
             Expr::AndAssign(name, value, _) => {
-                self.emit_compound_assign(name, *value, Op::LAnd, ctx)
+                self.emit_compound_assign(name, *value, Op::And, ctx)
             }
 
-            Expr::OrAssign(name, value, _) => self.emit_compound_assign(name, *value, Op::LOr, ctx),
+            Expr::OrAssign(name, value, _) => self.emit_compound_assign(name, *value, Op::Or, ctx),
 
             Expr::XorAssign(name, value, _) => {
                 self.emit_compound_assign(name, *value, Op::Xor, ctx)
@@ -888,7 +892,7 @@ impl IRGen {
 
             Expr::For(var, iter, body, _) => self.compile_for(var, iter, body, ctx),
 
-            Expr::Break(_) => self.compile_break(ctx),
+            Expr::Break(value, _) => self.compile_break(value, ctx),
 
             Expr::Continue(_) => self.compile_continue(ctx),
 

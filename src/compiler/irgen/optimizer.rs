@@ -259,6 +259,10 @@ fn pass_algebraic(
             Op::Div if c2 == Some(1) => Some((Op::Move, src1)),
             Op::Xor if c2 == Some(0) => Some((Op::Move, src1)),
             Op::Xor if c1 == Some(0) => Some((Op::Move, src2)),
+            Op::And if c2 == Some(0) => Some((Op::Move, z())),
+            Op::And if c1 == Some(0) => Some((Op::Move, z())),
+            Op::Or if c2 == Some(0) => Some((Op::Move, src1)),
+            Op::Or if c1 == Some(0) => Some((Op::Move, src2)),
             Op::LAnd if c2 == Some(0) => Some((Op::Move, z())),
             Op::LAnd if c1 == Some(0) => Some((Op::Move, z())),
             Op::LOr if c2 == Some(0) => Some((Op::Move, src1)),
@@ -412,6 +416,8 @@ fn is_pure(op: &Op) -> bool {
             | Op::StrGe
             | Op::LAnd
             | Op::LOr
+            | Op::And
+            | Op::Or
             | Op::Xor
             | Op::Shl
             | Op::Shr
@@ -625,6 +631,8 @@ fn is_hoistable(op: &Op) -> bool {
             | Op::Xor
             | Op::LAnd
             | Op::LOr
+            | Op::And
+            | Op::Or
             | Op::Shl
             | Op::Shr
             | Op::BNot

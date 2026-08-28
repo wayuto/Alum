@@ -3,7 +3,7 @@ use super::parser::{CompoundOp, make_compound_assign, make_inc_dec};
 use crate::compiler::{
     Span,
     lexer::{FstringSeg, Lexer, Token},
-    parser::{Expr, FuncAttrs, Parser, Type},
+    parser::{Expr, FuncAttrs, Parser, Primitive, Type},
 };
 
 impl<'a> Parser<'a> {
@@ -391,7 +391,7 @@ impl<'a> Parser<'a> {
                     self.next()?;
                     let var = self.expr()?;
                     self.expect(Token::LBRACE)?;
-                    let mut cases: Vec<(Expr, Expr)> = Vec::new();
+                    let mut cases: Vec<(Expr, Option<Box<Expr>>, Expr)> = Vec::new();
                     let mut default: Option<Box<Expr>> = None;
                     loop {
                         match self.peek().cloned() {
@@ -408,9 +408,16 @@ impl<'a> Parser<'a> {
                             }
                             Some(Ok((_, _))) => {
                                 let case = self.expr()?;
+                                let guard = match self.peek() {
+                                    Some(Ok((Token::IF, _))) => {
+                                        self.next()?;
+                                        Some(Box::new(self.expr()?))
+                                    }
+                                    _ => None,
+                                };
                                 self.expect(Token::COLON)?;
                                 let ret = self.expr()?;
-                                cases.push((case, ret));
+                                cases.push((case, guard, ret));
                             }
                             Some(Err(e)) => return Err(ParserError::LexerError(e.clone())),
                             None => {
@@ -461,7 +468,29 @@ impl<'a> Parser<'a> {
                 }
                 Ok((Token::BREAK, span)) => {
                     self.next()?;
-                    Ok(Expr::Break(span))
+                    let value = match self.peek() {
+                        Some(Ok((Token::SEMICOLON, _))) | Some(Ok((Token::RBRACE, _))) | None => {
+                            None
+                        }
+                        Some(Ok((
+                            Token::VAR
+                            | Token::CST
+                            | Token::FUN
+                            | Token::STRUCT
+                            | Token::UNION
+                            | Token::ENUM
+                            | Token::TYPEDEF
+                            | Token::EXTERN
+                            | Token::IMPORT
+                            | Token::USING
+                            | Token::RET
+                            | Token::BREAK
+                            | Token::CONTINUE,
+                            _,
+                        ))) => None,
+                        _ => Some(Box::new(self.expr()?)),
+                    };
+                    Ok(Expr::Break(value, span))
                 }
                 Ok((Token::CONTINUE, span)) => {
                     self.next()?;
@@ -714,48 +743,55 @@ impl<'a> Parser<'a> {
 
     pub(super) fn logical(&mut self) -> Result<Expr, ParserError> {
         let mut left = self.logical_and()?;
-        while let Some(Ok((op, _))) = self.peek().cloned() {
-            match op {
-                Token::OR | Token::LOR => {
-                    self.next()?;
-                    let right = self.logical_and()?;
-                    let span = left.span();
-                    left = Expr::LOr(Box::new(left), Box::new(right), span);
-                }
-                _ => break,
-            }
+        while let Some(Ok((Token::OR, _))) = self.peek().cloned() {
+            self.next()?;
+            let right = self.logical_and()?;
+            let span = left.span();
+            left = Expr::LOr(Box::new(left), Box::new(right), span);
         }
         Ok(left)
     }
 
     pub(super) fn logical_and(&mut self) -> Result<Expr, ParserError> {
         let mut left = self.comparison()?;
-        while let Some(Ok((op, _))) = self.peek().cloned() {
-            match op {
-                Token::AND | Token::LAND => {
-                    self.next()?;
-                    let right = self.comparison()?;
-                    let span = left.span();
-                    left = Expr::LAnd(Box::new(left), Box::new(right), span);
-                }
-                _ => break,
-            }
+        while let Some(Ok((Token::AND, _))) = self.peek().cloned() {
+            self.next()?;
+            let right = self.comparison()?;
+            let span = left.span();
+            left = Expr::LAnd(Box::new(left), Box::new(right), span);
         }
         Ok(left)
     }
 
     pub(super) fn bitwise(&mut self) -> Result<Expr, ParserError> {
+        let mut left = self.bitwise_xor()?;
+        while let Some(Ok((Token::LOR, _))) = self.peek().cloned() {
+            self.next()?;
+            let right = self.bitwise_xor()?;
+            let span = left.span();
+            left = Expr::BOr(Box::new(left), Box::new(right), span);
+        }
+        Ok(left)
+    }
+
+    fn bitwise_xor(&mut self) -> Result<Expr, ParserError> {
+        let mut left = self.bitwise_and()?;
+        while let Some(Ok((Token::XOR, _))) = self.peek().cloned() {
+            self.next()?;
+            let right = self.bitwise_and()?;
+            let span = left.span();
+            left = Expr::Xor(Box::new(left), Box::new(right), span);
+        }
+        Ok(left)
+    }
+
+    fn bitwise_and(&mut self) -> Result<Expr, ParserError> {
         let mut left = self.shift()?;
-        while let Some(Ok((op, _))) = self.peek().cloned() {
-            match op {
-                Token::XOR => {
-                    self.next()?;
-                    let right = self.shift()?;
-                    let span = left.span();
-                    left = Expr::Xor(Box::new(left), Box::new(right), span);
-                }
-                _ => break,
-            }
+        while let Some(Ok((Token::LAND, _))) = self.peek().cloned() {
+            self.next()?;
+            let right = self.shift()?;
+            let span = left.span();
+            left = Expr::BAnd(Box::new(left), Box::new(right), span);
         }
         Ok(left)
     }
@@ -1044,8 +1080,12 @@ impl<'a> Parser<'a> {
                     self.expect(Token::LPAREN)?;
                     let params = self.get_params_list()?;
                     self.expect(Token::RPAREN)?;
-                    self.expect(Token::COLON)?;
-                    let ret_type = self.parse_type()?;
+                    let ret_type = if matches!(self.peek(), Some(Ok((Token::COLON, _)))) {
+                        self.next()?;
+                        self.parse_type()?
+                    } else {
+                        Type::Primitive(Primitive::Void)
+                    };
                     self.scope_depth += 1;
                     let body = self.expr();
                     self.scope_depth -= 1;

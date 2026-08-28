@@ -701,6 +701,25 @@ impl TypeChecker {
                 })?;
                 Ok(var_type)
             }
+            Expr::BAnd(lhs, rhs, _) | Expr::BOr(lhs, rhs, _) => {
+                let lhs_type = self.check_expr(lhs)?;
+                let rhs_type = self.check_expr(rhs)?;
+                if lhs_type.is_float() || rhs_type.is_float() {
+                    return Err(CheckerError::InvalidOperation {
+                        op: "bitwise".to_string(),
+                        type_name: format!("{:?} and {:?}", lhs_type, rhs_type),
+                        span: span,
+                    });
+                }
+                if lhs_type.is_numeric() && rhs_type.is_numeric() {
+                    return Ok(Type::Primitive(Primitive::Int));
+                }
+                return Err(CheckerError::InvalidOperation {
+                    op: "bitwise".to_string(),
+                    type_name: format!("{:?} and {:?}", lhs_type, rhs_type),
+                    span: span,
+                });
+            }
             Expr::LAnd(lhs, rhs, _) | Expr::LOr(lhs, rhs, _) => {
                 let lhs_type = self.check_expr(lhs)?;
                 let rhs_type = self.check_expr(rhs)?;
@@ -1024,10 +1043,12 @@ impl TypeChecker {
                 }
 
                 self.push_scope();
+                self.loop_break_types.push(Vec::new());
                 self.check_expr(body)?;
+                let break_types = self.loop_break_types.pop().unwrap_or_default();
                 self.pop_scope();
 
-                Ok(Type::Primitive(Primitive::Void))
+                Ok(unify_break_types(break_types, span)?)
             }
             Expr::For(var, array, body, _) => {
                 let array_type = self.check_expr(array)?;
@@ -1075,10 +1096,12 @@ impl TypeChecker {
 
                 self.push_scope();
                 self.declare_var(var, elem_type);
+                self.loop_break_types.push(Vec::new());
                 self.check_expr(body)?;
+                let break_types = self.loop_break_types.pop().unwrap_or_default();
                 self.pop_scope();
 
-                Ok(Type::Primitive(Primitive::Void))
+                Ok(unify_break_types(break_types, span)?)
             }
             Expr::Block(body, _) => {
                 self.push_scope();
@@ -1313,6 +1336,23 @@ impl TypeChecker {
                     let resolved_body = self.resolve_type(&body_type);
 
                     let ret_is_void = matches!(resolved_ret, Type::Primitive(Primitive::Void));
+                    let body_unresolved = matches!(resolved_body, Type::TypeVar(_));
+                    if ret_is_void
+                        && !body_unresolved
+                        && !matches!(resolved_body, Type::Primitive(Primitive::Void))
+                    {
+                        self.return_types.pop();
+                        if !type_params.is_empty() {
+                            self.pop_generic_params();
+                        }
+                        self.pop_scope();
+                        return Err(CheckerError::TypeMismatch {
+                            expected: ret_var.clone(),
+                            found: body_type.clone(),
+                            context: "function return type".to_string(),
+                            span,
+                        });
+                    }
                     if !ret_is_void && resolved_ret != resolved_body {
                         self.return_types.pop();
                         if !type_params.is_empty() {
@@ -1346,7 +1386,23 @@ impl TypeChecker {
                     Ok(Type::Primitive(Primitive::Void))
                 }
             }
-            Expr::Break(_) | Expr::Continue(_) => Ok(Type::Primitive(Primitive::Void)),
+            Expr::Break(value, bspan) => {
+                if self.loop_break_types.is_empty() {
+                    return Err(CheckerError::InvalidOperation {
+                        op: "break".to_string(),
+                        type_name: "outside of a loop".to_string(),
+                        span: *bspan,
+                    });
+                }
+                if let Some(v) = value {
+                    let t = self.check_expr(v)?;
+                    if let Some(types) = self.loop_break_types.last_mut() {
+                        types.push(t);
+                    }
+                }
+                Ok(Type::Primitive(Primitive::Void))
+            }
+            Expr::Continue(_) => Ok(Type::Primitive(Primitive::Void)),
             Expr::TypeDef(_) => Ok(Type::Primitive(Primitive::Void)),
             Expr::Match(target, branches, default, _) => {
                 let target_type = self.check_expr(target)?;
@@ -1354,7 +1410,39 @@ impl TypeChecker {
                 self.check_match_exhaustiveness(&target_type, branches, has_default, span)?;
                 let mut case_types: Vec<Type> = Vec::new();
                 let mut ret_types: Vec<Type> = Vec::new();
-                for (case_type, ret_type) in branches {
+                for (case_type, guard, ret_type) in branches {
+                    if let Some(guard) = guard {
+                        let guard_type = self.check_expr(guard)?;
+                        if !guard_type.is_bool() {
+                            return Err(CheckerError::TypeMismatch {
+                                expected: Type::Primitive(Primitive::Boolean),
+                                found: guard_type,
+                                context: "match guard".to_string(),
+                                span: span,
+                            });
+                        }
+                    }
+                    if let Expr::Range(lo, hi, rspan) = case_type {
+                        let lo_type = self.check_expr(lo)?;
+                        let hi_type = self.check_expr(hi)?;
+                        if !lo_type.is_numeric() || !hi_type.is_numeric() {
+                            return Err(CheckerError::InvalidOperation {
+                                op: "range pattern".to_string(),
+                                type_name: format!("{:?} and {:?}", lo_type, hi_type),
+                                span: *rspan,
+                            });
+                        }
+                        if self.resolve_type(&target_type) != Type::Primitive(Primitive::Int) {
+                            return Err(CheckerError::TypeMismatch {
+                                expected: target_type.clone(),
+                                found: Type::Primitive(Primitive::Int),
+                                context: "range pattern".to_string(),
+                                span: *rspan,
+                            });
+                        }
+                        ret_types.push(self.check_expr(ret_type)?);
+                        continue;
+                    }
                     case_types.push(self.check_expr(case_type)?);
                     ret_types.push(self.check_expr(ret_type)?);
                 }
@@ -1777,4 +1865,25 @@ impl TypeChecker {
             }),
         }
     }
+}
+
+fn unify_break_types(
+    types: Vec<Type>,
+    span: crate::compiler::span::Span,
+) -> Result<Type, CheckerError> {
+    let mut iter = types.into_iter();
+    let Some(first) = iter.next() else {
+        return Ok(Type::Primitive(Primitive::Void));
+    };
+    for t in iter {
+        if t != first {
+            return Err(CheckerError::TypeMismatch {
+                expected: first.clone(),
+                found: t,
+                context: "break value".to_string(),
+                span,
+            });
+        }
+    }
+    Ok(first)
 }

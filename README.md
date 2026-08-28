@@ -42,8 +42,8 @@ The official tutorial series (中文教程) walks through the language from scra
 
 ### Functional & Control Flow
 
-- **Lambdas & Higher-Order Functions** — first-class function types; struct method fields invoked through index sugar (`v[i] = x`)
-- **Expression-Oriented Control Flow** — `if`/`else`, `match` (arms need no separators, patterns evaluate lazily), `while`, `for-in` over arrays and ranges (`n..m`)
+- **Lambdas & Higher-Order Functions** — first-class function types; methods are function-pointer fields on structs, invoked through dot sugar with `&self` as the first argument (`vec.push(&vec, x)`)
+- **Expression-Oriented Control Flow** — `if`/`else`, `match` (arms need no separators, patterns evaluate lazily; `n..m` patterns match `n <= t < m`; arms may take a bool guard: `pat if cond: body`), `while`, `for-in` over arrays and ranges (`n..m`); `break expr` makes the innermost loop evaluate to a value
 - **Short-Circuit Logic** — `&&` and `||` evaluate lazily
 - **F-String Interpolation** — `println(f"value: {x}")`; every primitive interpolates, including `void` rendered as `nil`
 - **Function Annotations** — `(pub)` export for modules, `(extern)` external symbols, `(pure)` pure functions; return-type annotations optional (default `void`)
@@ -370,7 +370,7 @@ cargo build --release
 - **[Grammar (EBNF)](./GRAMMAR.md)** - Formal grammar derived from the parser
 - **[Standard Library](./alum-std/README.md)** - Comprehensive standard library documentation
 - **[Build Tool](./alum-make/README.md)** - almk build tool documentation
-- **[Tutorial Series](https://cr0.dpdns.org)** - 19-part Chinese tutorial covering the language from scratch
+- **[Tutorial Series](https://cr0.dpdns.org)** - 20-part Chinese tutorial covering the language from scratch
 
 ## License
 

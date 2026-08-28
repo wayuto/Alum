@@ -24,8 +24,8 @@ fun get_max(a: int, b: int): int {
 
 // Function with no return value
 fun greet(name: string): void {
-    print("Hello, ")
-    println(name)
+    print("Hello, ")@void
+    println(name)@void
 }
 
 fun main(): int {

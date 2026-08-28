@@ -149,7 +149,9 @@ fn op_clobbers(inst: &Instruction, constants: &[IRConst]) -> u32 {
     let base = match &inst.op {
         Op::Move | Op::Load | Op::Store | Op::GlobLoad | Op::GlobStore => R_RAX | R_R10,
         Op::FMove | Op::FLoad | Op::FStore | Op::FGlobLoad | Op::FGlobStore => R_R10,
-        Op::Add | Op::Sub | Op::Mul | Op::LAnd | Op::LOr | Op::Xor => R_RAX | R_RBX | R_R10,
+        Op::Add | Op::Sub | Op::Mul | Op::LAnd | Op::LOr | Op::And | Op::Or | Op::Xor => {
+            R_RAX | R_RBX | R_R10
+        }
         Op::Shl | Op::Shr => R_RAX | R_RCX | R_R10,
         Op::BNot => R_RAX | R_R10,
         Op::Div | Op::Mod => R_RAX | R_RDX | R_RBX | R_R10,
@@ -551,11 +553,13 @@ pub fn allocate_registers(func: &IRFunction, program_constants: &[IRConst]) -> A
         Op::Div | Op::Mod | Op::StrCat | Op::Eq | Op::Ne | Op::Gt | Op::Ge | Op::Lt | Op::Le => {
             true
         }
-        Op::Add | Op::Sub | Op::Mul | Op::LAnd | Op::LOr | Op::Xor => match &i.src2 {
-            Some(Operand::ConstIdx(idx)) => !matches!(program_constants[*idx], IRConst::Int(_)),
-            Some(Operand::Var(_) | Operand::Temp(_, _)) => false,
-            _ => true,
-        },
+        Op::Add | Op::Sub | Op::Mul | Op::LAnd | Op::LOr | Op::And | Op::Or | Op::Xor => {
+            match &i.src2 {
+                Some(Operand::ConstIdx(idx)) => !matches!(program_constants[*idx], IRConst::Int(_)),
+                Some(Operand::Var(_) | Operand::Temp(_, _)) => false,
+                _ => true,
+            }
+        }
         _ => false,
     });
     if writes_rbx {

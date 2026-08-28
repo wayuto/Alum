@@ -85,8 +85,14 @@ fn classify(
 
     match expr {
         Var(name, _) if globals.contains(name) => Err(format!("read mutable global '{}'", name)),
-        Int(..) | Float(..) | Bool(..) | String(..) | Nil(_) | Var(..) | Break(_) | Continue(_)
+        Int(..) | Float(..) | Bool(..) | String(..) | Nil(_) | Var(..) | Continue(_)
         | TypeDef(_) | Struct(..) | Union(..) | Enum(..) => Ok(()),
+        Break(v, _) => {
+            if let Some(v) = v {
+                classify(fn_name, v, decls, globals, in_progress, memo, bound)?;
+            }
+            Ok(())
+        }
 
         Call(callee, _, args, _) => {
             let Some(name) = callee_name(callee) else {
@@ -148,9 +154,12 @@ fn classify(
         }
         Match(scrutinee, arms, default, _) => {
             classify(fn_name, scrutinee, decls, globals, in_progress, memo, bound)?;
-            for (pat, arm) in arms {
+            for (pat, guard, arm) in arms {
                 let saved = bound.clone();
                 classify(fn_name, pat, decls, globals, in_progress, memo, bound)?;
+                if let Some(guard) = guard {
+                    classify(fn_name, guard, decls, globals, in_progress, memo, bound)?;
+                }
                 classify(fn_name, arm, decls, globals, in_progress, memo, bound)?;
                 *bound = saved;
             }
@@ -214,6 +223,8 @@ fn classify(
         | FGt(l, r, _)
         | FGe(l, r, _)
         | Xor(l, r, _)
+        | BAnd(l, r, _)
+        | BOr(l, r, _)
         | LAnd(l, r, _)
         | LOr(l, r, _)
         | Shl(l, r, _)

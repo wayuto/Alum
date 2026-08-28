@@ -55,7 +55,15 @@ impl AsmCodeGen {
                 self.store_global_xmm(dst, Reg::Xmm0)?;
                 Ok(())
             }
-            Op::Add | Op::Sub | Op::Mul | Op::Div | Op::LAnd | Op::LOr | Op::Xor => {
+            Op::Add
+            | Op::Sub
+            | Op::Mul
+            | Op::Div
+            | Op::LAnd
+            | Op::LOr
+            | Op::And
+            | Op::Or
+            | Op::Xor => {
                 let dst = code.dst.as_ref().unwrap();
                 let src1 = code.src1.as_ref().unwrap();
                 let src2 = code.src2.as_ref().unwrap();
@@ -69,8 +77,8 @@ impl AsmCodeGen {
                         Op::Add => Asm::Add,
                         Op::Sub => Asm::Sub,
                         Op::Mul => Asm::Imul,
-                        Op::LAnd => Asm::And,
-                        Op::LOr => Asm::Or,
+                        Op::LAnd | Op::And => Asm::And,
+                        Op::LOr | Op::Or => Asm::Or,
                         Op::Xor => Asm::Xor,
                         _ => unreachable!(),
                     };

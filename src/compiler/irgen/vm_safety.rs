@@ -105,9 +105,10 @@ impl<'a> VmSafety<'a> {
     pub(super) fn safe(&mut self, expr: &Expr) -> bool {
         use Expr::*;
         match expr {
-            Int(..) | Float(..) | Bool(..) | String(..) | Nil(_) | Var(..) | Break(_)
-            | Continue(_) | TypeDef(_) | Struct(..) | Union(..) | Enum(..) | GlobalVar(..)
-            | ExternVar(..) | FuncDecl(..) => true,
+            Int(..) | Float(..) | Bool(..) | String(..) | Nil(_) | Var(..) | Continue(_)
+            | TypeDef(_) | Struct(..) | Union(..) | Enum(..) | GlobalVar(..) | ExternVar(..)
+            | FuncDecl(..) => true,
+            Break(v, _) => v.as_ref().map(|v| self.safe(v)).unwrap_or(true),
 
             Call(callee, _, args, _) => {
                 match callee.as_ref() {
@@ -177,9 +178,14 @@ impl<'a> VmSafety<'a> {
                 if !self.safe(s) {
                     return false;
                 }
-                for (pat, arm) in arms {
+                for (pat, guard, arm) in arms {
                     if !self.safe(pat) {
                         return false;
+                    }
+                    if let Some(guard) = guard {
+                        if !self.safe(guard) {
+                            return false;
+                        }
                     }
                     self.enter_scope();
                     let r = self.safe(arm);
@@ -260,6 +266,8 @@ impl<'a> VmSafety<'a> {
             | FGt(l, r, _)
             | FGe(l, r, _)
             | Xor(l, r, _)
+            | BAnd(l, r, _)
+            | BOr(l, r, _)
             | LAnd(l, r, _)
             | LOr(l, r, _)
             | Shl(l, r, _)

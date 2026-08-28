@@ -303,7 +303,7 @@ impl TypeChecker {
     pub(super) fn check_match_exhaustiveness(
         &self,
         target_ty: &Type,
-        branches: &[(Expr, Expr)],
+        branches: &[(Expr, Option<Box<Expr>>, Expr)],
         has_default: bool,
         span: Span,
     ) -> Result<(), CheckerError> {
@@ -313,7 +313,10 @@ impl TypeChecker {
         match self.resolve_type(target_ty) {
             Type::Primitive(Primitive::Boolean) => {
                 let mut covered: HashSet<bool> = HashSet::new();
-                for (case, _) in branches {
+                for (case, guard, _) in branches {
+                    if guard.is_some() {
+                        continue;
+                    }
                     if let Expr::Bool(b, _) = case {
                         covered.insert(*b);
                     } else {
@@ -337,7 +340,10 @@ impl TypeChecker {
             Type::Primitive(Primitive::Int) => {
                 let mut enum_name: Option<String> = None;
                 let mut covered: HashSet<isize> = HashSet::new();
-                for (case, _) in branches {
+                for (case, guard, _) in branches {
+                    if guard.is_some() {
+                        continue;
+                    }
                     match self.enum_member_of(case) {
                         Some((en, value)) => {
                             if let Some(cur) = &enum_name {
@@ -470,8 +476,11 @@ impl TypeChecker {
             }
             Expr::Match(target, branches, default, _) => {
                 self.resolve_call_type_args(target);
-                for (case, result) in branches.iter_mut() {
+                for (case, guard, result) in branches.iter_mut() {
                     self.resolve_call_type_args(case);
+                    if let Some(guard) = guard {
+                        self.resolve_call_type_args(guard);
+                    }
                     self.resolve_call_type_args(result);
                 }
                 if let Some(d) = default {
@@ -538,6 +547,8 @@ impl TypeChecker {
             | Expr::FLe(l, r, _)
             | Expr::FGt(l, r, _)
             | Expr::FGe(l, r, _)
+            | Expr::BAnd(l, r, _)
+            | Expr::BOr(l, r, _)
             | Expr::LAnd(l, r, _)
             | Expr::LOr(l, r, _)
             | Expr::Shl(l, r, _)

@@ -341,9 +341,10 @@ pub(super) fn hoist_lambdas(
             Box::new(hoist_lambdas(*target, lambda_counter, lambda_map)),
             branches
                 .into_iter()
-                .map(|(pat, arm)| {
+                .map(|(pat, guard, arm)| {
                     (
                         hoist_lambdas(pat, lambda_counter, lambda_map),
+                        guard.map(|g| Box::new(hoist_lambdas(*g, lambda_counter, lambda_map))),
                         hoist_lambdas(arm, lambda_counter, lambda_map),
                     )
                 })
@@ -364,6 +365,16 @@ pub(super) fn hoist_lambdas(
             Span::new(0, 0),
         ),
         Expr::Xor(l, r, _) => Expr::Xor(
+            Box::new(hoist_lambdas(*l, lambda_counter, lambda_map)),
+            Box::new(hoist_lambdas(*r, lambda_counter, lambda_map)),
+            Span::new(0, 0),
+        ),
+        Expr::BAnd(l, r, _) => Expr::BAnd(
+            Box::new(hoist_lambdas(*l, lambda_counter, lambda_map)),
+            Box::new(hoist_lambdas(*r, lambda_counter, lambda_map)),
+            Span::new(0, 0),
+        ),
+        Expr::BOr(l, r, _) => Expr::BOr(
             Box::new(hoist_lambdas(*l, lambda_counter, lambda_map)),
             Box::new(hoist_lambdas(*r, lambda_counter, lambda_map)),
             Span::new(0, 0),
