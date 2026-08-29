@@ -36,6 +36,7 @@ pub struct Package {
 
 #[derive(Deserialize, Serialize)]
 pub struct Build {
+    pub main_only: Option<bool>,
     pub linker: String,
     pub cc: Option<String>,
     pub cflags: Option<String>,

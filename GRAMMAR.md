@@ -14,9 +14,12 @@ float_lit    = digit , { digit } , "." , digit , { digit } ,
                [ ( "e" | "E" ) , [ "+" | "-" ] , digit , { digit } ] ;
 string_lit   = string ;
 string       = ( '"' , { char } , '"' )
-             | ( "'" , { char } , "'" ) ;        (* may span lines *)
+             | ( "'" , { char } , "'" ) ;        (* may span lines;
+                                                    a single-quoted string of
+                                                    exactly one character is a
+                                                    char literal of type char *)
 char         = ?any character? | escape ;
-escape       = "\" , ( "n" | "t" | "r" | ?any character? ) ;
+escape       = "\" , ( "n" | "t" | "r" | "0" | ?any character? ) ;
 fstring_lit  = "f" , quote , { fstring_char } , quote ;   (* quote is '"' or "'" *)
 fstring_char = char
              | "{{" | "}}"                        (* escaped braces *)
@@ -27,10 +30,11 @@ nil_lit      = "nil" ;
 comment      = "//" , { ?any character except newline? } ;
 
 keyword      = "fun" | "var" | "cst" | "struct" | "union" | "enum" | "typedef"
+             | "char"
              | "if" | "else" | "while" | "for" | "in" | "match" | "return"
              | "break" | "continue" | "import" | "using" | "as" | "extern"
              | "true" | "false" | "nil"
-             | "int" | "float" | "bool" | "string" | "void" ;
+             | "int" | "char" | "float" | "bool" | "string" | "void" ;
 
 (* "pub" and "pure" are ordinary identifiers used contextually, not keywords.
    Newlines carry no syntactic meaning; ";" inside blocks either discards
@@ -86,7 +90,11 @@ bit_and      = shift , { "&" , shift } ;
 shift        = additive , { ( "<<" | ">>" ) , additive } ;
 additive     = sum | range ;
 range        = term , ".." , additive ;           (* left side stops at term level;
-                                                     right-associative *)
+                                                     right-associative; exclusive
+                                                     upper bound n <= t < m;
+                                                     a one-character string literal
+                                                     as a bound denotes its byte
+                                                     value: 'a'..'z' == 97..122 *)
 sum          = term , { ( "+" | "-" ) , term } ;
 term         = unary , { ( "*" | "/" | "%" ) , unary } ;
 unary        = ( "$" | "*" | "&" | "-" | "+"
@@ -215,7 +223,7 @@ type_suffix   = "(" , type_params , ")"          (* function type *)
 type_params  = [ type , { "," , type } ] ;
 type_name    = [ identifier , "::" ] , ( prim_type | identifier ) ,
                [ generic_args ] ;
-prim_type    = "int" | "float" | "bool" | "string" | "void" ;
+prim_type    = "int" | "char" | "float" | "bool" | "string" | "void" ;
 (* identifiers resolve to type parameters, typedefs, enums (as int),
    unions or structs, in that order;
    function-type and array suffixes are mutually exclusive *)

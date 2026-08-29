@@ -581,12 +581,25 @@ impl TypeChecker {
         let found = self.resolve_type(found);
 
         match (&expected, &found) {
+            (Type::Struct(s1, a1), Type::Pointer(inner))
+                if **inner == Type::Struct(s1.clone(), a1.clone()) =>
+            {
+                true
+            }
+            (Type::Pointer(inner), Type::Struct(s1, a1))
+                if **inner == Type::Struct(s1.clone(), a1.clone()) =>
+            {
+                true
+            }
             (Type::Primitive(Primitive::Void), Type::Primitive(Primitive::Void)) => true,
             (Type::Pointer(_), Type::Primitive(Primitive::Void)) => true,
             (Type::TypeVar(_), Type::Primitive(Primitive::Void)) => true,
             (Type::Param(_), Type::Primitive(Primitive::Void)) => true,
             (Type::TypeVar(_), _) => true,
             (_, Type::TypeVar(_)) => true,
+
+            (Type::Primitive(Primitive::Char), Type::Primitive(Primitive::Int))
+            | (Type::Primitive(Primitive::Int), Type::Primitive(Primitive::Char)) => true,
             (Type::Param(a), Type::Param(b)) => a == b,
             (Type::Primitive(a), Type::Primitive(b)) => a == b,
             (Type::Pointer(inner), Type::Primitive(Primitive::String))

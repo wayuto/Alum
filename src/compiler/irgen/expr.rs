@@ -227,6 +227,19 @@ impl IRGen {
                 });
                 Ok(res_tmp)
             }
+            Expr::Char(c, _) => {
+                let ir_type = IRType::Int;
+                let ir_const = IRConst::Int(c as i64);
+                let res_tmp = ctx.new_tmp(ir_type);
+                let const_idx = self.get_const_index(ir_const);
+                ctx.instructions.push(Instruction {
+                    op: Op::Move,
+                    dst: Some(res_tmp.clone()),
+                    src1: Some(Operand::ConstIdx(const_idx)),
+                    src2: None,
+                });
+                Ok(res_tmp)
+            }
             Expr::Float(f, _) => {
                 let ir_type = IRType::Float;
                 let ir_const = IRConst::Float(OrderedFloat(f));

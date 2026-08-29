@@ -359,6 +359,7 @@ fn rename_expr(e: &mut Expr, map: &HashMap<String, String>, locals: &mut Vec<Str
         }
         Expr::Int(_, _)
         | Expr::Float(_, _)
+        | Expr::Char(_, _)
         | Expr::Bool(_, _)
         | Expr::String(_, _)
         | Expr::Nil(_)

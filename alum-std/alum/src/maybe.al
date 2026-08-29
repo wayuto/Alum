@@ -8,10 +8,10 @@ struct(pub) Maybe<T> {
     value: T
 }
 
-fun(pub, pure) is_some<T>(m: Maybe<T>): int {
+fun(pub, pure) is_some<T>(m: Maybe<T>): bool {
     if m.tag == Just {
-        return 1
+        return true
     }
-    return 0
+    return false
 }
 

@@ -170,6 +170,7 @@ impl Context {
         match typ {
             HighType::Primitive(p) => match p {
                 Primitive::Int => IRType::Int,
+                Primitive::Char => IRType::Int,
                 Primitive::Float => IRType::Float,
                 Primitive::String => IRType::String,
                 Primitive::Boolean => IRType::Bool,

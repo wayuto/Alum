@@ -12,7 +12,13 @@ impl IRGen {
     ) -> Result<Operand, CodeGenError> {
         let target = self.compile_expr(*target, ctx)?;
         let end_label = ctx.new_label("end_match");
-        let res_tmp = ctx.new_tmp(IRType::Void);
+
+        let res_ty = branches
+            .iter()
+            .find_map(|(_, _, b)| self.expr_high_type(b, ctx))
+            .map(|t| Context::type_to_ir_type(&t))
+            .unwrap_or(IRType::Void);
+        let res_tmp = ctx.new_tmp(res_ty);
 
         let cmp_op = if matches!(
             ctx.get_operand_type(&target, &self.constants)?,

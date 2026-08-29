@@ -105,7 +105,7 @@ impl<'a> VmSafety<'a> {
     pub(super) fn safe(&mut self, expr: &Expr) -> bool {
         use Expr::*;
         match expr {
-            Int(..) | Float(..) | Bool(..) | String(..) | Nil(_) | Var(..) | Continue(_)
+            Int(..) | Float(..) | Char(..) | Bool(..) | String(..) | Nil(_) | Var(..) | Continue(_)
             | TypeDef(_) | Struct(..) | Union(..) | Enum(..) | GlobalVar(..) | ExternVar(..)
             | FuncDecl(..) => true,
             Break(v, _) => v.as_ref().map(|v| self.safe(v)).unwrap_or(true),

@@ -85,7 +85,7 @@ fn classify(
 
     match expr {
         Var(name, _) if globals.contains(name) => Err(format!("read mutable global '{}'", name)),
-        Int(..) | Float(..) | Bool(..) | String(..) | Nil(_) | Var(..) | Continue(_)
+        Int(..) | Float(..) | Char(..) | Bool(..) | String(..) | Nil(_) | Var(..) | Continue(_)
         | TypeDef(_) | Struct(..) | Union(..) | Enum(..) => Ok(()),
         Break(v, _) => {
             if let Some(v) = v {

@@ -9,6 +9,7 @@ pub struct Program {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Primitive {
     Int,
+    Char,
     Float,
     String,
     Boolean,
@@ -55,7 +56,10 @@ impl Type {
     pub fn is_numeric(&self) -> bool {
         matches!(
             self,
-            Type::Primitive(Primitive::Int) | Type::Primitive(Primitive::Float) | Type::TypeVar(_)
+            Type::Primitive(Primitive::Int)
+                | Type::Primitive(Primitive::Char)
+                | Type::Primitive(Primitive::Float)
+                | Type::TypeVar(_)
         )
     }
 
@@ -84,6 +88,7 @@ impl Type {
         match self {
             Type::Primitive(p) => match p {
                 Primitive::Int => "int".to_string(),
+                Primitive::Char => "char".to_string(),
                 Primitive::Float => "float".to_string(),
                 Primitive::String => "str".to_string(),
                 Primitive::Boolean => "bool".to_string(),
@@ -115,6 +120,7 @@ impl fmt::Display for Type {
         match self {
             Type::Primitive(p) => match p {
                 Primitive::Int => write!(f, "int"),
+                Primitive::Char => write!(f, "char"),
                 Primitive::Float => write!(f, "float"),
                 Primitive::String => write!(f, "string"),
                 Primitive::Boolean => write!(f, "bool"),
@@ -153,6 +159,7 @@ impl Expr {
     pub fn span(&self) -> Span {
         match self {
             Expr::Int(_, s)
+            | Expr::Char(_, s)
             | Expr::Float(_, s)
             | Expr::Bool(_, s)
             | Expr::String(_, s)
@@ -252,6 +259,7 @@ pub struct FuncAttrs {
 #[derive(Debug, Clone)]
 pub enum Expr {
     Int(isize, Span),
+    Char(u8, Span),
     Float(f64, Span),
     Bool(bool, Span),
     String(String, Span),

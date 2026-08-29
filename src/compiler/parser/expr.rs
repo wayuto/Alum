@@ -949,6 +949,7 @@ impl<'a> Parser<'a> {
             self.next()?;
             let right = self.additive()?;
             let span = left.span();
+
             return Ok(Expr::Range(Box::new(left), Box::new(right), span));
         }
 
@@ -1044,6 +1045,10 @@ impl<'a> Parser<'a> {
                 Ok((Token::INT(n), span)) => {
                     self.next()?;
                     return Ok(Expr::Int(n, span));
+                }
+                Ok((Token::CHAR(c), span)) => {
+                    self.next()?;
+                    return Ok(Expr::Char(c, span));
                 }
                 Ok((Token::FLOAT(f), span)) => {
                     self.next()?;

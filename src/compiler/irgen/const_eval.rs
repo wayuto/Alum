@@ -249,7 +249,7 @@ impl IRGen {
     fn expr_has_var(&self, expr: &Expr) -> bool {
         use Expr::*;
         match expr {
-            Int(..) | Float(..) | Bool(..) | String(..) | Nil(_) | Continue(_) | TypeDef(_)
+            Int(..) | Float(..) | Char(..) | Bool(..) | String(..) | Nil(_) | Continue(_) | TypeDef(_)
             | Struct(..) | Union(..) | Enum(..) => false,
             Break(v, _) => v.as_ref().map(|v| self.expr_has_var(v)).unwrap_or(false),
             Var(..) => true,
@@ -387,7 +387,7 @@ fn order_vm_functions(selected: &mut Vec<(String, Expr)>) -> Vec<Expr> {
 fn collect_var_refs(expr: &Expr, out: &mut BTreeSet<String>) {
     use Expr::*;
     match expr {
-        Int(..) | Float(..) | Bool(..) | String(..) | Nil(_) | Continue(_) | TypeDef(_)
+        Int(..) | Float(..) | Char(..) | Bool(..) | String(..) | Nil(_) | Continue(_) | TypeDef(_)
         | Struct(..) | Union(..) | Enum(..) | GlobalVar(..) | ExternVar(..) => {}
         Break(v, _) => {
             if let Some(v) = v {

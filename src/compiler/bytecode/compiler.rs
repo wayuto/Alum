@@ -115,6 +115,7 @@ fn has_break_value(expr: &Expr) -> bool {
         | Expr::ShrAssign(_, e, _) => has_break_value(e),
         Expr::Inc(..)
         | Expr::Dec(..)
+        | Expr::Char(..)
         | Expr::Int(..)
         | Expr::Float(..)
         | Expr::Bool(..)
@@ -336,6 +337,10 @@ impl Compiler {
         match expr {
             Expr::Int(n, _) => {
                 let idx = self.add_const(Value::Int(*n as i64));
+                self.emit(Op::LOADCONST, &[idx]);
+            }
+            Expr::Char(c, _) => {
+                let idx = self.add_const(Value::Int(*c as i64));
                 self.emit(Op::LOADCONST, &[idx]);
             }
             Expr::Float(f, _) => {

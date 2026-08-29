@@ -176,6 +176,7 @@ impl TypeChecker {
         let span = expr.span();
         match expr {
             Expr::Int(_, _) => Ok(Type::Primitive(Primitive::Int)),
+            Expr::Char(_, _) => Ok(Type::Primitive(Primitive::Char)),
             Expr::Float(_, _) => Ok(Type::Primitive(Primitive::Float)),
             Expr::Bool(_, _) => Ok(Type::Primitive(Primitive::Boolean)),
             Expr::String(_, _) => Ok(Type::Primitive(Primitive::String)),
@@ -1136,9 +1137,7 @@ impl TypeChecker {
 
                 match array_type {
                     Type::Array(inner) => Ok(*inner),
-                    
-                    Type::Primitive(Primitive::String) => Ok(Type::Primitive(Primitive::Int)),
-
+                    Type::Primitive(Primitive::String) => Ok(Type::Primitive(Primitive::Char)),
                     Type::Pointer(inner)
                         if matches!(inner.as_ref(), Type::Primitive(Primitive::Void)) =>
                     {
@@ -1196,9 +1195,10 @@ impl TypeChecker {
                             }
                         }
                         Type::Primitive(Primitive::String) => {
-                            
-                            let byte_store =
-                                matches!(value_type, Type::Primitive(Primitive::Int));
+                            let byte_store = matches!(
+                                value_type,
+                                Type::Primitive(Primitive::Int) | Type::Primitive(Primitive::Char)
+                            );
                             if !byte_store
                                 && !self.types_compatible(
                                     &Type::Primitive(Primitive::String),
@@ -1317,7 +1317,12 @@ impl TypeChecker {
                     });
                 }
 
-                Ok(Type::Array(Box::new(Type::Primitive(Primitive::Int))))
+                let elem = if matches!(start_type, Type::Primitive(Primitive::Char)) {
+                    Type::Primitive(Primitive::Char)
+                } else {
+                    Type::Primitive(Primitive::Int)
+                };
+                Ok(Type::Array(Box::new(elem)))
             }
             Expr::FuncDecl(name, attrs, type_params, params, ret_type, body, _) => {
                 if attrs.is_external {
@@ -1439,10 +1444,14 @@ impl TypeChecker {
                                 span: *rspan,
                             });
                         }
-                        if self.resolve_type(&target_type) != Type::Primitive(Primitive::Int) {
+                        let resolved_target = self.resolve_type(&target_type);
+                        if !matches!(
+                            resolved_target,
+                            Type::Primitive(Primitive::Int) | Type::Primitive(Primitive::Char)
+                        ) {
                             return Err(CheckerError::TypeMismatch {
-                                expected: target_type.clone(),
-                                found: Type::Primitive(Primitive::Int),
+                                expected: Type::Primitive(Primitive::Int),
+                                found: resolved_target,
                                 context: "range pattern".to_string(),
                                 span: *rspan,
                             });
@@ -1457,7 +1466,8 @@ impl TypeChecker {
                     ret_types.push(self.check_expr(d)?)
                 }
                 for case_type in case_types {
-                    if case_type != target_type {
+                    let both_numeric = case_type.is_numeric() && target_type.is_numeric();
+                    if case_type != target_type && !both_numeric {
                         return Err(CheckerError::TypeMismatch {
                             expected: target_type,
                             found: case_type,
@@ -1796,6 +1806,13 @@ impl TypeChecker {
                     | (Type::Primitive(Primitive::Boolean), Type::Primitive(Primitive::Boolean))
                     | (_, Type::Primitive(Primitive::Void)) => Ok(resolved_target),
                     (Type::Primitive(Primitive::Void), _) => Ok(resolved_target),
+                    (Type::Primitive(Primitive::Char), Type::Primitive(Primitive::Int))
+                    | (Type::Primitive(Primitive::Int), Type::Primitive(Primitive::Char))
+                    | (Type::Primitive(Primitive::Char), Type::Primitive(Primitive::Char))
+                    | (Type::Primitive(Primitive::Char), Type::Primitive(Primitive::Float))
+                    | (Type::Primitive(Primitive::Float), Type::Primitive(Primitive::Char)) => {
+                        Ok(resolved_target)
+                    }
                     (Type::Pointer(_), Type::Pointer(_)) => Ok(resolved_target),
                     _ => Err(CheckerError::InvalidOperation {
                         op: "cast".to_string(),

@@ -5,16 +5,16 @@ An Alum build tool
 
 ### Dependencies
 
-| Dependency    | Version   |
-| ------------- | --------- |
-| Rust && Cargo | >= 1.93.0 |
-| clap          | >= 4.5.54 |
+| Dependency    | Version    |
+| ------------- | ---------- |
+| Rust && Cargo | >= 1.93.0  |
+| clap          | >= 4.5.54  |
 | serde         | >= 1.0.228 |
-| toml          | >= 0.9.11 |
-| walkdir       | >= 2.5.0  |
-| git2          | >= 0.20.3 |
-| ureq          | >= 2.9.6  |
-| zip           | >= 7.2.0  |
+| toml          | >= 0.9.11  |
+| walkdir       | >= 2.5.0   |
+| git2          | >= 0.20.3  |
+| ureq          | >= 2.9.6   |
+| zip           | >= 7.2.0   |
 
 ### Install from source
 ```bash
@@ -94,17 +94,18 @@ alc = "alc"
 
 ### Build
 
-| Field       | Type        | Optionality | Description                                |
-| ----------- | ----------- | ----------- | ------------------------------------------ |
-| linker      | String      | required    | linking `target/objects/*.o` to executable |
-| cc          | String      | optional    | C compiler (for C/Alum mixed projects)     |
-| alc         | String      | optional    | Alum compiler                              |
-| cflags      | String      | optional    | compilation parameters for C compiler      |
-| alflags     | String      | optional    | compilation parameters for Alum compiler   |
-| lnflags     | String      | optional    | compilation parameters for linker          |
-| includes    | Vec<String> | optional    | add `-I./path/to/include` when compiling   |
-| nostdlib    | bool        | optional    | don't link with Alum standard library      |
-| library_type| String      | optional    | library type: "static", "a", "shared", "so"|
+| Field        | Type        | Optionality | Description                                 |
+| ------------ | ----------- | ----------- | ------------------------------------------- |
+| main_only    | bool        | optional    | only compile `main.al`                      |
+| linker       | String      | required    | linking `target/objects/*.o` to executable  |
+| cc           | String      | optional    | C compiler (for C/Alum mixed projects)      |
+| alc          | String      | optional    | Alum compiler                               |
+| cflags       | String      | optional    | compilation parameters for C compiler       |
+| alflags      | String      | optional    | compilation parameters for Alum compiler    |
+| lnflags      | String      | optional    | compilation parameters for linker           |
+| includes     | Vec<String> | optional    | add `-I./path/to/include` when compiling    |
+| nostdlib     | bool        | optional    | don't link with Alum standard library       |
+| library_type | String      | optional    | library type: "static", "a", "shared", "so" |
 
 ### Library Types
 
@@ -297,11 +298,11 @@ $ almk run
 
 **`[native]` field reference:**
 
-| Field    | Type          | Optionality | Default          | Description                                          |
-| -------- | ------------- | ----------- | ---------------- | ---------------------------------------------------- |
-| shared   | bool          | optional    | `true`           | `true` = shared `.so`, `false` = static `.a`         |
-| name     | String        | optional    | `<package>_native` | output library name                                |
-| sources  | Vec<String>   | optional    | —                | C files/globs compiled into the native library      |
+| Field   | Type        | Optionality | Default            | Description                                    |
+| ------- | ----------- | ----------- | ------------------ | ---------------------------------------------- |
+| shared  | bool        | optional    | `true`             | `true` = shared `.so`, `false` = static `.a`   |
+| name    | String      | optional    | `<package>_native` | output library name                            |
+| sources | Vec<String> | optional    | —                  | C files/globs compiled into the native library |
 
 ### Dependencies
 ```toml

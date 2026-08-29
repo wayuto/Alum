@@ -76,6 +76,21 @@ impl fmt::Display for Reg {
 }
 
 impl Reg {
+    pub fn is_caller_saved_gp(self) -> bool {
+        matches!(
+            self,
+            Reg::Rax
+                | Reg::Rcx
+                | Reg::Rdx
+                | Reg::Rsi
+                | Reg::Rdi
+                | Reg::R8
+                | Reg::R9
+                | Reg::R10
+                | Reg::R11
+        )
+    }
+
     pub fn is_xmm(self) -> bool {
         matches!(
             self,

@@ -411,6 +411,7 @@ impl Optimizer {
         match expr {
             Expr::Int(_, _)
             | Expr::Float(_, _)
+            | Expr::Char(_, _)
             | Expr::Bool(_, _)
             | Expr::String(_, _)
             | Expr::Nil(_)

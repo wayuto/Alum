@@ -181,6 +181,9 @@ impl AsmCodeGen {
         ] {
             self.invalidate_cached_reg(*reg);
         }
+
+        self.alloc_regs
+            .retain(|_, reg| reg.is_xmm() || !reg.is_caller_saved_gp());
     }
 
     pub(super) fn invalidate_caller_saved_xmm(&mut self) {
@@ -232,6 +235,10 @@ impl AsmCodeGen {
                 self.push_text(mov(Operand::Reg(alloc_reg), Operand::Reg(reg)));
             }
             self.regs.insert(alloc_reg, dst.clone());
+
+            if alloc_reg.is_caller_saved_gp() && self.has_slot(dst) {
+                self.push_text(mov(m_rbp(self.get_offset(dst)?), Operand::Reg(reg)));
+            }
             return Ok(());
         }
         self.invalidate_cached_operand(dst, Some(reg));
@@ -309,6 +316,18 @@ impl AsmCodeGen {
             self.push_data(Asm::Label(lbl.clone()));
             self.push_data(Asm::Dq(vec![f.into_inner().to_bits()]));
             lbl
+        }
+    }
+
+    pub(super) fn has_slot(&self, op: &IROperand) -> bool {
+        let k = op.key();
+        if self.spill_vars.contains_key(&k) {
+            return true;
+        }
+        match op {
+            IROperand::Var(name) => self.vars.contains_key(name),
+            IROperand::Temp(id, _) => self.vars.contains_key(&format!("_tmp_{}", id)),
+            _ => false,
         }
     }
 

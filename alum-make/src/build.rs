@@ -187,6 +187,7 @@ fn compile_alum(
     compiler: String,
     flags: Option<String>,
     includes: Option<Vec<String>>,
+    main_only: Option<bool>,
 ) -> Result<(), Box<dyn Error>> {
     let source_files = get_files("./src", Target::ALSRC);
     let mut extra_args: Vec<String> = Vec::new();
@@ -202,23 +203,46 @@ fn compile_alum(
         return Ok(());
     }
 
-    for file in source_files {
-        let rel = file.strip_prefix("./").unwrap_or(file.as_path());
-        let output = PathBuf::from("target/objects/alum").join(rel.with_extension("o"));
-        fs::create_dir_all(output.parent().unwrap())?;
+    match main_only {
+        Some(false) => {
+            for file in source_files {
+                let rel = file.strip_prefix("./").unwrap_or(file.as_path());
+                let output = PathBuf::from("target/objects/alum").join(rel.with_extension("o"));
+                fs::create_dir_all(output.parent().unwrap())?;
 
-        let mut args = extra_args.clone();
-        args.push(file.to_string_lossy().into_owned());
-        args.push("-c".to_owned());
-        args.push("-o".to_owned());
-        args.push(output.to_string_lossy().into_owned());
-        run_command(
-            log,
-            &compiler,
-            &args,
-            &format!("Failed to compile Alum file: {:?}", file),
-        )?;
+                let mut args = extra_args.clone();
+                args.push(file.to_string_lossy().into_owned());
+                args.push("-c".to_owned());
+                args.push("-o".to_owned());
+                args.push(output.to_string_lossy().into_owned());
+                run_command(
+                    log,
+                    &compiler,
+                    &args,
+                    &format!("Failed to compile Alum file: {:?}", file),
+                )?;
+            }
+        }
+        _ => {
+            let file = PathBuf::from("./src/main.al");
+            let rel = file.strip_prefix("./").unwrap_or(file.as_path());
+            let output = PathBuf::from("target/objects/alum").join(rel.with_extension("o"));
+            fs::create_dir_all(output.parent().unwrap())?;
+
+            let mut args = extra_args.clone();
+            args.push(file.to_string_lossy().into_owned());
+            args.push("-c".to_owned());
+            args.push("-o".to_owned());
+            args.push(output.to_string_lossy().into_owned());
+            run_command(
+                log,
+                &compiler,
+                &args,
+                &format!("Failed to compile Alum file: {:?}", file),
+            )?;
+        }
     }
+
     Ok(())
 }
 
@@ -381,7 +405,13 @@ pub fn build(log: bool) -> Result<(), Box<dyn Error>> {
                 None => alflags = Some(extra.trim_start().to_owned()),
             }
         }
-        compile_alum(log, alc.clone(), alflags, config.build.includes.clone())?;
+        compile_alum(
+            log,
+            alc.clone(),
+            alflags,
+            config.build.includes.clone(),
+            config.build.main_only,
+        )?;
     }
 
     let obj_files = get_files("target/objects", Target::OBJ);

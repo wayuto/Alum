@@ -63,7 +63,11 @@ impl IRGen {
             },
             Expr::MemberAccess(obj, field_name, _) => {
                 let obj_ty = self.expr_high_type(obj, ctx)?;
-                self.member_field_type(&obj_ty, field_name)
+
+                match self.member_field_type(&obj_ty, field_name)? {
+                    Type::Function(_, ret) => Some(*ret),
+                    other => Some(other),
+                }
             }
 
             Expr::Call(callee, _, args, _)
@@ -219,7 +223,11 @@ impl IRGen {
             }
             Expr::MemberAccess(obj, field_name, _) => {
                 let obj_ty = self.expr_high_type(obj, ctx)?;
-                self.member_field_type(&obj_ty, field_name)
+
+                match self.member_field_type(&obj_ty, field_name)? {
+                    Type::Function(_, ret) => Some(*ret),
+                    other => Some(other),
+                }
             }
             _ => None,
         }
@@ -229,9 +237,9 @@ impl IRGen {
         if let Some(ty) = self.expr_high_type(arr, ctx) {
             match ty {
                 Type::Array(elem) => return (Some(*elem), false),
-                
+
                 Type::Primitive(Primitive::String) => {
-                    return (Some(Type::Primitive(Primitive::Int)), true);
+                    return (Some(Type::Primitive(Primitive::Char)), true);
                 }
                 Type::Pointer(inner) => {
                     let pointee = *inner;
@@ -245,7 +253,7 @@ impl IRGen {
             Expr::Var(name, _) => match ctx.get_var_high_type(name) {
                 Some(Type::Array(elem)) => return (Some(elem.as_ref().clone()), false),
                 Some(Type::Primitive(Primitive::String)) => {
-                    return (Some(Type::Primitive(Primitive::Int)), true);
+                    return (Some(Type::Primitive(Primitive::Char)), true);
                 }
                 Some(Type::Pointer(inner)) => {
                     return (Some(*inner.clone()), Self::ptr_scale(inner) == 1);

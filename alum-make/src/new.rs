@@ -20,6 +20,7 @@ pub fn new(
             language: language.clone(),
         },
         build: Build {
+            main_only: None,
             linker,
             cc,
             cflags: None,

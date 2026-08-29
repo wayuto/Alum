@@ -117,6 +117,7 @@ impl<'a> Lexer<'a> {
             Some('n') => out.push('\n'),
             Some('t') => out.push('\t'),
             Some('r') => out.push('\r'),
+            Some('0') => out.push('\0'),
             Some(c) => out.push(c),
             None => {}
         }
@@ -375,7 +376,12 @@ impl<'a> Lexer<'a> {
             }
             '\'' => {
                 self.bump();
-                Token::STRING(self.lex_string('\'')?)
+                let s = self.lex_string('\'')?;
+                if s.chars().count() == 1 {
+                    Token::CHAR(s.chars().next().unwrap() as u8)
+                } else {
+                    Token::STRING(s)
+                }
             }
             '"' => {
                 self.bump();
@@ -448,6 +454,7 @@ impl<'a> Lexer<'a> {
             "using" => Token::USING,
             "as" => Token::AS,
             "int" => Token::TYPE(ident),
+            "char" => Token::TYPE(ident),
             "float" => Token::TYPE(ident),
             "bool" => Token::TYPE(ident),
             "string" => Token::TYPE(ident),

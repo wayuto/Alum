@@ -10,6 +10,7 @@ pub enum Token {
     FLOAT(f64),
     BOOL(bool),
     STRING(String),
+    CHAR(u8),
     FSTRING(Vec<FstringSeg>),
     NIL,
     PLUS,

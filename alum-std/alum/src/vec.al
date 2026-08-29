@@ -15,7 +15,7 @@ struct(pub) Vec<T> {
     clear: void(*Vec<T>),
 }
 
-fun(pub) vec_new<T>(): Vec<T> {
+fun(pub) new<T>(): Vec<T> {
     return Vec<T> {
         data: [T; 0],
         len: 0,
@@ -31,7 +31,7 @@ fun(pub) vec_new<T>(): Vec<T> {
 				value: v.data[i]
 			}
 		},
-		push: \(v: *Vec<T>, elem: T): void {
+		push: \(v: *Vec<T>, elem: T) {
 			if v.len >= v.capacity {
 				var new_capacity: int = if v.capacity == 0 {
 					4
@@ -76,7 +76,7 @@ fun(pub) vec_new<T>(): Vec<T> {
 				value: elem
 			}
 		},
-		clear: \(v: *Vec<T>): void {
+		clear: \(v: *Vec<T>) {
 			var old: T[] = v.data
 			v.len = 0
 			v.capacity = 0

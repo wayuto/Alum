@@ -42,6 +42,7 @@ impl Expr {
         let indent_str = "  ".repeat(indent);
         match self {
             Expr::Int(n, _) => write!(f, "{}Int({})", indent_str, n),
+            Expr::Char(c, _) => write!(f, "{}Char('{}')", indent_str, *c as char),
             Expr::Float(n, _) => write!(f, "{}Float({})", indent_str, n),
             Expr::Bool(b, _) => write!(f, "{}Bool({})", indent_str, b),
             Expr::String(s, _) => write!(f, "{}String(\"{}\")", indent_str, s),
