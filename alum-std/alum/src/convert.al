@@ -2,7 +2,7 @@ import memory
 using memory::{malloc, free}
 
 fun(pub) itoa(n: int): string {
-    var buf: *void = malloc(32)
+    var buf: string = malloc(32)
     var num: int = n
     var idx: int = 0
     if num == 0 {
@@ -42,15 +42,14 @@ fun(pub) itoa(n: int): string {
 }
 
 fun(pub, pure) atoi(s: string): int {
-    var p: *void = s
     var i: int = 0
     while true {
-        var b: int = p[i]
-        if b != 32 && b != 9 && b != 10 && b != 13 break
+        var b: int = s[i]
+        if b != 32 && b != 9 && b != 10 && b != 13 break;
         i = i + 1
     }
     var sign: int = 1
-    var b: int = p[i]
+    var b: int = s[i]
     if b == 43 {
         i = i + 1
     } else {
@@ -61,7 +60,7 @@ fun(pub, pure) atoi(s: string): int {
     }
     var result: int = 0
     while true {
-        var d: int = p[i]
+        var d: int = s[i]
         if d < 48 || d > 57 break
         var dgt: int = d - 48
         

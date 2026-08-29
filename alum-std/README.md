@@ -78,20 +78,21 @@ fun(extern) dup3(int, int, int): int // dup2 with flags
 
 ### String Module (`string`)
 
-Provides string (byte array) operations. All functions are implemented in Alum;
-the comparison functions are `pure` and can participate in compile-time
-evaluation.
+Provides string (byte array) operations. The manipulation functions take raw
+`*void` pointers: string arguments pass implicitly, no move semantics, callers
+keep ownership. Comparison functions are `pure` and can participate in
+compile-time evaluation.
 
 | Signature | Description |
 | --- | --- |
-| `fun(pure) strlen(string): int` | String length |
-| `fun(pure) strcmp(string, string): int` | Lexicographic comparison |
-| `fun(pure) bcmp(string, string, int): int` | Byte comparison |
-| `fun(pure) memcmp(string, string, int): int` | Byte comparison (n bytes) |
-| `fun strcpy(string, string): string` | Copy string |
-| `fun strcat(string, string): string` | Concatenate strings |
-| `fun memcpy(string, string, int): string` | Copy n bytes |
-| `fun memset(string, int, int): string` | Fill n bytes with a value |
+| `fun(pure) strlen(*void): int` | String length |
+| `fun(pure) strcmp(*void, *void): int` | Lexicographic comparison |
+| `fun(pure) bcmp(*void, *void, int): int` | Byte comparison |
+| `fun(pure) memcmp(*void, *void, int): int` | Byte comparison (n bytes) |
+| `fun strcpy(*void, *void): *void` | Copy string |
+| `fun strcat(*void, *void): *void` | Concatenate strings |
+| `fun memcpy(*void, *void, int): *void` | Copy n bytes |
+| `fun memset(*void, int, int): *void` | Fill n bytes with a value |
 
 ### Math Module (`math`)
 
@@ -160,6 +161,8 @@ struct Timeval {
 fun(extern) nanosleep(*Timespec, *Timespec): int    // Sleep, rem may be nil
 fun(extern) clock_gettime(int, *Timespec): int      // Realtime(0)/monotonic(1) clock
 fun(extern) gettimeofday(*Timeval, *void): int      // Wall-clock time, tz may be nil
+
+fun sleep_ms(ms: int): int  // Sleep ms milliseconds (malloc'd Timespec + nanosleep)
 ```
 
 ### File System Module (`fs`)

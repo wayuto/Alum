@@ -20,7 +20,7 @@ fun main(): int {
 
     // String copy
     var copy: string = malloc(100)
-    copy = strcpy(copy, $hello)
+    strcpy(copy, $hello)
 
     println(f"Copy: {copy}")
 

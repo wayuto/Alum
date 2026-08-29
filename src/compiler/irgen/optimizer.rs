@@ -3,6 +3,9 @@ use ordered_float::OrderedFloat;
 use std::collections::{HashMap, HashSet};
 
 pub(crate) fn optimize(program: &mut IRProgram) {
+    if std::env::var_os("ALC_NO_OPT").is_some() {
+        return;
+    }
     let mut pool = ConstPool::new(&program.constants);
     for func in &mut program.functions {
         if func.is_external || func.instructions.is_empty() {

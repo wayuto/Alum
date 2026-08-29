@@ -60,7 +60,8 @@ impl IRGen {
                 let operand_type = ctx.get_operand_type(&operand, &self.constants)?;
                 let type_matches = operand_type == param.1
                     || (operand_type == IRType::Array && param.1 == IRType::Int)
-                    || (matches!(operand, Operand::Function(_)) && param.1 == IRType::Int);
+                    || (matches!(operand, Operand::Function(_)) && param.1 == IRType::Int)
+                    || (operand_type == IRType::String && param.1 == IRType::Int);
                 if !type_matches {
                     return Err(CodeGenError::TypeError {
                         message: format!(
@@ -69,8 +70,14 @@ impl IRGen {
                         ),
                     });
                 }
+
+                let raw_ptr_param = operand_type == IRType::String && param.1 == IRType::Int;
                 let operand = match self.expr_high_type(arg, ctx) {
-                    Some(hty) if self.is_resource_type(&hty) && !self.is_fresh_expr(arg) => {
+                    Some(hty)
+                        if self.is_resource_type(&hty)
+                            && !self.is_fresh_expr(arg)
+                            && !raw_ptr_param =>
+                    {
                         match arg {
                             Expr::Var(src, sp) if self.can_move_var(src, ctx) => {
                                 ctx.mark_moved(src, *sp);

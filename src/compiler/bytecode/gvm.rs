@@ -455,8 +455,7 @@ impl GVM {
                                 panic!("IndexError: String index out of bounds: {i}");
                             }
                             let byte = s.as_bytes()[*i as usize];
-                            self.stack
-                                .push(Value::Str(String::from_utf8_lossy(&[byte]).into_owned()));
+                            self.stack.push(Value::Int(byte as i64));
                         }
                         (Value::Void, _) | (_, Value::Void) => self.stack.push(Value::Void),
                         _ => panic!("TypeError: Wrong types for ARRAY_GET operation"),
@@ -479,6 +478,19 @@ impl GVM {
                                 self.slots.resize(index + 1, Value::Void);
                             }
                             self.slots[index] = Value::Array(a);
+                        }
+                        (Value::Str(s), Value::Int(i)) => {
+                            if *i < 0 || *i as usize >= s.len() {
+                                panic!("IndexError: String index out of bounds: {i}");
+                            }
+                            let byte: u8 = match &value {
+                                Value::Int(v) => *v as u8,
+                                Value::Str(sv) => sv.as_bytes().first().copied().unwrap_or(0),
+                                _ => panic!("TypeError: Wrong types for ARRAY_SET on string"),
+                            };
+                            let mut s = s.clone();
+                            s.replace_range(*i as usize..*i as usize + 1, &(byte as char).to_string());
+                            self.slots[index] = Value::Str(s);
                         }
                         (Value::Void, _) | (_, Value::Void) => {}
                         _ => panic!("TypeError: Wrong types for ARRAY_SET operation"),

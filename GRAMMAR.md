@@ -35,8 +35,8 @@ keyword      = "fun" | "var" | "cst" | "struct" | "union" | "enum" | "typedef"
 (* "pub" and "pure" are ordinary identifiers used contextually, not keywords.
    Newlines carry no syntactic meaning; ";" inside blocks either discards
    the preceding expression's value or (after return/break/continue and
-   declarations) is a tolerated separator. A ";" at top level is a syntax
-   error.
+   non-value declarations) is a tolerated separator. At top level ";" is
+   always a tolerated separator.
    "&" and "|" are bitwise operators (precedence: & > ^ > |); "&&" and "||"
    are the short-circuit logical operators. *)
 
@@ -101,7 +101,8 @@ postfix      = primary , { post_op } ;
 post_op      = "(" , [ args ] , ")"              (* call *)
              | "[" , expr , "]"                  (* index *)
              | "." , identifier                  (* member access *)
-             | "@" , type                        (* cast *)
+             | "@" , type                        (* cast; pointer-to-pointer
+                                                   casts reinterpret the address *)
              | "++" | "--" ;                     (* post-increment/decrement *)
 args         = expr , { "," , expr } ;
 (* trailing commas are tolerated in call/array/param/field/enum lists,
@@ -121,8 +122,10 @@ primary      = int_lit | float_lit | bool_lit | nil_lit | string_lit | fstring_l
 
 block        = "{" , [ block_item , { [ ";" ] , block_item } ] , "}" ;
 (* an expression followed by ";" discards its value (desugars to "@void"):
-   `println(x);` evaluates and drops. After return/break/continue and after
-   declarations, ";" remains a tolerated separator. *)
+   `println(x);` evaluates and drops, and `var i = 1;` is the nil-valued
+   statement `var i = 1` @void. After return/break/continue and after
+   non-value declarations (fun/struct/union/enum/typedef/extern/cst/global
+   var), ";" remains a tolerated separator. *)
 
 lambda       = "\" , "(" , params , ")" , [ ":" , type ] , expr ;
              (* omitted return type defaults to void *)
@@ -152,6 +155,9 @@ match_arm    = expr , [ "if" , expr ] , ":" , expr ;
 (* an optional guard after the pattern must be bool and may only reference
    variables from the enclosing scope (patterns do not bind);
    a failed guard falls through to the next arm, not to the default *)
+(* "break" with a value: `break x` takes x as the loop's value. Without a
+   value write `break;` — a bare `break` followed by an identifier would
+   otherwise parse the next statement as the break value expression. *)
 (* a pattern of the form n..m is a range pattern: it matches when
    n <= target < m (same exclusive upper bound as for-in ranges);
    the target must be int *)

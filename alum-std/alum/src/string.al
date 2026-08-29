@@ -1,53 +1,49 @@
-fun(pub, pure) strlen(s: string): int {
-    var p: *void = s
+// Byte/string operations. Manipulation functions take raw pointers (*void):
+// strings pass implicitly, no move semantics, callers keep ownership.
+
+fun(pub, pure) strlen(s: *void): int {
     var i: int = 0
     while true {
-        var b: int = p[i]
-        if b == 0 break
+        var b: int = s[i]
+        if b == 0 break;
         i = i + 1
     }
     return i
 }
 
-fun(pub) strcpy(dst: string, src: string): string {
-    var pd: *void = dst
-    var ps: *void = src
+fun(pub) strcpy(dst: *void, src: *void): *void {
     var i: int = 0
     while true {
-        var b: int = ps[i]
-        pd[i] = ps[i]
-        if b == 0 break
+        var b: int = src[i]
+        dst[i] = b
+        if b == 0 break;
         i = i + 1
     }
     return dst
 }
 
-fun(pub) strcat(dst: string, src: string): string {
-    var pd: *void = dst
-    var ps: *void = src
+fun(pub) strcat(dst: *void, src: *void): *void {
     var i: int = 0
     while true {
-        var b: int = pd[i]
-        if b == 0 break
+        var b: int = dst[i]
+        if b == 0 break;
         i = i + 1
     }
     var j: int = 0
     while true {
-        var b: int = ps[j]
-        pd[i + j] = ps[j]
-        if b == 0 break
+        var b: int = src[j]
+        dst[i + j] = b
+        if b == 0 break;
         j = j + 1
     }
     return dst
 }
 
-fun(pub, pure) strcmp(s1: string, s2: string): int {
-    var p1: *void = s1
-    var p2: *void = s2
+fun(pub, pure) strcmp(s1: *void, s2: *void): int {
     var i: int = 0
     while true {
-        var a: int = p1[i]
-        var b: int = p2[i]
+        var a: int = s1[i]
+        var b: int = s2[i]
         if a != b {
             return a - b
         }
@@ -59,36 +55,29 @@ fun(pub, pure) strcmp(s1: string, s2: string): int {
     return 0
 }
 
-fun(pub) memcpy(dst: string, src: string, n: int): string {
-    var pd: *void = dst
-    var ps: *void = src
+fun(pub) memcpy(dst: *void, src: *void, n: int): *void {
     var i: int = 0
     while i < n {
-        pd[i] = ps[i]
+        dst[i] = src[i]
         i = i + 1
     }
     return dst
 }
 
-fun(pub) memset(s: string, c: int, n: int): string {
-    var p: *void = s
-    var arr: int[] = [c]
-    var pv: *void = arr
+fun(pub) memset(p: *void, c: int, n: int): *void {
     var i: int = 0
     while i < n {
-        p[i] = pv[8]
+        p[i] = c
         i = i + 1
     }
-    return s
+    return p
 }
 
-fun(pub, pure) bcmp(s1: string, s2: string, n: int): int {
-    var p1: *void = s1
-    var p2: *void = s2
+fun(pub, pure) bcmp(s1: *void, s2: *void, n: int): int {
     var i: int = 0
     while i < n {
-        var a: int = p1[i]
-        var b: int = p2[i]
+        var a: int = s1[i]
+        var b: int = s2[i]
         if a != b {
             return a - b
         }
@@ -97,6 +86,6 @@ fun(pub, pure) bcmp(s1: string, s2: string, n: int): int {
     return 0
 }
 
-fun(pub, pure) memcmp(s1: string, s2: string, n: int): int {
+fun(pub, pure) memcmp(s1: *void, s2: *void, n: int): int {
     return bcmp(s1, s2, n)
 }

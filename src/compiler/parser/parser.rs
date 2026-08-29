@@ -183,6 +183,9 @@ impl<'a> Parser<'a> {
                         self.synchronize();
                     }
                 }
+                Some(Ok((Token::SEMICOLON, _))) => {
+                    let _ = self.next();
+                }
                 Some(Ok(_)) => match self.expr() {
                     Ok(expr) => {
                         self.record_decl(&expr);
@@ -382,13 +385,12 @@ impl<'a> Parser<'a> {
                     let e = self.expr()?;
                     if matches!(self.peek(), Some(Ok((Token::SEMICOLON, _)))) {
                         self.next()?;
+
                         if !matches!(
                             e,
                             Expr::Return(..)
                                 | Expr::Break(..)
                                 | Expr::Continue(_)
-                                | Expr::VarDecl(..)
-                                | Expr::ConstDecl(..)
                                 | Expr::FuncDecl(..)
                                 | Expr::Struct(..)
                                 | Expr::Union(..)

@@ -336,7 +336,9 @@ impl IRGen {
                     }
                 }
                 let var_typ = ctx.get_var_type(&name)?;
-                if typ != var_typ {
+
+                let typ_ok = typ == var_typ || (var_typ == IRType::String && typ == IRType::Int);
+                if !typ_ok {
                     return Err(CodeGenError::TypeError {
                         message: format!("unexpected type: {:?}", typ),
                     });
@@ -1259,6 +1261,9 @@ impl IRGen {
                         });
                         Ok(res_tmp)
                     }
+
+                    Type::Pointer(_) => Ok(src),
+
                     _ => Err(CodeGenError::UnsupportedOperation {
                         message: format!("cast to {:?} is not supported", target_ty),
                     }),

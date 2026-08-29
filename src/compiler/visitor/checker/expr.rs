@@ -1136,7 +1136,8 @@ impl TypeChecker {
 
                 match array_type {
                     Type::Array(inner) => Ok(*inner),
-                    Type::Primitive(Primitive::String) => Ok(Type::Primitive(Primitive::String)),
+                    
+                    Type::Primitive(Primitive::String) => Ok(Type::Primitive(Primitive::Int)),
 
                     Type::Pointer(inner)
                         if matches!(inner.as_ref(), Type::Primitive(Primitive::Void)) =>
@@ -1195,8 +1196,14 @@ impl TypeChecker {
                             }
                         }
                         Type::Primitive(Primitive::String) => {
-                            if !self
-                                .types_compatible(&Type::Primitive(Primitive::String), &value_type)
+                            
+                            let byte_store =
+                                matches!(value_type, Type::Primitive(Primitive::Int));
+                            if !byte_store
+                                && !self.types_compatible(
+                                    &Type::Primitive(Primitive::String),
+                                    &value_type,
+                                )
                             {
                                 return Err(CheckerError::TypeMismatch {
                                     expected: Type::Primitive(Primitive::String),
@@ -1348,7 +1355,7 @@ impl TypeChecker {
                         self.pop_scope();
                         return Err(CheckerError::TypeMismatch {
                             expected: ret_var.clone(),
-                            found: body_type.clone(),
+                            found: resolved_body.clone(),
                             context: "function return type".to_string(),
                             span,
                         });
@@ -1789,6 +1796,7 @@ impl TypeChecker {
                     | (Type::Primitive(Primitive::Boolean), Type::Primitive(Primitive::Boolean))
                     | (_, Type::Primitive(Primitive::Void)) => Ok(resolved_target),
                     (Type::Primitive(Primitive::Void), _) => Ok(resolved_target),
+                    (Type::Pointer(_), Type::Pointer(_)) => Ok(resolved_target),
                     _ => Err(CheckerError::InvalidOperation {
                         op: "cast".to_string(),
                         type_name: format!("{:?} to {:?}", src_type, resolved_target),

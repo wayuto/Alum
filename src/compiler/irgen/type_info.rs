@@ -229,8 +229,9 @@ impl IRGen {
         if let Some(ty) = self.expr_high_type(arr, ctx) {
             match ty {
                 Type::Array(elem) => return (Some(*elem), false),
+                
                 Type::Primitive(Primitive::String) => {
-                    return (Some(Type::Primitive(Primitive::String)), true);
+                    return (Some(Type::Primitive(Primitive::Int)), true);
                 }
                 Type::Pointer(inner) => {
                     let pointee = *inner;
@@ -244,7 +245,7 @@ impl IRGen {
             Expr::Var(name, _) => match ctx.get_var_high_type(name) {
                 Some(Type::Array(elem)) => return (Some(elem.as_ref().clone()), false),
                 Some(Type::Primitive(Primitive::String)) => {
-                    return (Some(Type::Primitive(Primitive::String)), true);
+                    return (Some(Type::Primitive(Primitive::Int)), true);
                 }
                 Some(Type::Pointer(inner)) => {
                     return (Some(*inner.clone()), Self::ptr_scale(inner) == 1);

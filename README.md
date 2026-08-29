@@ -31,7 +31,7 @@ The official tutorial series (中文教程) walks through the language from scra
 
 - **Everything is an Expression (EiaE)** — there are no statements: blocks, `if`/`else`, `match`, loops and function bodies are all expressions, and the last expression is the result
 - **Strict Static Typing** — compile-time checking with full local inference; `int` and `float` never mix implicitly — conversions go through explicit `@` casts
-- **Explicit Casts (`@T`)** — `int`↔`float` (truncating), `int`↔`bool` (normalized to 0/1), anything → `void` (discard), `void` → any primitive (zero value)
+- **Explicit Casts (`@T`)** — `int`↔`float` (truncating), `int`↔`bool` (normalized to 0/1), anything → `void` (discard), `void` → any primitive (zero value), pointer ↔ pointer (bitwise reinterpretation: `malloc(n)@*Point`)
 - **Generics** — monomorphic instantiation with type inference at call sites
 - **Tagged `Result` / `Maybe`** — error handling and null-safety built from `struct` + `union` + `enum`
 
