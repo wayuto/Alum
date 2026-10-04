@@ -91,7 +91,12 @@ impl IRGen {
 
         for (field_name, _) in &fields {
             if let Some((_, field_expr)) = field_values.iter().find(|(n, _)| n == field_name) {
+                let copy_info = self.resource_copy_info(field_expr, ctx);
                 let val = self.compile_expr(field_expr.clone(), ctx)?;
+                let val = match copy_info {
+                    Some(ty) => self.copy_resource(ctx, val, &ty)?,
+                    None => val,
+                };
                 let offset_idx = self.get_const_index(IRConst::Int(0));
                 ctx.instructions.push(Instruction {
                     op: Op::StoreAt,
@@ -136,7 +141,7 @@ impl IRGen {
         ctx: &mut Context,
     ) -> Result<(Operand, Type), CodeGenError> {
         match expr {
-            Expr::Var(name, _) => {
+            Expr::Var { name, .. } => {
                 let hty = ctx
                     .get_var_high_type(name)
                     .ok_or_else(|| CodeGenError::TypeError {
@@ -146,7 +151,11 @@ impl IRGen {
                 let op = self.compile_expr(expr.clone(), ctx)?;
                 Ok((op, hty))
             }
-            Expr::MemberAccess(obj, field_name, _) => {
+            Expr::MemberAccess {
+                obj,
+                field: field_name,
+                ..
+            } => {
                 let (obj_addr, obj_type) = self.member_addr(obj, ctx)?;
                 let (offset, field_type) = self.member_offset_and_type(&obj_type, field_name)?;
                 let field_addr = if offset == 0 {

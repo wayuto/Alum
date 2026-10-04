@@ -10,10 +10,16 @@ impl IRGen {
     pub(super) fn store_global_vars(&mut self, body: &[Expr]) -> Result<(), CodeGenError> {
         for expr in body {
             match expr {
-                Expr::GlobalVar(name, is_pub, ty, init, _) => {
-                    let is_fn_binding = matches!(init.as_deref(), Some(Expr::FuncDecl(..)))
+                Expr::GlobalVar {
+                    name,
+                    is_pub,
+                    ty,
+                    value: init,
+                    ..
+                } => {
+                    let is_fn_binding = matches!(init.as_deref(), Some(Expr::FuncDecl { .. }))
                         || matches!(init.as_deref(),
-                            Some(Expr::Var(v, _)) if v.starts_with("_lambda_"));
+                            Some(Expr::Var { name: v, .. }) if v.starts_with("_lambda_"));
                     if is_fn_binding {
                         continue;
                     }
@@ -64,7 +70,13 @@ impl IRGen {
                         is_pub: *is_pub,
                     });
                 }
-                Expr::ConstDecl(name, _, _, is_pub, _) => {
+                Expr::ConstDecl {
+                    name,
+                    ty: _,
+                    value: _,
+                    is_pub,
+                    ..
+                } => {
                     if *is_pub {
                         if let Some((cv, _)) = self.globals.get(name).cloned() {
                             if matches!(&cv, IRConst::Str(_) | IRConst::Array(_)) {
@@ -93,9 +105,9 @@ impl IRGen {
         let mut pending: Vec<(String, Expr)> = exprs
             .iter()
             .filter_map(|e| match e {
-                Expr::ConstDecl(name, _, value, _, _) => {
-                    Some((name.clone(), value.as_ref().clone()))
-                }
+                Expr::ConstDecl {
+                    name, ty: _, value, ..
+                } => Some((name.clone(), value.as_ref().clone())),
                 _ => None,
             })
             .collect();

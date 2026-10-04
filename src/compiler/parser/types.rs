@@ -77,7 +77,12 @@ impl<'a> Parser<'a> {
         if let Some(Ok((Token::STAR, _))) = self.peek() {
             self.next()?;
             let inner_type = self.parse_type()?;
-            return Ok(Type::Pointer(Box::new(inner_type)));
+            match inner_type {
+                Type::Function(params, ret) => {
+                    return Ok(Type::Function(params, Box::new(Type::Pointer(ret))));
+                }
+                other => return Ok(Type::Pointer(Box::new(other))),
+            }
         }
 
         let (first_token, span) = self.next()?;
@@ -104,6 +109,7 @@ impl<'a> Parser<'a> {
                 } else {
                     match t.as_str() {
                         "int" => Type::Primitive(Primitive::Int),
+                        "char" => Type::Primitive(Primitive::Char),
                         "float" => Type::Primitive(Primitive::Float),
                         "bool" => Type::Primitive(Primitive::Boolean),
                         "string" => Type::Primitive(Primitive::String),

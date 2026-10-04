@@ -22,16 +22,14 @@ pub(super) struct Context {
     pub loop_end_labels: Vec<String>,
     pub loop_inc_labels: Vec<String>,
     pub loop_scope_depths: Vec<usize>,
+    pub loop_results: Vec<Option<Operand>>,
     pub var_types: HashMap<String, Type>,
     pub array_lengths: HashMap<String, usize>,
     pub func_name: String,
     pub borrowed: HashSet<String>,
-
     pub moved: HashSet<String>,
-
     pub moved_at: HashMap<String, Span>,
     pub(super) var_slots: HashMap<String, Vec<String>>,
-
     pub(super) var_type_history: HashMap<String, Vec<Option<Type>>>,
     pub(super) array_len_history: HashMap<String, Vec<Option<usize>>>,
     pub(super) borrow_history: HashMap<String, Vec<bool>>,
@@ -48,6 +46,7 @@ impl Context {
             loop_end_labels: Vec::new(),
             loop_inc_labels: Vec::new(),
             loop_scope_depths: Vec::new(),
+            loop_results: Vec::new(),
             var_types: HashMap::new(),
             array_lengths: HashMap::new(),
             func_name,
@@ -171,6 +170,7 @@ impl Context {
         match typ {
             HighType::Primitive(p) => match p {
                 Primitive::Int => IRType::Int,
+                Primitive::Char => IRType::Int,
                 Primitive::Float => IRType::Float,
                 Primitive::String => IRType::String,
                 Primitive::Boolean => IRType::Bool,
@@ -217,15 +217,15 @@ impl Context {
                 message: format!("variable '{}' already declared in this scope.", name),
             });
         }
-        let slot = if self.var_slots.contains_key(&name) {
-            let depth = self.var_slots.get(&name).map(|v| v.len()).unwrap_or(0);
+        let depth = self.var_slots.get(&name).map_or(0, Vec::len);
+        let slot = if depth > 0 {
             format!("{}${}", name, depth)
         } else {
             name.clone()
         };
         self.var_slots
             .entry(name.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(slot.clone());
 
         self.var_type_history

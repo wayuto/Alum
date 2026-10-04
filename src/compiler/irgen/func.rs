@@ -110,16 +110,23 @@ impl IRGen {
         Ok(())
     }
 
+    pub(super) fn lookup_func(&self, name: &str) -> Option<&IRFunction> {
+        self.functions
+            .iter()
+            .rev()
+            .find(|f| f.name == *name || f.aliases.iter().any(|a| a == name))
+    }
+    pub(super) fn has_func(&self, name: &str) -> bool {
+        self.lookup_func(name).is_some()
+    }
+
     pub(super) fn find_func(&self, name: &str) -> Result<IRFunction, CodeGenError> {
-        for func in self.functions.iter().rev() {
-            if func.name == *name || func.aliases.iter().any(|a| a == name) {
-                return Ok(func.to_owned());
-            }
-        }
-        Err(CodeGenError::UndefinedFunction {
-            name: name.to_string(),
-            span: Span::new(0, 0),
-        })
+        self.lookup_func(name)
+            .cloned()
+            .ok_or_else(|| CodeGenError::UndefinedFunction {
+                name: name.to_string(),
+                span: Span::new(0, 0),
+            })
     }
 
     pub(super) fn monomorphize(
@@ -157,7 +164,7 @@ impl IRGen {
                 .join("_")
         );
 
-        if self.find_func(&mangled).is_ok() {
+        if self.has_func(&mangled) {
             return Ok(mangled);
         }
 
@@ -203,7 +210,15 @@ impl IRGen {
         let lambda_funcs: Vec<Expr> = lambda_map.into_values().collect();
 
         for lambda in &lambda_funcs {
-            if let Expr::FuncDecl(name, _, _, params, ret_type, _, _) = lambda {
+            if let Expr::FuncDecl {
+                name,
+                attrs: _,
+                type_params: _,
+                params,
+                return_type: ret_type,
+                ..
+            } = lambda
+            {
                 self.func_decl(
                     name.clone(),
                     FuncAttrs::default(),
@@ -213,7 +228,16 @@ impl IRGen {
             }
         }
         for lambda in &lambda_funcs {
-            if let Expr::FuncDecl(name, _, _, params, _, body, _) = lambda {
+            if let Expr::FuncDecl {
+                name,
+                attrs: _,
+                type_params: _,
+                params,
+                return_type: _,
+                body,
+                ..
+            } = lambda
+            {
                 self.compile_fn(name.clone(), params.clone(), body.as_ref().clone())?;
             }
         }
@@ -235,18 +259,52 @@ pub(super) fn substitute_expr(expr: Expr, args: &[Type]) -> Expr {
     let sub_box = |e: Box<Expr>| Box::new(substitute_expr(*e, args));
     let sub_val = |e: Expr| substitute_expr(e, args);
     match expr {
-        VarDecl(name, ty, value, span) => VarDecl(name, ty.substitute(args), sub_box(value), span),
-        ConstDecl(name, ty, value, is_pub, span) => {
-            ConstDecl(name, ty.substitute(args), sub_box(value), is_pub, span)
-        }
-        GlobalVar(name, is_pub, ty, value, span) => GlobalVar(
+        VarDecl {
+            name,
+            ty,
+            value,
+            span,
+        } => VarDecl {
+            name,
+            ty: ty.substitute(args),
+            value: sub_box(value),
+            span,
+        },
+        ConstDecl {
+            name,
+            ty,
+            value,
+            is_pub,
+            span,
+        } => ConstDecl {
+            name,
+            ty: ty.substitute(args),
+            value: sub_box(value),
+            is_pub,
+            span,
+        },
+        GlobalVar {
             name,
             is_pub,
-            ty.substitute(args),
-            value.map(|v| sub_box(v)),
+            ty,
+            value,
             span,
-        ),
-        FuncDecl(name, attrs, type_params, params, ret_type, body, span) => {
+        } => GlobalVar {
+            name,
+            is_pub,
+            ty: ty.substitute(args),
+            value: value.map(|v| sub_box(v)),
+            span,
+        },
+        FuncDecl {
+            name,
+            attrs,
+            type_params,
+            params,
+            return_type: ret_type,
+            body,
+            span,
+        } => {
             let params = if type_params.is_empty() {
                 params
                     .into_iter()
@@ -260,25 +318,47 @@ pub(super) fn substitute_expr(expr: Expr, args: &[Type]) -> Expr {
             } else {
                 ret_type
             };
-            FuncDecl(
+            FuncDecl {
                 name,
                 attrs,
                 type_params,
                 params,
-                ret_type,
-                sub_box(body),
+                return_type: ret_type,
+                body: sub_box(body),
                 span,
-            )
+            }
         }
-        ExternVar(name, ty, span) => ExternVar(name, ty.substitute(args), span),
-        Call(callee, type_args, call_args, span) => Call(
-            sub_box(callee),
-            type_args.into_iter().map(|t| t.substitute(args)).collect(),
-            call_args.into_iter().map(sub_val).collect(),
+        ExternVar { name, ty, span } => ExternVar {
+            name,
+            ty: ty.substitute(args),
             span,
-        ),
-        ArrayFill(ty, len, span) => ArrayFill(ty.substitute(args), sub_box(len), span),
-        Struct(name, type_params, fields, span) => {
+        },
+        Call {
+            callee,
+            type_args,
+            args: call_args,
+            span,
+        } => Call {
+            callee: sub_box(callee),
+            type_args: type_args.into_iter().map(|t| t.substitute(args)).collect(),
+            args: call_args.into_iter().map(sub_val).collect(),
+            span,
+        },
+        ArrayFill {
+            elem_type: ty,
+            len,
+            span,
+        } => ArrayFill {
+            elem_type: ty.substitute(args),
+            len: sub_box(len),
+            span,
+        },
+        Struct {
+            name,
+            type_params,
+            fields,
+            span,
+        } => {
             let fields = if type_params.is_empty() {
                 fields
                     .into_iter()
@@ -287,15 +367,30 @@ pub(super) fn substitute_expr(expr: Expr, args: &[Type]) -> Expr {
             } else {
                 fields
             };
-            Struct(name, type_params, fields, span)
+            Struct {
+                name,
+                type_params,
+                fields,
+                span,
+            }
         }
-        StructLiteral(name, type_args, fields, span) => StructLiteral(
+        StructLiteral {
             name,
-            type_args.into_iter().map(|t| t.substitute(args)).collect(),
-            fields.into_iter().map(|(n, e)| (n, sub_val(e))).collect(),
+            type_args,
+            fields,
             span,
-        ),
-        Union(name, type_params, fields, span) => {
+        } => StructLiteral {
+            name,
+            type_args: type_args.into_iter().map(|t| t.substitute(args)).collect(),
+            fields: fields.into_iter().map(|(n, e)| (n, sub_val(e))).collect(),
+            span,
+        },
+        Union {
+            name,
+            type_params,
+            fields,
+            span,
+        } => {
             let fields = if type_params.is_empty() {
                 fields
                     .into_iter()
@@ -304,99 +399,475 @@ pub(super) fn substitute_expr(expr: Expr, args: &[Type]) -> Expr {
             } else {
                 fields
             };
-            Union(name, type_params, fields, span)
+            Union {
+                name,
+                type_params,
+                fields,
+                span,
+            }
         }
-        UnionLiteral(name, type_args, fields, span) => UnionLiteral(
+        UnionLiteral {
             name,
-            type_args.into_iter().map(|t| t.substitute(args)).collect(),
-            fields.into_iter().map(|(n, e)| (n, sub_val(e))).collect(),
+            type_args,
+            fields,
             span,
-        ),
-        Lambda(params, body, ret_type, span) => Lambda(
-            params
+        } => UnionLiteral {
+            name,
+            type_args: type_args.into_iter().map(|t| t.substitute(args)).collect(),
+            fields: fields.into_iter().map(|(n, e)| (n, sub_val(e))).collect(),
+            span,
+        },
+        Lambda {
+            params,
+            body,
+            return_type: ret_type,
+            span,
+        } => Lambda {
+            params: params
                 .into_iter()
                 .map(|(n, t)| (n, t.substitute(args)))
                 .collect(),
-            sub_box(body),
-            ret_type.substitute(args),
+            body: sub_box(body),
+            return_type: ret_type.substitute(args),
             span,
-        ),
-        Add(l, r, span) => Add(sub_box(l), sub_box(r), span),
-        Sub(l, r, span) => Sub(sub_box(l), sub_box(r), span),
-        Mul(l, r, span) => Mul(sub_box(l), sub_box(r), span),
-        Div(l, r, span) => Div(sub_box(l), sub_box(r), span),
-        Mod(l, r, span) => Mod(sub_box(l), sub_box(r), span),
-        FAdd(l, r, span) => FAdd(sub_box(l), sub_box(r), span),
-        FSub(l, r, span) => FSub(sub_box(l), sub_box(r), span),
-        FMul(l, r, span) => FMul(sub_box(l), sub_box(r), span),
-        FDiv(l, r, span) => FDiv(sub_box(l), sub_box(r), span),
-        Eq(l, r, span) => Eq(sub_box(l), sub_box(r), span),
-        Ne(l, r, span) => Ne(sub_box(l), sub_box(r), span),
-        Lt(l, r, span) => Lt(sub_box(l), sub_box(r), span),
-        Le(l, r, span) => Le(sub_box(l), sub_box(r), span),
-        Gt(l, r, span) => Gt(sub_box(l), sub_box(r), span),
-        Ge(l, r, span) => Ge(sub_box(l), sub_box(r), span),
-        FEq(l, r, span) => FEq(sub_box(l), sub_box(r), span),
-        FNe(l, r, span) => FNe(sub_box(l), sub_box(r), span),
-        FLt(l, r, span) => FLt(sub_box(l), sub_box(r), span),
-        FLe(l, r, span) => FLe(sub_box(l), sub_box(r), span),
-        FGt(l, r, span) => FGt(sub_box(l), sub_box(r), span),
-        FGe(l, r, span) => FGe(sub_box(l), sub_box(r), span),
-        Xor(l, r, span) => Xor(sub_box(l), sub_box(r), span),
-        LAnd(l, r, span) => LAnd(sub_box(l), sub_box(r), span),
-        LOr(l, r, span) => LOr(sub_box(l), sub_box(r), span),
-        StrCat(l, r, span) => StrCat(sub_box(l), sub_box(r), span),
-        Neg(e, span) => Neg(sub_box(e), span),
-        FNeg(e, span) => FNeg(sub_box(e), span),
-        Not(e, span) => Not(sub_box(e), span),
-        VarAssign(name, value, span) => VarAssign(name, sub_box(value), span),
-        AddAssign(name, value, span) => AddAssign(name, sub_box(value), span),
-        SubAssign(name, value, span) => SubAssign(name, sub_box(value), span),
-        Return(value, span) => Return(sub_box(value), span),
-        If(cond, then_branch, else_branch, span) => If(
-            sub_box(cond),
-            sub_box(then_branch),
-            else_branch.map(sub_box),
+        },
+        Add {
+            left: l,
+            right: r,
             span,
-        ),
-        While(cond, body, span) => While(sub_box(cond), sub_box(body), span),
-        Block(body, span) => Block(body.into_iter().map(sub_val).collect(), span),
-        Index(arr, idx, span) => Index(sub_box(arr), sub_box(idx), span),
-        IndexAssign(arr, idx, span) => IndexAssign(sub_box(arr), sub_box(idx), span),
-        ArrayLiteral(elements, span) => {
-            ArrayLiteral(elements.into_iter().map(sub_val).collect(), span)
-        }
-        Range(start, end, span) => Range(sub_box(start), sub_box(end), span),
-        For(var, iter, body, span) => For(var, sub_box(iter), sub_box(body), span),
-        MemberAccess(obj, field, span) => MemberAccess(sub_box(obj), field, span),
-        MemberAssign(obj, field, value, span) => {
-            MemberAssign(sub_box(obj), field, sub_box(value), span)
-        }
-        AddressOf(e, span) => AddressOf(sub_box(e), span),
-        Deref(e, span) => Deref(sub_box(e), span),
-        DerefAssign(ptr, value, span) => DerefAssign(sub_box(ptr), sub_box(value), span),
+        } => Add {
+            left: sub_box(l),
+            right: sub_box(r),
+            span,
+        },
+        Sub {
+            left: l,
+            right: r,
+            span,
+        } => Sub {
+            left: sub_box(l),
+            right: sub_box(r),
+            span,
+        },
+        Mul {
+            left: l,
+            right: r,
+            span,
+        } => Mul {
+            left: sub_box(l),
+            right: sub_box(r),
+            span,
+        },
+        Div {
+            left: l,
+            right: r,
+            span,
+        } => Div {
+            left: sub_box(l),
+            right: sub_box(r),
+            span,
+        },
+        Mod {
+            left: l,
+            right: r,
+            span,
+        } => Mod {
+            left: sub_box(l),
+            right: sub_box(r),
+            span,
+        },
+        FAdd {
+            left: l,
+            right: r,
+            span,
+        } => FAdd {
+            left: sub_box(l),
+            right: sub_box(r),
+            span,
+        },
+        FSub {
+            left: l,
+            right: r,
+            span,
+        } => FSub {
+            left: sub_box(l),
+            right: sub_box(r),
+            span,
+        },
+        FMul {
+            left: l,
+            right: r,
+            span,
+        } => FMul {
+            left: sub_box(l),
+            right: sub_box(r),
+            span,
+        },
+        FDiv {
+            left: l,
+            right: r,
+            span,
+        } => FDiv {
+            left: sub_box(l),
+            right: sub_box(r),
+            span,
+        },
+        Eq {
+            left: l,
+            right: r,
+            span,
+        } => Eq {
+            left: sub_box(l),
+            right: sub_box(r),
+            span,
+        },
+        Ne {
+            left: l,
+            right: r,
+            span,
+        } => Ne {
+            left: sub_box(l),
+            right: sub_box(r),
+            span,
+        },
+        Lt {
+            left: l,
+            right: r,
+            span,
+        } => Lt {
+            left: sub_box(l),
+            right: sub_box(r),
+            span,
+        },
+        Le {
+            left: l,
+            right: r,
+            span,
+        } => Le {
+            left: sub_box(l),
+            right: sub_box(r),
+            span,
+        },
+        Gt {
+            left: l,
+            right: r,
+            span,
+        } => Gt {
+            left: sub_box(l),
+            right: sub_box(r),
+            span,
+        },
+        Ge {
+            left: l,
+            right: r,
+            span,
+        } => Ge {
+            left: sub_box(l),
+            right: sub_box(r),
+            span,
+        },
+        FEq {
+            left: l,
+            right: r,
+            span,
+        } => FEq {
+            left: sub_box(l),
+            right: sub_box(r),
+            span,
+        },
+        FNe {
+            left: l,
+            right: r,
+            span,
+        } => FNe {
+            left: sub_box(l),
+            right: sub_box(r),
+            span,
+        },
+        FLt {
+            left: l,
+            right: r,
+            span,
+        } => FLt {
+            left: sub_box(l),
+            right: sub_box(r),
+            span,
+        },
+        FLe {
+            left: l,
+            right: r,
+            span,
+        } => FLe {
+            left: sub_box(l),
+            right: sub_box(r),
+            span,
+        },
+        FGt {
+            left: l,
+            right: r,
+            span,
+        } => FGt {
+            left: sub_box(l),
+            right: sub_box(r),
+            span,
+        },
+        FGe {
+            left: l,
+            right: r,
+            span,
+        } => FGe {
+            left: sub_box(l),
+            right: sub_box(r),
+            span,
+        },
+        Xor {
+            left: l,
+            right: r,
+            span,
+        } => Xor {
+            left: sub_box(l),
+            right: sub_box(r),
+            span,
+        },
+        BAnd {
+            left: l,
+            right: r,
+            span,
+        } => BAnd {
+            left: sub_box(l),
+            right: sub_box(r),
+            span,
+        },
+        BOr {
+            left: l,
+            right: r,
+            span,
+        } => BOr {
+            left: sub_box(l),
+            right: sub_box(r),
+            span,
+        },
+        LAnd {
+            left: l,
+            right: r,
+            span,
+        } => LAnd {
+            left: sub_box(l),
+            right: sub_box(r),
+            span,
+        },
+        LOr {
+            left: l,
+            right: r,
+            span,
+        } => LOr {
+            left: sub_box(l),
+            right: sub_box(r),
+            span,
+        },
+        StrCat {
+            left: l,
+            right: r,
+            span,
+        } => StrCat {
+            left: sub_box(l),
+            right: sub_box(r),
+            span,
+        },
+        Neg { expr: e, span } => Neg {
+            expr: sub_box(e),
+            span,
+        },
+        FNeg { expr: e, span } => FNeg {
+            expr: sub_box(e),
+            span,
+        },
+        Not { expr: e, span } => Not {
+            expr: sub_box(e),
+            span,
+        },
+        VarAssign { name, value, span } => VarAssign {
+            name,
+            value: sub_box(value),
+            span,
+        },
+        AddAssign { name, value, span } => AddAssign {
+            name,
+            value: sub_box(value),
+            span,
+        },
+        SubAssign { name, value, span } => SubAssign {
+            name,
+            value: sub_box(value),
+            span,
+        },
+        Return { value, span } => Return {
+            value: sub_box(value),
+            span,
+        },
+        If {
+            cond,
+            then_branch,
+            else_branch,
+            span,
+        } => If {
+            cond: sub_box(cond),
+            then_branch: sub_box(then_branch),
+            else_branch: else_branch.map(sub_box),
+            span,
+        },
+        While { cond, body, span } => While {
+            cond: sub_box(cond),
+            body: sub_box(body),
+            span,
+        },
+        Block { stmts: body, span } => Block {
+            stmts: body.into_iter().map(sub_val).collect(),
+            span,
+        },
+        Index {
+            array: arr,
+            index: idx,
+            span,
+        } => Index {
+            array: sub_box(arr),
+            index: sub_box(idx),
+            span,
+        },
+        IndexAssign {
+            target: arr,
+            value: idx,
+            span,
+        } => IndexAssign {
+            target: sub_box(arr),
+            value: sub_box(idx),
+            span,
+        },
+        ArrayLiteral { elements, span } => ArrayLiteral {
+            elements: elements.into_iter().map(sub_val).collect(),
+            span,
+        },
+        Range {
+            start,
+            end,
+            inclusive,
+            span,
+        } => Range {
+            start: sub_box(start),
+            end: sub_box(end),
+            inclusive,
+            span,
+        },
+        For {
+            var,
+            iterable: iter,
+            body,
+            span,
+        } => For {
+            var,
+            iterable: sub_box(iter),
+            body: sub_box(body),
+            span,
+        },
+        MemberAccess { obj, field, span } => MemberAccess {
+            obj: sub_box(obj),
+            field,
+            span,
+        },
+        MemberAssign {
+            obj,
+            field,
+            value,
+            span,
+        } => MemberAssign {
+            obj: sub_box(obj),
+            field,
+            value: sub_box(value),
+            span,
+        },
+        AddressOf { expr: e, span } => AddressOf {
+            expr: sub_box(e),
+            span,
+        },
+        Deref { expr: e, span } => Deref {
+            expr: sub_box(e),
+            span,
+        },
+        DerefAssign { ptr, value, span } => DerefAssign {
+            ptr: sub_box(ptr),
+            value: sub_box(value),
+            span,
+        },
 
-        Match(target, branches, default, span) => Match(
-            sub_box(target),
-            branches
-                .into_iter()
-                .map(|(c, v)| (sub_val(c), sub_val(v)))
-                .collect(),
-            default.map(sub_box),
+        Match {
+            target,
+            branches,
+            default,
             span,
-        ),
-        Cast(inner, ty, span) => Cast(sub_box(inner), ty.substitute(args), span),
-        FString(parts, span) => FString(parts.into_iter().map(sub_val).collect(), span),
-        Inc(name, span) => Inc(name, span),
-        Dec(name, span) => Dec(name, span),
-        MulAssign(name, value, span) => MulAssign(name, sub_box(value), span),
-        DivAssign(name, value, span) => DivAssign(name, sub_box(value), span),
-        ModAssign(name, value, span) => ModAssign(name, sub_box(value), span),
-        AndAssign(name, value, span) => AndAssign(name, sub_box(value), span),
-        OrAssign(name, value, span) => OrAssign(name, sub_box(value), span),
-        XorAssign(name, value, span) => XorAssign(name, sub_box(value), span),
-        ShlAssign(name, value, span) => ShlAssign(name, sub_box(value), span),
-        ShrAssign(name, value, span) => ShrAssign(name, sub_box(value), span),
+        } => Match {
+            target: sub_box(target),
+            branches: branches
+                .into_iter()
+                .map(|(c, g, v)| (sub_val(c), g.map(|g| Box::new(sub_val(*g))), sub_val(v)))
+                .collect(),
+            default: default.map(sub_box),
+            span,
+        },
+        Cast {
+            expr: inner,
+            ty,
+            span,
+        } => Cast {
+            expr: sub_box(inner),
+            ty: ty.substitute(args),
+            span,
+        },
+        FString { segs: parts, span } => FString {
+            segs: parts.into_iter().map(sub_val).collect(),
+            span,
+        },
+        Inc { name, span } => Inc { name, span },
+        Dec { name, span } => Dec { name, span },
+        MulAssign { name, value, span } => MulAssign {
+            name,
+            value: sub_box(value),
+            span,
+        },
+        DivAssign { name, value, span } => DivAssign {
+            name,
+            value: sub_box(value),
+            span,
+        },
+        ModAssign { name, value, span } => ModAssign {
+            name,
+            value: sub_box(value),
+            span,
+        },
+        AndAssign { name, value, span } => AndAssign {
+            name,
+            value: sub_box(value),
+            span,
+        },
+        OrAssign { name, value, span } => OrAssign {
+            name,
+            value: sub_box(value),
+            span,
+        },
+        XorAssign { name, value, span } => XorAssign {
+            name,
+            value: sub_box(value),
+            span,
+        },
+        ShlAssign { name, value, span } => ShlAssign {
+            name,
+            value: sub_box(value),
+            span,
+        },
+        ShrAssign { name, value, span } => ShrAssign {
+            name,
+            value: sub_box(value),
+            span,
+        },
         other => other,
     }
 }

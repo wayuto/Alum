@@ -1,4 +1,4 @@
-$ifndef ALUM_ARRAY_COMPAT
+#ifndef ALUM_ARRAY_COMPAT
 #define ALUM_ARRAY_COMPAT 1
 
 // C-compatible array functions
@@ -8,4 +8,4 @@ fun(extern) c_array_sum(*int, int): int
 fun(extern) c_array_max(*int, int): int
 fun(extern) c_array_reverse(*int, int): void
 
-$endif
+#endif

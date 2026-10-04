@@ -428,27 +428,27 @@ impl<'a> Parser<'a> {
             let mut itoa_attrs = FuncAttrs::default();
             itoa_attrs.is_external = true;
             itoa_attrs.link_name = Some("itoa".to_string());
-            body.push(Expr::FuncDecl(
-                "itoa".to_string(),
-                itoa_attrs,
-                Vec::new(),
-                vec![("n".to_string(), Type::Primitive(Primitive::Int))],
-                Type::Primitive(Primitive::String),
-                Box::new(Expr::Nil(Span::new(0, 0))),
-                Span::new(0, 0),
-            ));
+            body.push(Expr::FuncDecl {
+                name: "itoa".to_string(),
+                attrs: itoa_attrs,
+                type_params: Vec::new(),
+                params: vec![("n".to_string(), Type::Primitive(Primitive::Int))],
+                return_type: Type::Primitive(Primitive::String),
+                body: Box::new(Expr::Nil(Span::new(0, 0))),
+                span: Span::new(0, 0),
+            });
             let mut ftoa_attrs = FuncAttrs::default();
             ftoa_attrs.is_external = true;
             ftoa_attrs.link_name = Some("ftoa".to_string());
-            body.push(Expr::FuncDecl(
-                "ftoa".to_string(),
-                ftoa_attrs,
-                Vec::new(),
-                vec![("n".to_string(), Type::Primitive(Primitive::Float))],
-                Type::Primitive(Primitive::String),
-                Box::new(Expr::Nil(Span::new(0, 0))),
-                Span::new(0, 0),
-            ));
+            body.push(Expr::FuncDecl {
+                name: "ftoa".to_string(),
+                attrs: ftoa_attrs,
+                type_params: Vec::new(),
+                params: vec![("n".to_string(), Type::Primitive(Primitive::Float))],
+                return_type: Type::Primitive(Primitive::String),
+                body: Box::new(Expr::Nil(Span::new(0, 0))),
+                span: Span::new(0, 0),
+            });
         }
     }
 }

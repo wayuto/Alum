@@ -9,6 +9,7 @@ pub struct Program {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Primitive {
     Int,
+    Char,
     Float,
     String,
     Boolean,
@@ -55,7 +56,10 @@ impl Type {
     pub fn is_numeric(&self) -> bool {
         matches!(
             self,
-            Type::Primitive(Primitive::Int) | Type::Primitive(Primitive::Float) | Type::TypeVar(_)
+            Type::Primitive(Primitive::Int)
+                | Type::Primitive(Primitive::Char)
+                | Type::Primitive(Primitive::Float)
+                | Type::TypeVar(_)
         )
     }
 
@@ -80,25 +84,11 @@ impl Type {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn contains_param(&self) -> bool {
-        match self {
-            Type::Param(_) => true,
-            Type::Pointer(inner) => inner.contains_param(),
-            Type::Array(inner) => inner.contains_param(),
-            Type::Function(params, ret) => {
-                params.iter().any(|p| p.contains_param()) || ret.contains_param()
-            }
-            Type::Struct(_, args) => args.iter().any(|t| t.contains_param()),
-            Type::Union(_, args) => args.iter().any(|t| t.contains_param()),
-            _ => false,
-        }
-    }
-
     pub fn mangle(&self) -> String {
         match self {
             Type::Primitive(p) => match p {
                 Primitive::Int => "int".to_string(),
+                Primitive::Char => "char".to_string(),
                 Primitive::Float => "float".to_string(),
                 Primitive::String => "str".to_string(),
                 Primitive::Boolean => "bool".to_string(),
@@ -130,6 +120,7 @@ impl fmt::Display for Type {
         match self {
             Type::Primitive(p) => match p {
                 Primitive::Int => write!(f, "int"),
+                Primitive::Char => write!(f, "char"),
                 Primitive::Float => write!(f, "float"),
                 Primitive::String => write!(f, "string"),
                 Primitive::Boolean => write!(f, "bool"),
@@ -167,89 +158,371 @@ impl fmt::Display for Type {
 impl Expr {
     pub fn span(&self) -> Span {
         match self {
-            Expr::Int(_, s)
-            | Expr::Float(_, s)
-            | Expr::Bool(_, s)
-            | Expr::String(_, s)
+            Expr::Int { value: _, span: s }
+            | Expr::Char { value: _, span: s }
+            | Expr::Float { value: _, span: s }
+            | Expr::Bool { value: _, span: s }
+            | Expr::String { value: _, span: s }
             | Expr::Nil(s)
-            | Expr::Add(_, _, s)
-            | Expr::Sub(_, _, s)
-            | Expr::Mul(_, _, s)
-            | Expr::Div(_, _, s)
-            | Expr::Mod(_, _, s)
-            | Expr::Shl(_, _, s)
-            | Expr::Shr(_, _, s)
-            | Expr::FAdd(_, _, s)
-            | Expr::FSub(_, _, s)
-            | Expr::FMul(_, _, s)
-            | Expr::FDiv(_, _, s)
-            | Expr::Eq(_, _, s)
-            | Expr::Ne(_, _, s)
-            | Expr::Lt(_, _, s)
-            | Expr::Le(_, _, s)
-            | Expr::Gt(_, _, s)
-            | Expr::Ge(_, _, s)
-            | Expr::FEq(_, _, s)
-            | Expr::FNe(_, _, s)
-            | Expr::FLt(_, _, s)
-            | Expr::FLe(_, _, s)
-            | Expr::FGt(_, _, s)
-            | Expr::FGe(_, _, s)
-            | Expr::Not(_, s)
-            | Expr::StrCat(_, _, s)
-            | Expr::Var(_, s)
-            | Expr::VarDecl(_, _, _, s)
-            | Expr::ConstDecl(_, _, _, _, s)
-            | Expr::GlobalVar(_, _, _, _, s)
-            | Expr::ExternVar(_, _, s)
-            | Expr::VarAssign(_, _, s)
-            | Expr::FuncDecl(_, _, _, _, _, _, s)
-            | Expr::Call(_, _, _, s)
-            | Expr::Return(_, s)
-            | Expr::If(_, _, _, s)
-            | Expr::While(_, _, s)
-            | Expr::Break(s)
+            | Expr::Add {
+                left: _,
+                right: _,
+                span: s,
+            }
+            | Expr::Sub {
+                left: _,
+                right: _,
+                span: s,
+            }
+            | Expr::Mul {
+                left: _,
+                right: _,
+                span: s,
+            }
+            | Expr::Div {
+                left: _,
+                right: _,
+                span: s,
+            }
+            | Expr::Mod {
+                left: _,
+                right: _,
+                span: s,
+            }
+            | Expr::Shl {
+                left: _,
+                right: _,
+                span: s,
+            }
+            | Expr::Shr {
+                left: _,
+                right: _,
+                span: s,
+            }
+            | Expr::FAdd {
+                left: _,
+                right: _,
+                span: s,
+            }
+            | Expr::FSub {
+                left: _,
+                right: _,
+                span: s,
+            }
+            | Expr::FMul {
+                left: _,
+                right: _,
+                span: s,
+            }
+            | Expr::FDiv {
+                left: _,
+                right: _,
+                span: s,
+            }
+            | Expr::Eq {
+                left: _,
+                right: _,
+                span: s,
+            }
+            | Expr::Ne {
+                left: _,
+                right: _,
+                span: s,
+            }
+            | Expr::Lt {
+                left: _,
+                right: _,
+                span: s,
+            }
+            | Expr::Le {
+                left: _,
+                right: _,
+                span: s,
+            }
+            | Expr::Gt {
+                left: _,
+                right: _,
+                span: s,
+            }
+            | Expr::Ge {
+                left: _,
+                right: _,
+                span: s,
+            }
+            | Expr::FEq {
+                left: _,
+                right: _,
+                span: s,
+            }
+            | Expr::FNe {
+                left: _,
+                right: _,
+                span: s,
+            }
+            | Expr::FLt {
+                left: _,
+                right: _,
+                span: s,
+            }
+            | Expr::FLe {
+                left: _,
+                right: _,
+                span: s,
+            }
+            | Expr::FGt {
+                left: _,
+                right: _,
+                span: s,
+            }
+            | Expr::FGe {
+                left: _,
+                right: _,
+                span: s,
+            }
+            | Expr::Not { expr: _, span: s }
+            | Expr::StrCat {
+                left: _,
+                right: _,
+                span: s,
+            }
+            | Expr::Var { name: _, span: s }
+            | Expr::VarDecl {
+                name: _,
+                ty: _,
+                value: _,
+                span: s,
+            }
+            | Expr::ConstDecl {
+                name: _,
+                ty: _,
+                value: _,
+                is_pub: _,
+                span: s,
+            }
+            | Expr::GlobalVar {
+                name: _,
+                is_pub: _,
+                ty: _,
+                value: _,
+                span: s,
+            }
+            | Expr::ExternVar {
+                name: _,
+                ty: _,
+                span: s,
+            }
+            | Expr::VarAssign {
+                name: _,
+                value: _,
+                span: s,
+            }
+            | Expr::FuncDecl {
+                name: _,
+                attrs: _,
+                type_params: _,
+                params: _,
+                return_type: _,
+                body: _,
+                span: s,
+            }
+            | Expr::Call {
+                callee: _,
+                type_args: _,
+                args: _,
+                span: s,
+            }
+            | Expr::Return { value: _, span: s }
+            | Expr::If {
+                cond: _,
+                then_branch: _,
+                else_branch: _,
+                span: s,
+            }
+            | Expr::While {
+                cond: _,
+                body: _,
+                span: s,
+            }
+            | Expr::Break { value: _, span: s }
             | Expr::Continue(s)
-            | Expr::Block(_, s)
-            | Expr::Index(_, _, s)
-            | Expr::IndexAssign(_, _, s)
-            | Expr::ArrayLiteral(_, s)
-            | Expr::ArrayFill(_, _, s)
-            | Expr::Range(_, _, s)
-            | Expr::For(_, _, _, s)
+            | Expr::Block { stmts: _, span: s }
+            | Expr::Index {
+                array: _,
+                index: _,
+                span: s,
+            }
+            | Expr::IndexAssign {
+                target: _,
+                value: _,
+                span: s,
+            }
+            | Expr::ArrayLiteral {
+                elements: _,
+                span: s,
+            }
+            | Expr::ArrayFill {
+                elem_type: _,
+                len: _,
+                span: s,
+            }
+            | Expr::Range {
+                start: _,
+                end: _,
+                inclusive: _,
+                span: s,
+            }
+            | Expr::For {
+                var: _,
+                iterable: _,
+                body: _,
+                span: s,
+            }
             | Expr::TypeDef(s)
-            | Expr::Match(_, _, _, s)
-            | Expr::Struct(_, _, _, s)
-            | Expr::StructLiteral(_, _, _, s)
-            | Expr::Union(_, _, _, s)
-            | Expr::UnionLiteral(_, _, _, s)
-            | Expr::Enum(_, _, s)
-            | Expr::MemberAccess(_, _, s)
-            | Expr::MemberAssign(_, _, _, s)
-            | Expr::Lambda(_, _, _, s)
-            | Expr::Neg(_, s)
-            | Expr::FNeg(_, s)
-            | Expr::BNot(_, s)
-            | Expr::Inc(_, s)
-            | Expr::Dec(_, s)
-            | Expr::Xor(_, _, s)
-            | Expr::LAnd(_, _, s)
-            | Expr::LOr(_, _, s)
-            | Expr::AddAssign(_, _, s)
-            | Expr::SubAssign(_, _, s)
-            | Expr::MulAssign(_, _, s)
-            | Expr::DivAssign(_, _, s)
-            | Expr::ModAssign(_, _, s)
-            | Expr::AndAssign(_, _, s)
-            | Expr::OrAssign(_, _, s)
-            | Expr::XorAssign(_, _, s)
-            | Expr::ShlAssign(_, _, s)
-            | Expr::ShrAssign(_, _, s)
-            | Expr::AddressOf(_, s)
-            | Expr::Deref(_, s)
-            | Expr::DerefAssign(_, _, s)
-            | Expr::Cast(_, _, s)
-            | Expr::FString(_, s) => *s,
+            | Expr::Match {
+                target: _,
+                branches: _,
+                default: _,
+                span: s,
+            }
+            | Expr::Struct {
+                name: _,
+                type_params: _,
+                fields: _,
+                span: s,
+            }
+            | Expr::StructLiteral {
+                name: _,
+                type_args: _,
+                fields: _,
+                span: s,
+            }
+            | Expr::Union {
+                name: _,
+                type_params: _,
+                fields: _,
+                span: s,
+            }
+            | Expr::UnionLiteral {
+                name: _,
+                type_args: _,
+                fields: _,
+                span: s,
+            }
+            | Expr::Enum {
+                name: _,
+                members: _,
+                span: s,
+            }
+            | Expr::MemberAccess {
+                obj: _,
+                field: _,
+                span: s,
+            }
+            | Expr::MemberAssign {
+                obj: _,
+                field: _,
+                value: _,
+                span: s,
+            }
+            | Expr::Lambda {
+                params: _,
+                body: _,
+                return_type: _,
+                span: s,
+            }
+            | Expr::Neg { expr: _, span: s }
+            | Expr::FNeg { expr: _, span: s }
+            | Expr::BNot { expr: _, span: s }
+            | Expr::Inc { name: _, span: s }
+            | Expr::Dec { name: _, span: s }
+            | Expr::Xor {
+                left: _,
+                right: _,
+                span: s,
+            }
+            | Expr::BAnd {
+                left: _,
+                right: _,
+                span: s,
+            }
+            | Expr::BOr {
+                left: _,
+                right: _,
+                span: s,
+            }
+            | Expr::LAnd {
+                left: _,
+                right: _,
+                span: s,
+            }
+            | Expr::LOr {
+                left: _,
+                right: _,
+                span: s,
+            }
+            | Expr::AddAssign {
+                name: _,
+                value: _,
+                span: s,
+            }
+            | Expr::SubAssign {
+                name: _,
+                value: _,
+                span: s,
+            }
+            | Expr::MulAssign {
+                name: _,
+                value: _,
+                span: s,
+            }
+            | Expr::DivAssign {
+                name: _,
+                value: _,
+                span: s,
+            }
+            | Expr::ModAssign {
+                name: _,
+                value: _,
+                span: s,
+            }
+            | Expr::AndAssign {
+                name: _,
+                value: _,
+                span: s,
+            }
+            | Expr::OrAssign {
+                name: _,
+                value: _,
+                span: s,
+            }
+            | Expr::XorAssign {
+                name: _,
+                value: _,
+                span: s,
+            }
+            | Expr::ShlAssign {
+                name: _,
+                value: _,
+                span: s,
+            }
+            | Expr::ShrAssign {
+                name: _,
+                value: _,
+                span: s,
+            }
+            | Expr::AddressOf { expr: _, span: s }
+            | Expr::Deref { expr: _, span: s }
+            | Expr::DerefAssign {
+                ptr: _,
+                value: _,
+                span: s,
+            }
+            | Expr::Cast {
+                expr: _,
+                ty: _,
+                span: s,
+            }
+            | Expr::FString { segs: _, span: s } => *s,
         }
     }
 }
@@ -264,95 +537,423 @@ pub struct FuncAttrs {
 
 #[derive(Debug, Clone)]
 pub enum Expr {
-    Int(isize, Span),
-    Float(f64, Span),
-    Bool(bool, Span),
-    String(String, Span),
+    Int {
+        value: isize,
+        span: Span,
+    },
+    Char {
+        value: u8,
+        span: Span,
+    },
+    Float {
+        value: f64,
+        span: Span,
+    },
+    Bool {
+        value: bool,
+        span: Span,
+    },
+    String {
+        value: String,
+        span: Span,
+    },
     Nil(Span),
-    Add(Box<Expr>, Box<Expr>, Span),
-    Sub(Box<Expr>, Box<Expr>, Span),
-    Mul(Box<Expr>, Box<Expr>, Span),
-    Div(Box<Expr>, Box<Expr>, Span),
-    Mod(Box<Expr>, Box<Expr>, Span),
-    FAdd(Box<Expr>, Box<Expr>, Span),
-    FSub(Box<Expr>, Box<Expr>, Span),
-    FMul(Box<Expr>, Box<Expr>, Span),
-    FDiv(Box<Expr>, Box<Expr>, Span),
-    Eq(Box<Expr>, Box<Expr>, Span),
-    Ne(Box<Expr>, Box<Expr>, Span),
-    Lt(Box<Expr>, Box<Expr>, Span),
-    Le(Box<Expr>, Box<Expr>, Span),
-    Gt(Box<Expr>, Box<Expr>, Span),
-    Ge(Box<Expr>, Box<Expr>, Span),
-    FEq(Box<Expr>, Box<Expr>, Span),
-    FNe(Box<Expr>, Box<Expr>, Span),
-    FLt(Box<Expr>, Box<Expr>, Span),
-    FLe(Box<Expr>, Box<Expr>, Span),
-    FGt(Box<Expr>, Box<Expr>, Span),
-    FGe(Box<Expr>, Box<Expr>, Span),
-    Neg(Box<Expr>, Span),
-    FNeg(Box<Expr>, Span),
-    Not(Box<Expr>, Span),
-    Inc(String, Span),
-    Dec(String, Span),
-    Xor(Box<Expr>, Box<Expr>, Span),
-    LAnd(Box<Expr>, Box<Expr>, Span),
-    LOr(Box<Expr>, Box<Expr>, Span),
-    Shl(Box<Expr>, Box<Expr>, Span),
-    Shr(Box<Expr>, Box<Expr>, Span),
-    BNot(Box<Expr>, Span),
-    AddAssign(String, Box<Expr>, Span),
-    SubAssign(String, Box<Expr>, Span),
-    MulAssign(String, Box<Expr>, Span),
-    DivAssign(String, Box<Expr>, Span),
-    ModAssign(String, Box<Expr>, Span),
-    AndAssign(String, Box<Expr>, Span),
-    OrAssign(String, Box<Expr>, Span),
-    XorAssign(String, Box<Expr>, Span),
-    ShlAssign(String, Box<Expr>, Span),
-    ShrAssign(String, Box<Expr>, Span),
-    StrCat(Box<Expr>, Box<Expr>, Span),
-    Var(String, Span),
-    VarDecl(String, Type, Box<Expr>, Span),
-    ConstDecl(String, Type, Box<Expr>, bool, Span),
-    GlobalVar(String, bool, Type, Option<Box<Expr>>, Span),
-    VarAssign(String, Box<Expr>, Span),
-    FuncDecl(
-        String,
-        FuncAttrs,
-        Vec<String>,
-        Vec<(String, Type)>,
-        Type,
-        Box<Expr>,
-        Span,
-    ),
-    ExternVar(String, Type, Span),
-    Call(Box<Expr>, Vec<Type>, Vec<Expr>, Span),
-    Return(Box<Expr>, Span),
-    If(Box<Expr>, Box<Expr>, Option<Box<Expr>>, Span),
-    While(Box<Expr>, Box<Expr>, Span),
-    Break(Span),
+    Add {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        span: Span,
+    },
+    Sub {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        span: Span,
+    },
+    Mul {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        span: Span,
+    },
+    Div {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        span: Span,
+    },
+    Mod {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        span: Span,
+    },
+    FAdd {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        span: Span,
+    },
+    FSub {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        span: Span,
+    },
+    FMul {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        span: Span,
+    },
+    FDiv {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        span: Span,
+    },
+    Eq {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        span: Span,
+    },
+    Ne {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        span: Span,
+    },
+    Lt {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        span: Span,
+    },
+    Le {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        span: Span,
+    },
+    Gt {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        span: Span,
+    },
+    Ge {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        span: Span,
+    },
+    FEq {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        span: Span,
+    },
+    FNe {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        span: Span,
+    },
+    FLt {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        span: Span,
+    },
+    FLe {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        span: Span,
+    },
+    FGt {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        span: Span,
+    },
+    FGe {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        span: Span,
+    },
+    Neg {
+        expr: Box<Expr>,
+        span: Span,
+    },
+    FNeg {
+        expr: Box<Expr>,
+        span: Span,
+    },
+    Not {
+        expr: Box<Expr>,
+        span: Span,
+    },
+    Inc {
+        name: String,
+        span: Span,
+    },
+    Dec {
+        name: String,
+        span: Span,
+    },
+    Xor {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        span: Span,
+    },
+    BAnd {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        span: Span,
+    },
+    BOr {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        span: Span,
+    },
+    LAnd {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        span: Span,
+    },
+    LOr {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        span: Span,
+    },
+    Shl {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        span: Span,
+    },
+    Shr {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        span: Span,
+    },
+    BNot {
+        expr: Box<Expr>,
+        span: Span,
+    },
+    AddAssign {
+        name: String,
+        value: Box<Expr>,
+        span: Span,
+    },
+    SubAssign {
+        name: String,
+        value: Box<Expr>,
+        span: Span,
+    },
+    MulAssign {
+        name: String,
+        value: Box<Expr>,
+        span: Span,
+    },
+    DivAssign {
+        name: String,
+        value: Box<Expr>,
+        span: Span,
+    },
+    ModAssign {
+        name: String,
+        value: Box<Expr>,
+        span: Span,
+    },
+    AndAssign {
+        name: String,
+        value: Box<Expr>,
+        span: Span,
+    },
+    OrAssign {
+        name: String,
+        value: Box<Expr>,
+        span: Span,
+    },
+    XorAssign {
+        name: String,
+        value: Box<Expr>,
+        span: Span,
+    },
+    ShlAssign {
+        name: String,
+        value: Box<Expr>,
+        span: Span,
+    },
+    ShrAssign {
+        name: String,
+        value: Box<Expr>,
+        span: Span,
+    },
+    StrCat {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        span: Span,
+    },
+    Var {
+        name: String,
+        span: Span,
+    },
+    VarDecl {
+        name: String,
+        ty: Type,
+        value: Box<Expr>,
+        span: Span,
+    },
+    ConstDecl {
+        name: String,
+        ty: Type,
+        value: Box<Expr>,
+        is_pub: bool,
+        span: Span,
+    },
+    GlobalVar {
+        name: String,
+        is_pub: bool,
+        ty: Type,
+        value: Option<Box<Expr>>,
+        span: Span,
+    },
+    VarAssign {
+        name: String,
+        value: Box<Expr>,
+        span: Span,
+    },
+    FuncDecl {
+        name: String,
+        attrs: FuncAttrs,
+        type_params: Vec<String>,
+        params: Vec<(String, Type)>,
+        return_type: Type,
+        body: Box<Expr>,
+        span: Span,
+    },
+    ExternVar {
+        name: String,
+        ty: Type,
+        span: Span,
+    },
+    Call {
+        callee: Box<Expr>,
+        type_args: Vec<Type>,
+        args: Vec<Expr>,
+        span: Span,
+    },
+    Return {
+        value: Box<Expr>,
+        span: Span,
+    },
+    If {
+        cond: Box<Expr>,
+        then_branch: Box<Expr>,
+        else_branch: Option<Box<Expr>>,
+        span: Span,
+    },
+    While {
+        cond: Box<Expr>,
+        body: Box<Expr>,
+        span: Span,
+    },
+    Break {
+        value: Option<Box<Expr>>,
+        span: Span,
+    },
     Continue(Span),
-    Block(Vec<Expr>, Span),
-    Index(Box<Expr>, Box<Expr>, Span),
-    IndexAssign(Box<Expr>, Box<Expr>, Span),
-    ArrayLiteral(Vec<Expr>, Span),
-    ArrayFill(Type, Box<Expr>, Span),
-    Range(Box<Expr>, Box<Expr>, Span),
-    For(String, Box<Expr>, Box<Expr>, Span),
+    Block {
+        stmts: Vec<Expr>,
+        span: Span,
+    },
+    Index {
+        array: Box<Expr>,
+        index: Box<Expr>,
+        span: Span,
+    },
+    IndexAssign {
+        target: Box<Expr>,
+        value: Box<Expr>,
+        span: Span,
+    },
+    ArrayLiteral {
+        elements: Vec<Expr>,
+        span: Span,
+    },
+    ArrayFill {
+        elem_type: Type,
+        len: Box<Expr>,
+        span: Span,
+    },
+    Range {
+        start: Box<Expr>,
+        end: Box<Expr>,
+        inclusive: bool,
+        span: Span,
+    },
+    For {
+        var: String,
+        iterable: Box<Expr>,
+        body: Box<Expr>,
+        span: Span,
+    },
     TypeDef(Span),
-    Match(Box<Expr>, Vec<(Expr, Expr)>, Option<Box<Expr>>, Span),
-    Struct(String, Vec<String>, Vec<(String, Type)>, Span),
-    StructLiteral(String, Vec<Type>, Vec<(String, Expr)>, Span),
-    Union(String, Vec<String>, Vec<(String, Type)>, Span),
-    UnionLiteral(String, Vec<Type>, Vec<(String, Expr)>, Span),
-    Enum(String, Vec<(String, isize)>, Span),
-    MemberAccess(Box<Expr>, String, Span),
-    MemberAssign(Box<Expr>, String, Box<Expr>, Span),
-    Lambda(Vec<(String, Type)>, Box<Expr>, Type, Span),
-    AddressOf(Box<Expr>, Span),
-    Deref(Box<Expr>, Span),
-    DerefAssign(Box<Expr>, Box<Expr>, Span),
-    Cast(Box<Expr>, Type, Span),
-    FString(Vec<Expr>, Span),
+    Match {
+        target: Box<Expr>,
+        branches: Vec<(Expr, Option<Box<Expr>>, Expr)>,
+        default: Option<Box<Expr>>,
+        span: Span,
+    },
+    Struct {
+        name: String,
+        type_params: Vec<String>,
+        fields: Vec<(String, Type)>,
+        span: Span,
+    },
+    StructLiteral {
+        name: String,
+        type_args: Vec<Type>,
+        fields: Vec<(String, Expr)>,
+        span: Span,
+    },
+    Union {
+        name: String,
+        type_params: Vec<String>,
+        fields: Vec<(String, Type)>,
+        span: Span,
+    },
+    UnionLiteral {
+        name: String,
+        type_args: Vec<Type>,
+        fields: Vec<(String, Expr)>,
+        span: Span,
+    },
+    Enum {
+        name: String,
+        members: Vec<(String, isize)>,
+        span: Span,
+    },
+    MemberAccess {
+        obj: Box<Expr>,
+        field: String,
+        span: Span,
+    },
+    MemberAssign {
+        obj: Box<Expr>,
+        field: String,
+        value: Box<Expr>,
+        span: Span,
+    },
+    Lambda {
+        params: Vec<(String, Type)>,
+        body: Box<Expr>,
+        return_type: Type,
+        span: Span,
+    },
+    AddressOf {
+        expr: Box<Expr>,
+        span: Span,
+    },
+    Deref {
+        expr: Box<Expr>,
+        span: Span,
+    },
+    DerefAssign {
+        ptr: Box<Expr>,
+        value: Box<Expr>,
+        span: Span,
+    },
+    Cast {
+        expr: Box<Expr>,
+        ty: Type,
+        span: Span,
+    },
+    FString {
+        segs: Vec<Expr>,
+        span: Span,
+    },
 }

@@ -3,9 +3,9 @@ use super::error::CodeGenError;
 use super::regalloc;
 use crate::compiler::{
     codegen::asm::*,
-    irgen::ir::{IRFunction, IRType, Instruction, Op, Operand as IROperand},
+    irgen::ir::{IRConst, IRFunction, IRType, Instruction, Op, Operand as IROperand},
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy)]
 enum Jcc {
@@ -80,44 +80,29 @@ impl AsmCodeGen {
         self.stack_arg_plan.clear();
         self.cur_inst_idx = 0;
         self.call_stack_bytes = 0;
+        self.debug_intervals.clear();
 
         let alloc = regalloc::allocate_registers(&func, &self.program.constants);
         self.alloc_regs = alloc.registers;
         self.spill_vars = alloc.spill_offsets;
         self.used_callee_saved = alloc.used_callee_saved;
+        self.call_saves = alloc.call_saves;
+        self.debug_intervals = alloc.debug_intervals;
         let stack_size = alloc.stack_size;
 
-        let is_leaf = !func.instructions.iter().any(|i| {
-            matches!(
-                i.op,
-                Op::Call
-                    | Op::Malloc
-                    | Op::Free
-                    | Op::StrCat
-                    | Op::StrByte
-                    | Op::Range
-                    | Op::StrEq
-                    | Op::StrNe
-                    | Op::StrLt
-                    | Op::StrLe
-                    | Op::StrGt
-                    | Op::StrGe
-            )
-        });
+        let is_leaf = alloc.is_leaf;
         let mut lea_used: std::collections::HashSet<String> = std::collections::HashSet::new();
         for inst in &func.instructions {
-            if matches!(inst.op, Op::Lea) {
-                if let Some(IROperand::Var(name)) = &inst.src1 {
-                    lea_used.insert(name.clone());
-                }
+            if matches!(inst.op, Op::Lea)
+                && let Some(IROperand::Var(name)) = &inst.src1
+            {
+                lea_used.insert(name.clone());
             }
         }
-
-        let mut stack_params: HashMap<String, i32> = HashMap::new();
+        let mut stack_params: HashSet<String> = HashSet::new();
         {
             let mut n_int = 0usize;
             let mut n_flt = 0usize;
-            let mut slot = 0i32;
             for (param, ty) in &func.params {
                 let on_stack = if matches!(ty, IRType::Float) {
                     n_flt >= 8
@@ -131,9 +116,8 @@ impl AsmCodeGen {
                 }
                 if on_stack {
                     if let IROperand::Var(name) = param {
-                        stack_params.insert(name.clone(), slot);
+                        stack_params.insert(name.clone());
                     }
-                    slot += 1;
                 }
             }
         }
@@ -175,11 +159,7 @@ impl AsmCodeGen {
                             if !self.spill_vars.contains_key(&temp_key)
                                 && !self.vars.contains_key(&temp_key)
                             {
-                                let needs_slot = match self.alloc_regs.get(&temp_key) {
-                                    Some(reg) => !is_leaf && reg.reg_id() < 12,
-                                    None => true,
-                                };
-                                if needs_slot {
+                                if self.alloc_regs.get(&temp_key).is_none() {
                                     offset += 8;
                                     self.vars.insert(temp_key, offset);
                                 }
@@ -236,15 +216,9 @@ impl AsmCodeGen {
             }
             self.push_text(Asm::Mov(Operand::Reg(Reg::Rbp), Operand::Reg(Reg::Rsp)));
 
-            if used_regs.len() % 2 == 1 {
-                self.push_text(Asm::Sub(Operand::Reg(Reg::Rsp), Operand::Imm(8)));
-            }
-
-            if final_stack_size > 0 {
-                self.push_text(Asm::Sub(
-                    Operand::Reg(Reg::Rsp),
-                    Operand::Imm(final_stack_size as i64),
-                ));
+            let total = final_stack_size + if used_regs.len() % 2 == 1 { 8 } else { 0 };
+            if total > 0 {
+                self.push_text(Asm::Sub(Operand::Reg(Reg::Rsp), Operand::Imm(total as i64)));
             }
         }
 
@@ -374,6 +348,18 @@ impl AsmCodeGen {
                 i += 2;
                 continue;
             }
+
+            let needs_wrap = regalloc::clobbers_all_volatile(code, &self.program.constants);
+            if needs_wrap {
+                if let Some((regs, pad)) = self.call_saves.get(&i).cloned() {
+                    if pad {
+                        self.push_text(Asm::Sub(Operand::Reg(Reg::Rsp), Operand::Imm(8)));
+                    }
+                    for r in &regs {
+                        self.push_text(Asm::Push(*r));
+                    }
+                }
+            }
             match &code.op {
                 Op::Call => {
                     for (r, off) in &xmm_spill_slots {
@@ -405,6 +391,16 @@ impl AsmCodeGen {
                 }
                 _ => {
                     self.compile_code(code.clone())?;
+                }
+            }
+            if needs_wrap {
+                if let Some((regs, pad)) = self.call_saves.get(&i).cloned() {
+                    for r in regs.iter().rev() {
+                        self.push_text(Asm::Pop(*r));
+                    }
+                    if pad {
+                        self.push_text(Asm::Add(Operand::Reg(Reg::Rsp), Operand::Imm(8)));
+                    }
                 }
             }
             i += 1;
@@ -517,6 +513,7 @@ impl AsmCodeGen {
                     self.push_text(Asm::Jp(skip.clone()));
                     cc.emit(self, &label);
                     self.push_text(Asm::Label(skip));
+                    cc.emit(self, &label);
                 } else {
                     self.push_text(Asm::Jp(label.clone()));
                     self.push_text(Asm::Jne(label.clone()));
@@ -527,13 +524,57 @@ impl AsmCodeGen {
             self.invalidate_cached_reg(Reg::Xmm0);
             self.invalidate_cached_reg(Reg::Xmm1);
         } else {
-            self.load(a, Reg::Rax)?;
-            self.load(b, Reg::Rbx)?;
-            self.push_text(Asm::Cmp(Operand::Reg(Reg::Rax), Operand::Reg(Reg::Rbx)));
-            self.invalidate_cached_reg(Reg::Rax);
-            self.invalidate_cached_reg(Reg::Rbx);
+            let a_home = match a {
+                IROperand::Var(_) | IROperand::Temp(_, _) => self.alloc_regs.get(&a.key()).copied(),
+                _ => None,
+            };
+            let b_scratch: Option<Reg> = match b {
+                IROperand::ConstIdx(idx) => match &self.program.constants[*idx] {
+                    IRConst::Int(v) if *v >= i32::MIN as i64 && *v <= i32::MAX as i64 => None,
+                    IRConst::Int(_) => Some(Reg::R10),
+                    _ => Some(Reg::Rbx),
+                },
+                IROperand::Var(_) | IROperand::Temp(_, _) => None,
+                _ => Some(Reg::Rbx),
+            };
+            let a_reg = match a_home {
+                Some(h) if b_scratch.map(|s| s != h).unwrap_or(true) => h,
+                _ => {
+                    self.load(a, Reg::Rax)?;
+                    Reg::Rax
+                }
+            };
+            match b {
+                IROperand::ConstIdx(idx) => {
+                    if let IRConst::Int(v) = &self.program.constants[*idx] {
+                        if *v >= i32::MIN as i64 && *v <= i32::MAX as i64 {
+                            self.push_text(Asm::Cmp(Operand::Reg(a_reg), Operand::Imm(*v)));
+                        } else {
+                            self.load(b, Reg::R10)?;
+                            self.push_text(Asm::Cmp(Operand::Reg(a_reg), Operand::Reg(Reg::R10)));
+                            self.invalidate_cached_reg(Reg::R10);
+                        }
+                    } else {
+                        self.load(b, Reg::Rbx)?;
+                        self.push_text(Asm::Cmp(Operand::Reg(a_reg), Operand::Reg(Reg::Rbx)));
+                        self.invalidate_cached_reg(Reg::Rbx);
+                    }
+                }
+                IROperand::Var(_) | IROperand::Temp(_, _) => {
+                    let loc = self.get_location(b)?;
+                    self.push_text(Asm::Cmp(Operand::Reg(a_reg), loc));
+                }
+                _ => {
+                    self.load(b, Reg::Rbx)?;
+                    self.push_text(Asm::Cmp(Operand::Reg(a_reg), Operand::Reg(Reg::Rbx)));
+                    self.invalidate_cached_reg(Reg::Rbx);
+                }
+            }
+            if a_reg == Reg::Rax {
+                self.invalidate_cached_reg(Reg::Rax);
+            }
+            cc.emit(self, &label);
         }
-        cc.emit(self, &label);
         Ok(true)
     }
 }

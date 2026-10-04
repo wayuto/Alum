@@ -21,7 +21,7 @@ dependencies = [
 
 [[package]]
 name = "almk"
-version = "0.9.8"
+version = "0.9.9"
 dependencies = [
  "clap",
  "git2",

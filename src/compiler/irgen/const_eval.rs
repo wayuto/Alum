@@ -7,7 +7,7 @@ use crate::compiler::{
     parser::{Expr, Primitive, Program, Type},
 };
 use ordered_float::OrderedFloat;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 impl IRGen {
     pub(super) fn eval_const(
@@ -16,36 +16,56 @@ impl IRGen {
         ctx: Option<&Context>,
     ) -> Option<(IRConst, IRType)> {
         match expr {
-            Expr::Int(n, _) => Some((IRConst::Int(*n as i64), IRType::Int)),
-            Expr::Float(f, _) => Some((IRConst::Float(OrderedFloat(*f)), IRType::Float)),
-            Expr::String(s, _) => Some((IRConst::Str(s.clone()), IRType::String)),
-            Expr::Bool(b, _) => Some((IRConst::Int(if *b { 1 } else { 0 }), IRType::Bool)),
+            Expr::Int { value: n, .. } => Some((IRConst::Int(*n as i64), IRType::Int)),
+            Expr::Float { value: f, .. } => Some((IRConst::Float(OrderedFloat(*f)), IRType::Float)),
+            Expr::String { value: s, .. } => Some((IRConst::Str(s.clone()), IRType::String)),
+            Expr::Bool { value: b, .. } => {
+                Some((IRConst::Int(if *b { 1 } else { 0 }), IRType::Bool))
+            }
             Expr::Nil(_) => Some((IRConst::Int(0), IRType::Int)),
-            Expr::Var(name, _) => {
+            Expr::Var { name, .. } => {
                 if ctx.map(|c| c.get_var_type(name).is_ok()).unwrap_or(false) {
                     return None;
                 }
                 self.globals.get(name).cloned()
             }
-            Expr::Neg(e, _) => match self.eval_const(e, ctx)? {
+            Expr::Neg { expr: e, .. } => match self.eval_const(e, ctx)? {
                 (IRConst::Int(v), IRType::Int) => {
                     Some((IRConst::Int(v.wrapping_neg()), IRType::Int))
                 }
                 _ => None,
             },
-            Expr::FNeg(e, _) => match self.eval_const(e, ctx)? {
+            Expr::FNeg { expr: e, .. } => match self.eval_const(e, ctx)? {
                 (IRConst::Float(v), IRType::Float) => Some((IRConst::Float(-v), IRType::Float)),
                 _ => None,
             },
-            Expr::Add(l, r, _)
-            | Expr::Sub(l, r, _)
-            | Expr::Mul(l, r, _)
-            | Expr::Div(l, r, _)
-            | Expr::Mod(l, r, _)
-            | Expr::FAdd(l, r, _)
-            | Expr::FSub(l, r, _)
-            | Expr::FMul(l, r, _)
-            | Expr::FDiv(l, r, _) => {
+            Expr::Add {
+                left: l, right: r, ..
+            }
+            | Expr::Sub {
+                left: l, right: r, ..
+            }
+            | Expr::Mul {
+                left: l, right: r, ..
+            }
+            | Expr::Div {
+                left: l, right: r, ..
+            }
+            | Expr::Mod {
+                left: l, right: r, ..
+            }
+            | Expr::FAdd {
+                left: l, right: r, ..
+            }
+            | Expr::FSub {
+                left: l, right: r, ..
+            }
+            | Expr::FMul {
+                left: l, right: r, ..
+            }
+            | Expr::FDiv {
+                left: l, right: r, ..
+            } => {
                 let (lc, lt) = self.eval_const(l, ctx)?;
                 let (rc, rt) = self.eval_const(r, ctx)?;
                 if matches!(lt, IRType::Float) || matches!(rt, IRType::Float) {
@@ -54,10 +74,10 @@ impl IRGen {
                         _ => return None,
                     };
                     let v = match expr {
-                        Expr::FAdd(..) | Expr::Add(..) => a + b,
-                        Expr::FSub(..) | Expr::Sub(..) => a - b,
-                        Expr::FMul(..) | Expr::Mul(..) => a * b,
-                        Expr::FDiv(..) | Expr::Div(..) => a / b,
+                        Expr::FAdd { .. } | Expr::Add { .. } => a + b,
+                        Expr::FSub { .. } | Expr::Sub { .. } => a - b,
+                        Expr::FMul { .. } | Expr::Mul { .. } => a * b,
+                        Expr::FDiv { .. } | Expr::Div { .. } => a / b,
                         _ => return None,
                     };
                     Some((IRConst::Float(OrderedFloat(v)), IRType::Float))
@@ -67,16 +87,16 @@ impl IRGen {
                         _ => return None,
                     };
                     let v = match expr {
-                        Expr::Add(..) => a.wrapping_add(b),
-                        Expr::Sub(..) => a.wrapping_sub(b),
-                        Expr::Mul(..) => a.wrapping_mul(b),
-                        Expr::Div(..) => {
+                        Expr::Add { .. } => a.wrapping_add(b),
+                        Expr::Sub { .. } => a.wrapping_sub(b),
+                        Expr::Mul { .. } => a.wrapping_mul(b),
+                        Expr::Div { .. } => {
                             if b == 0 {
                                 return None;
                             }
                             a.wrapping_div(b)
                         }
-                        Expr::Mod(..) => {
+                        Expr::Mod { .. } => {
                             if b == 0 {
                                 return None;
                             }
@@ -100,7 +120,7 @@ impl IRGen {
             .program_body
             .iter()
             .filter_map(|e| match e {
-                Expr::FuncDecl(name, attrs, ..)
+                Expr::FuncDecl { name, attrs, .. }
                     if attrs.is_pure && (!attrs.is_external || self.native_resolved(name)) =>
                 {
                     Some(name.clone())
@@ -115,7 +135,16 @@ impl IRGen {
 
         let mut unsafe_fns: HashSet<String> = HashSet::new();
         for decl in self.program_body.iter() {
-            if let Expr::FuncDecl(name, attrs, _, _, _, body, _) = decl {
+            if let Expr::FuncDecl {
+                name,
+                attrs,
+                type_params: _,
+                params: _,
+                return_type: _,
+                body,
+                ..
+            } = decl
+            {
                 if (attrs.is_pure || name.starts_with("_lambda_"))
                     && (!attrs.is_external || self.native_resolved(name))
                 {
@@ -131,7 +160,7 @@ impl IRGen {
             .program_body
             .iter()
             .filter_map(|e| match e {
-                Expr::FuncDecl(name, attrs, ..)
+                Expr::FuncDecl { name, attrs, .. }
                     if ((attrs.is_pure || name.starts_with("_lambda_"))
                         && (!attrs.is_external || self.native_resolved(name))
                         && !unsafe_fns.contains(name)) =>
@@ -147,7 +176,7 @@ impl IRGen {
         for e in self.program_body.iter() {
             if matches!(
                 e,
-                Expr::Struct(..) | Expr::Union(..) | Expr::Enum(..) | Expr::TypeDef(_)
+                Expr::Struct { .. } | Expr::Union { .. } | Expr::Enum { .. } | Expr::TypeDef(_)
             ) {
                 body.push(e.clone());
             }
@@ -249,91 +278,258 @@ impl IRGen {
     fn expr_has_var(&self, expr: &Expr) -> bool {
         use Expr::*;
         match expr {
-            Int(..) | Float(..) | Bool(..) | String(..) | Nil(_) | Break(_) | Continue(_)
-            | TypeDef(_) | Struct(..) | Union(..) | Enum(..) => false,
-            Var(..) => true,
-            Call(f, _, args, _) => {
-                if !matches!(f.as_ref(), Var(..)) && self.expr_has_var(f) {
+            Int { .. }
+            | Float { .. }
+            | Char { .. }
+            | Bool { .. }
+            | String { .. }
+            | Nil(_)
+            | Continue(_)
+            | TypeDef(_)
+            | Struct { .. }
+            | Union { .. }
+            | Enum { .. } => false,
+            Break { value: v, .. } => v.as_ref().map(|v| self.expr_has_var(v)).unwrap_or(false),
+            Var { .. } => true,
+            Call {
+                callee: f,
+                type_args: _,
+                args,
+                ..
+            } => {
+                if !matches!(f.as_ref(), Var { .. }) && self.expr_has_var(f) {
                     return true;
                 }
                 args.iter().any(|a| self.expr_has_var(a))
             }
-            Block(stmts, _) => stmts.iter().any(|s| self.expr_has_var(s)),
-            If(c, t, e, _) => {
+            Block { stmts, .. } => stmts.iter().any(|s| self.expr_has_var(s)),
+            If {
+                cond: c,
+                then_branch: t,
+                else_branch: e,
+                ..
+            } => {
                 self.expr_has_var(c)
                     || self.expr_has_var(t)
                     || e.as_ref().map(|x| self.expr_has_var(x)).unwrap_or(false)
             }
-            While(c, b, _) => self.expr_has_var(c) || self.expr_has_var(b),
-            For(_, i, b, _) => self.expr_has_var(i) || self.expr_has_var(b),
-            Range(l, r, _) => self.expr_has_var(l) || self.expr_has_var(r),
-            Match(s, arms, d, _) => {
+            While {
+                cond: c, body: b, ..
+            } => self.expr_has_var(c) || self.expr_has_var(b),
+            For {
+                var: _,
+                iterable: i,
+                body: b,
+                ..
+            } => self.expr_has_var(i) || self.expr_has_var(b),
+            Range {
+                start: l, end: r, ..
+            } => self.expr_has_var(l) || self.expr_has_var(r),
+            Match {
+                target: s,
+                branches: arms,
+                default: d,
+                ..
+            } => {
                 self.expr_has_var(s)
-                    || arms
-                        .iter()
-                        .any(|(p, a)| self.expr_has_var(p) || self.expr_has_var(a))
+                    || arms.iter().any(|(p, g, a)| {
+                        self.expr_has_var(p)
+                            || g.as_ref().map(|g| self.expr_has_var(g)).unwrap_or(false)
+                            || self.expr_has_var(a)
+                    })
                     || d.as_ref().map(|x| self.expr_has_var(x)).unwrap_or(false)
             }
-            Return(v, _) => self.expr_has_var(v),
-            Lambda(_, b, _, _) => self.expr_has_var(b),
-            FuncDecl(_, _, _, _, _, b, _) => self.expr_has_var(b),
-            GlobalVar(..) | ExternVar(..) => false,
-            VarDecl(_, _, v, _) | ConstDecl(_, _, v, _, _) => self.expr_has_var(v),
-            Not(e, _) | BNot(e, _) | Neg(e, _) | FNeg(e, _) | AddressOf(e, _) | Deref(e, _) => {
-                self.expr_has_var(e)
+            Return { value: v, .. } => self.expr_has_var(v),
+            Lambda {
+                params: _, body: b, ..
+            } => self.expr_has_var(b),
+            FuncDecl {
+                name: _,
+                attrs: _,
+                type_params: _,
+                params: _,
+                return_type: _,
+                body: b,
+                ..
+            } => self.expr_has_var(b),
+            GlobalVar { .. } | ExternVar { .. } => false,
+            VarDecl {
+                name: _,
+                ty: _,
+                value: v,
+                ..
             }
-            Add(l, r, _)
-            | Sub(l, r, _)
-            | Mul(l, r, _)
-            | Div(l, r, _)
-            | Mod(l, r, _)
-            | FAdd(l, r, _)
-            | FSub(l, r, _)
-            | FMul(l, r, _)
-            | FDiv(l, r, _)
-            | Eq(l, r, _)
-            | Ne(l, r, _)
-            | Lt(l, r, _)
-            | Le(l, r, _)
-            | Gt(l, r, _)
-            | Ge(l, r, _)
-            | FEq(l, r, _)
-            | FNe(l, r, _)
-            | FLt(l, r, _)
-            | FLe(l, r, _)
-            | FGt(l, r, _)
-            | FGe(l, r, _)
-            | Xor(l, r, _)
-            | LAnd(l, r, _)
-            | LOr(l, r, _)
-            | Shl(l, r, _)
-            | Shr(l, r, _)
-            | StrCat(l, r, _)
-            | Index(l, r, _)
-            | DerefAssign(l, r, _) => self.expr_has_var(l) || self.expr_has_var(r),
-            IndexAssign(o, v, _) | MemberAssign(o, _, v, _) => {
-                self.expr_has_var(o) || self.expr_has_var(v)
+            | ConstDecl {
+                name: _,
+                ty: _,
+                value: v,
+                ..
+            } => self.expr_has_var(v),
+            Not { expr: e, .. }
+            | BNot { expr: e, .. }
+            | Neg { expr: e, .. }
+            | FNeg { expr: e, .. }
+            | AddressOf { expr: e, .. }
+            | Deref { expr: e, .. } => self.expr_has_var(e),
+            Add {
+                left: l, right: r, ..
             }
-            ArrayLiteral(items, _) => items.iter().any(|it| self.expr_has_var(it)),
-            ArrayFill(_, len, _) => self.expr_has_var(len),
-            StructLiteral(_, _, fields, _) | UnionLiteral(_, _, fields, _) => {
-                fields.iter().any(|(_, v)| self.expr_has_var(v))
+            | Sub {
+                left: l, right: r, ..
             }
-            MemberAccess(o, _, _) => self.expr_has_var(o),
-            Inc(..) | Dec(..) => false,
-            VarAssign(_, v, _)
-            | AddAssign(_, v, _)
-            | SubAssign(_, v, _)
-            | MulAssign(_, v, _)
-            | DivAssign(_, v, _)
-            | ModAssign(_, v, _)
-            | AndAssign(_, v, _)
-            | OrAssign(_, v, _)
-            | XorAssign(_, v, _)
-            | ShlAssign(_, v, _)
-            | ShrAssign(_, v, _) => self.expr_has_var(v),
-            FString(parts, _) => parts.iter().any(|p| self.expr_has_var(p)),
-            Cast(inner, _, _) => self.expr_has_var(inner),
+            | Mul {
+                left: l, right: r, ..
+            }
+            | Div {
+                left: l, right: r, ..
+            }
+            | Mod {
+                left: l, right: r, ..
+            }
+            | FAdd {
+                left: l, right: r, ..
+            }
+            | FSub {
+                left: l, right: r, ..
+            }
+            | FMul {
+                left: l, right: r, ..
+            }
+            | FDiv {
+                left: l, right: r, ..
+            }
+            | Eq {
+                left: l, right: r, ..
+            }
+            | Ne {
+                left: l, right: r, ..
+            }
+            | Lt {
+                left: l, right: r, ..
+            }
+            | Le {
+                left: l, right: r, ..
+            }
+            | Gt {
+                left: l, right: r, ..
+            }
+            | Ge {
+                left: l, right: r, ..
+            }
+            | FEq {
+                left: l, right: r, ..
+            }
+            | FNe {
+                left: l, right: r, ..
+            }
+            | FLt {
+                left: l, right: r, ..
+            }
+            | FLe {
+                left: l, right: r, ..
+            }
+            | FGt {
+                left: l, right: r, ..
+            }
+            | FGe {
+                left: l, right: r, ..
+            }
+            | Xor {
+                left: l, right: r, ..
+            }
+            | BAnd {
+                left: l, right: r, ..
+            }
+            | BOr {
+                left: l, right: r, ..
+            }
+            | LAnd {
+                left: l, right: r, ..
+            }
+            | LOr {
+                left: l, right: r, ..
+            }
+            | Shl {
+                left: l, right: r, ..
+            }
+            | Shr {
+                left: l, right: r, ..
+            }
+            | StrCat {
+                left: l, right: r, ..
+            }
+            | Index {
+                array: l, index: r, ..
+            }
+            | DerefAssign {
+                ptr: l, value: r, ..
+            } => self.expr_has_var(l) || self.expr_has_var(r),
+            IndexAssign {
+                target: o,
+                value: v,
+                ..
+            }
+            | MemberAssign {
+                obj: o,
+                field: _,
+                value: v,
+                ..
+            } => self.expr_has_var(o) || self.expr_has_var(v),
+            ArrayLiteral {
+                elements: items, ..
+            } => items.iter().any(|it| self.expr_has_var(it)),
+            ArrayFill {
+                elem_type: _, len, ..
+            } => self.expr_has_var(len),
+            StructLiteral {
+                name: _,
+                type_args: _,
+                fields,
+                ..
+            }
+            | UnionLiteral {
+                name: _,
+                type_args: _,
+                fields,
+                ..
+            } => fields.iter().any(|(_, v)| self.expr_has_var(v)),
+            MemberAccess { obj: o, .. } => self.expr_has_var(o),
+            Inc { .. } | Dec { .. } => false,
+            VarAssign {
+                name: _, value: v, ..
+            }
+            | AddAssign {
+                name: _, value: v, ..
+            }
+            | SubAssign {
+                name: _, value: v, ..
+            }
+            | MulAssign {
+                name: _, value: v, ..
+            }
+            | DivAssign {
+                name: _, value: v, ..
+            }
+            | ModAssign {
+                name: _, value: v, ..
+            }
+            | AndAssign {
+                name: _, value: v, ..
+            }
+            | OrAssign {
+                name: _, value: v, ..
+            }
+            | XorAssign {
+                name: _, value: v, ..
+            }
+            | ShlAssign {
+                name: _, value: v, ..
+            }
+            | ShrAssign {
+                name: _, value: v, ..
+            } => self.expr_has_var(v),
+            FString { segs: parts, .. } => parts.iter().any(|p| self.expr_has_var(p)),
+            Cast { expr: inner, .. } => self.expr_has_var(inner),
         }
     }
 }
@@ -342,16 +538,15 @@ fn order_vm_functions(selected: &mut Vec<(String, Expr)>) -> Vec<Expr> {
     if selected.is_empty() {
         return Vec::new();
     }
-
     selected.sort_by(|a, b| a.0.cmp(&b.0));
-    let decls: HashMap<String, Expr> = selected.drain(..).collect();
+    let decls: BTreeMap<String, Expr> = selected.drain(..).collect();
     let mut ordered: Vec<Expr> = Vec::new();
     let mut done: HashSet<String> = HashSet::new();
     let mut in_progress: HashSet<String> = HashSet::new();
 
     fn emit(
         name: &str,
-        decls: &HashMap<String, Expr>,
+        decls: &BTreeMap<String, Expr>,
         ordered: &mut Vec<Expr>,
         done: &mut HashSet<String>,
         in_progress: &mut HashSet<String>,
@@ -363,7 +558,7 @@ fn order_vm_functions(selected: &mut Vec<(String, Expr)>) -> Vec<Expr> {
             return;
         };
         in_progress.insert(name.to_string());
-        let mut deps: HashSet<String> = HashSet::new();
+        let mut deps: BTreeSet<String> = BTreeSet::new();
         collect_var_refs(decl, &mut deps);
         for dep in deps {
             emit(&dep, decls, ordered, done, in_progress);
@@ -380,128 +575,304 @@ fn order_vm_functions(selected: &mut Vec<(String, Expr)>) -> Vec<Expr> {
     ordered
 }
 
-fn collect_var_refs(expr: &Expr, out: &mut HashSet<String>) {
+fn collect_var_refs(expr: &Expr, out: &mut BTreeSet<String>) {
     use Expr::*;
     match expr {
-        Int(..) | Float(..) | Bool(..) | String(..) | Nil(_) | Break(_) | Continue(_)
-        | TypeDef(_) | Struct(..) | Union(..) | Enum(..) | GlobalVar(..) | ExternVar(..) => {}
-        Var(name, _) => {
+        Int { .. }
+        | Float { .. }
+        | Char { .. }
+        | Bool { .. }
+        | String { .. }
+        | Nil(_)
+        | Continue(_)
+        | TypeDef(_)
+        | Struct { .. }
+        | Union { .. }
+        | Enum { .. }
+        | GlobalVar { .. }
+        | ExternVar { .. } => {}
+        Break { value: v, .. } => {
+            if let Some(v) = v {
+                collect_var_refs(v, out);
+            }
+        }
+        Var { name, .. } => {
             out.insert(name.clone());
         }
-        FuncDecl(_, _, _, _, _, body, _) => {
+        FuncDecl {
+            name: _,
+            attrs: _,
+            type_params: _,
+            params: _,
+            return_type: _,
+            body,
+            ..
+        } => {
             collect_var_refs(body, out);
         }
-        Call(f, _, args, _) => {
+        Call {
+            callee: f,
+            type_args: _,
+            args,
+            ..
+        } => {
             collect_var_refs(f, out);
             for a in args {
                 collect_var_refs(a, out);
             }
         }
-        Block(stmts, _) => {
+        Block { stmts, .. } => {
             for s in stmts {
                 collect_var_refs(s, out);
             }
         }
-        If(c, t, e, _) => {
+        If {
+            cond: c,
+            then_branch: t,
+            else_branch: e,
+            ..
+        } => {
             collect_var_refs(c, out);
             collect_var_refs(t, out);
             if let Some(x) = e {
                 collect_var_refs(x, out);
             }
         }
-        While(c, b, _) | Range(c, b, _) => {
+        While {
+            cond: c, body: b, ..
+        }
+        | Range {
+            start: c, end: b, ..
+        } => {
             collect_var_refs(c, out);
             collect_var_refs(b, out);
         }
-        For(_, i, b, _) => {
+        For {
+            var: _,
+            iterable: i,
+            body: b,
+            ..
+        } => {
             collect_var_refs(i, out);
             collect_var_refs(b, out);
         }
-        Match(s, arms, d, _) => {
+        Match {
+            target: s,
+            branches: arms,
+            default: d,
+            ..
+        } => {
             collect_var_refs(s, out);
-            for (p, a) in arms {
+            for (p, g, a) in arms {
                 collect_var_refs(p, out);
+                if let Some(g) = g {
+                    collect_var_refs(g, out);
+                }
                 collect_var_refs(a, out);
             }
             if let Some(x) = d {
                 collect_var_refs(x, out);
             }
         }
-        Return(v, _)
-        | Not(v, _)
-        | BNot(v, _)
-        | Neg(v, _)
-        | FNeg(v, _)
-        | AddressOf(v, _)
-        | Deref(v, _) => collect_var_refs(v, out),
-        Lambda(_, b, _, _) => collect_var_refs(b, out),
-        VarDecl(_, _, v, _) | ConstDecl(_, _, v, _, _) => collect_var_refs(v, out),
-        Add(l, r, _)
-        | Sub(l, r, _)
-        | Mul(l, r, _)
-        | Div(l, r, _)
-        | Mod(l, r, _)
-        | FAdd(l, r, _)
-        | FSub(l, r, _)
-        | FMul(l, r, _)
-        | FDiv(l, r, _)
-        | Eq(l, r, _)
-        | Ne(l, r, _)
-        | Lt(l, r, _)
-        | Le(l, r, _)
-        | Gt(l, r, _)
-        | Ge(l, r, _)
-        | FEq(l, r, _)
-        | FNe(l, r, _)
-        | FLt(l, r, _)
-        | FLe(l, r, _)
-        | FGt(l, r, _)
-        | FGe(l, r, _)
-        | Xor(l, r, _)
-        | LAnd(l, r, _)
-        | LOr(l, r, _)
-        | Shl(l, r, _)
-        | Shr(l, r, _)
-        | StrCat(l, r, _)
-        | Index(l, r, _)
-        | DerefAssign(l, r, _) => {
+        Return { value: v, .. }
+        | Not { expr: v, .. }
+        | BNot { expr: v, .. }
+        | Neg { expr: v, .. }
+        | FNeg { expr: v, .. }
+        | AddressOf { expr: v, .. }
+        | Deref { expr: v, .. } => collect_var_refs(v, out),
+        Lambda {
+            params: _, body: b, ..
+        } => collect_var_refs(b, out),
+        VarDecl {
+            name: _,
+            ty: _,
+            value: v,
+            ..
+        }
+        | ConstDecl {
+            name: _,
+            ty: _,
+            value: v,
+            ..
+        } => collect_var_refs(v, out),
+        Add {
+            left: l, right: r, ..
+        }
+        | Sub {
+            left: l, right: r, ..
+        }
+        | Mul {
+            left: l, right: r, ..
+        }
+        | Div {
+            left: l, right: r, ..
+        }
+        | Mod {
+            left: l, right: r, ..
+        }
+        | FAdd {
+            left: l, right: r, ..
+        }
+        | FSub {
+            left: l, right: r, ..
+        }
+        | FMul {
+            left: l, right: r, ..
+        }
+        | FDiv {
+            left: l, right: r, ..
+        }
+        | Eq {
+            left: l, right: r, ..
+        }
+        | Ne {
+            left: l, right: r, ..
+        }
+        | Lt {
+            left: l, right: r, ..
+        }
+        | Le {
+            left: l, right: r, ..
+        }
+        | Gt {
+            left: l, right: r, ..
+        }
+        | Ge {
+            left: l, right: r, ..
+        }
+        | FEq {
+            left: l, right: r, ..
+        }
+        | FNe {
+            left: l, right: r, ..
+        }
+        | FLt {
+            left: l, right: r, ..
+        }
+        | FLe {
+            left: l, right: r, ..
+        }
+        | FGt {
+            left: l, right: r, ..
+        }
+        | FGe {
+            left: l, right: r, ..
+        }
+        | Xor {
+            left: l, right: r, ..
+        }
+        | BAnd {
+            left: l, right: r, ..
+        }
+        | BOr {
+            left: l, right: r, ..
+        }
+        | LAnd {
+            left: l, right: r, ..
+        }
+        | LOr {
+            left: l, right: r, ..
+        }
+        | Shl {
+            left: l, right: r, ..
+        }
+        | Shr {
+            left: l, right: r, ..
+        }
+        | StrCat {
+            left: l, right: r, ..
+        }
+        | Index {
+            array: l, index: r, ..
+        }
+        | DerefAssign {
+            ptr: l, value: r, ..
+        } => {
             collect_var_refs(l, out);
             collect_var_refs(r, out);
         }
-        IndexAssign(o, v, _) | MemberAssign(o, _, v, _) => {
+        IndexAssign {
+            target: o,
+            value: v,
+            ..
+        }
+        | MemberAssign {
+            obj: o,
+            field: _,
+            value: v,
+            ..
+        } => {
             collect_var_refs(o, out);
             collect_var_refs(v, out);
         }
-        ArrayLiteral(items, _) => {
+        ArrayLiteral {
+            elements: items, ..
+        } => {
             for it in items {
                 collect_var_refs(it, out);
             }
         }
-        ArrayFill(_, len, _) => collect_var_refs(len, out),
-        StructLiteral(_, _, fields, _) | UnionLiteral(_, _, fields, _) => {
+        ArrayFill {
+            elem_type: _, len, ..
+        } => collect_var_refs(len, out),
+        StructLiteral {
+            name: _,
+            type_args: _,
+            fields,
+            ..
+        }
+        | UnionLiteral {
+            name: _,
+            type_args: _,
+            fields,
+            ..
+        } => {
             for (_, v) in fields {
                 collect_var_refs(v, out);
             }
         }
-        MemberAccess(o, _, _) => collect_var_refs(o, out),
-        Inc(..) | Dec(..) => {}
-        VarAssign(_, v, _)
-        | AddAssign(_, v, _)
-        | SubAssign(_, v, _)
-        | MulAssign(_, v, _)
-        | DivAssign(_, v, _)
-        | ModAssign(_, v, _)
-        | AndAssign(_, v, _)
-        | OrAssign(_, v, _)
-        | XorAssign(_, v, _)
-        | ShlAssign(_, v, _)
-        | ShrAssign(_, v, _) => collect_var_refs(v, out),
-        FString(parts, _) => {
+        MemberAccess { obj: o, .. } => collect_var_refs(o, out),
+        Inc { .. } | Dec { .. } => {}
+        VarAssign {
+            name: _, value: v, ..
+        }
+        | AddAssign {
+            name: _, value: v, ..
+        }
+        | SubAssign {
+            name: _, value: v, ..
+        }
+        | MulAssign {
+            name: _, value: v, ..
+        }
+        | DivAssign {
+            name: _, value: v, ..
+        }
+        | ModAssign {
+            name: _, value: v, ..
+        }
+        | AndAssign {
+            name: _, value: v, ..
+        }
+        | OrAssign {
+            name: _, value: v, ..
+        }
+        | XorAssign {
+            name: _, value: v, ..
+        }
+        | ShlAssign {
+            name: _, value: v, ..
+        }
+        | ShrAssign {
+            name: _, value: v, ..
+        } => collect_var_refs(v, out),
+        FString { segs: parts, .. } => {
             for p in parts {
                 collect_var_refs(p, out);
             }
         }
-        Cast(inner, _, _) => collect_var_refs(inner, out),
+        Cast { expr: inner, .. } => collect_var_refs(inner, out),
     }
 }
 

@@ -7,7 +7,16 @@ const IMPURE_LAMBDA_MARKER: &str = "!\u{03bb}";
 pub fn check_pure_functions(body: &[Expr]) -> Result<(), CodeGenError> {
     let mut decls: HashMap<&str, (bool, bool, &Expr)> = HashMap::new();
     for expr in body {
-        if let Expr::FuncDecl(name, attrs, _, _, _, func_body, _) = expr {
+        if let Expr::FuncDecl {
+            name,
+            attrs,
+            type_params: _,
+            params: _,
+            return_type: _,
+            body: func_body,
+            ..
+        } = expr
+        {
             decls.insert(name, (attrs.is_pure, attrs.is_external, func_body));
         }
     }
@@ -15,7 +24,7 @@ pub fn check_pure_functions(body: &[Expr]) -> Result<(), CodeGenError> {
     let globals: HashSet<String> = body
         .iter()
         .filter_map(|e| match e {
-            Expr::GlobalVar(name, ..) => Some(name.to_string()),
+            Expr::GlobalVar { name, .. } => Some(name.to_string()),
             _ => None,
         })
         .collect();
@@ -24,7 +33,16 @@ pub fn check_pure_functions(body: &[Expr]) -> Result<(), CodeGenError> {
     let mut memo: HashMap<String, bool> = HashMap::new();
 
     for expr in body {
-        let Expr::FuncDecl(name, attrs, _, _, _, func_body, span) = expr else {
+        let Expr::FuncDecl {
+            name,
+            attrs,
+            type_params: _,
+            params: _,
+            return_type: _,
+            body: func_body,
+            span,
+        } = expr
+        else {
             continue;
         };
         if attrs.is_external {
@@ -66,10 +84,6 @@ pub fn check_pure_functions(body: &[Expr]) -> Result<(), CodeGenError> {
     Ok(())
 }
 
-pub(super) fn check_lambda_params(_program_body: &[Expr]) -> Result<(), CodeGenError> {
-    Ok(())
-}
-
 fn op_err(fn_name: &str, what: &str, _span: Span) -> CodeGenError {
     CodeGenError::NameError {
         message: format!("pure function '{}' may not {}", fn_name, what),
@@ -88,11 +102,34 @@ fn classify(
     use Expr::*;
 
     match expr {
-        Var(name, _) if globals.contains(name) => Err(format!("read mutable global '{}'", name)),
-        Int(..) | Float(..) | Bool(..) | String(..) | Nil(_) | Var(..) | Break(_) | Continue(_)
-        | TypeDef(_) | Struct(..) | Union(..) | Enum(..) => Ok(()),
+        Var { name, .. } if globals.contains(name) => {
+            Err(format!("read mutable global '{}'", name))
+        }
+        Int { .. }
+        | Float { .. }
+        | Char { .. }
+        | Bool { .. }
+        | String { .. }
+        | Nil(_)
+        | Var { .. }
+        | Continue(_)
+        | TypeDef(_)
+        | Struct { .. }
+        | Union { .. }
+        | Enum { .. } => Ok(()),
+        Break { value: v, .. } => {
+            if let Some(v) = v {
+                classify(fn_name, v, decls, globals, in_progress, memo, bound)?;
+            }
+            Ok(())
+        }
 
-        Call(callee, _, args, _) => {
+        Call {
+            callee,
+            type_args: _,
+            args,
+            ..
+        } => {
             let Some(name) = callee_name(callee) else {
                 return Err("indirect call (callee is not a function name)".to_string());
             };
@@ -112,7 +149,7 @@ fn classify(
             Ok(())
         }
 
-        Block(stmts, _) => {
+        Block { stmts, .. } => {
             let saved = bound.clone();
             for s in stmts {
                 classify(fn_name, s, decls, globals, in_progress, memo, bound)?;
@@ -120,7 +157,12 @@ fn classify(
             *bound = saved;
             Ok(())
         }
-        If(cond, then_e, else_e, _) => {
+        If {
+            cond,
+            then_branch: then_e,
+            else_branch: else_e,
+            ..
+        } => {
             classify(fn_name, cond, decls, globals, in_progress, memo, bound)?;
             let saved = bound.clone();
             classify(fn_name, then_e, decls, globals, in_progress, memo, bound)?;
@@ -132,29 +174,44 @@ fn classify(
             }
             Ok(())
         }
-        While(cond, body, _) => {
+        While { cond, body, .. } => {
             classify(fn_name, cond, decls, globals, in_progress, memo, bound)?;
             let saved = bound.clone();
             let r = classify(fn_name, body, decls, globals, in_progress, memo, bound);
             *bound = saved;
             r
         }
-        For(_, iter, body, _) => {
+        For {
+            var: _,
+            iterable: iter,
+            body,
+            ..
+        } => {
             classify(fn_name, iter, decls, globals, in_progress, memo, bound)?;
             let saved = bound.clone();
             let r = classify(fn_name, body, decls, globals, in_progress, memo, bound);
             *bound = saved;
             r
         }
-        Range(l, r, _) => {
+        Range {
+            start: l, end: r, ..
+        } => {
             classify(fn_name, l, decls, globals, in_progress, memo, bound)?;
             classify(fn_name, r, decls, globals, in_progress, memo, bound)
         }
-        Match(scrutinee, arms, default, _) => {
+        Match {
+            target: scrutinee,
+            branches: arms,
+            default,
+            ..
+        } => {
             classify(fn_name, scrutinee, decls, globals, in_progress, memo, bound)?;
-            for (pat, arm) in arms {
+            for (pat, guard, arm) in arms {
                 let saved = bound.clone();
                 classify(fn_name, pat, decls, globals, in_progress, memo, bound)?;
+                if let Some(guard) = guard {
+                    classify(fn_name, guard, decls, globals, in_progress, memo, bound)?;
+                }
                 classify(fn_name, arm, decls, globals, in_progress, memo, bound)?;
                 *bound = saved;
             }
@@ -165,86 +222,168 @@ fn classify(
             }
             Ok(())
         }
-        Return(value, _) => classify(fn_name, value, decls, globals, in_progress, memo, bound),
-        Lambda(_, lbody, _, _) => {
-            check_lambda_body(fn_name, lbody, decls, globals, in_progress, memo)
-        }
-        FuncDecl(_, _, _, _, _, nested, _) => {
-            classify(fn_name, nested, decls, globals, in_progress, memo, bound)
-        }
+        Return { value, .. } => classify(fn_name, value, decls, globals, in_progress, memo, bound),
+        Lambda {
+            params: _,
+            body: lbody,
+            ..
+        } => check_lambda_body(fn_name, lbody, decls, globals, in_progress, memo),
+        FuncDecl {
+            name: _,
+            attrs: _,
+            type_params: _,
+            params: _,
+            return_type: _,
+            body: nested,
+            ..
+        } => classify(fn_name, nested, decls, globals, in_progress, memo, bound),
 
-        GlobalVar(name, _, _, _, _) => Err(format!("declare global variable '{}'", name)),
-        ExternVar(name, _, _) => Err(format!("declare extern variable '{}'", name)),
-        VarDecl(name, _, value, _) => {
+        GlobalVar { name, .. } => Err(format!("declare global variable '{}'", name)),
+        ExternVar { name, .. } => Err(format!("declare extern variable '{}'", name)),
+        VarDecl {
+            name, ty: _, value, ..
+        } => {
             let result = classify(fn_name, value, decls, globals, in_progress, memo, bound);
             if let Ok(()) = &result {
                 bind_value(name, value, decls, globals, in_progress, memo, bound);
             }
             result
         }
-        ConstDecl(_, _, value, _, _) => {
-            classify(fn_name, value, decls, globals, in_progress, memo, bound)
-        }
+        ConstDecl {
+            name: _,
+            ty: _,
+            value,
+            ..
+        } => classify(fn_name, value, decls, globals, in_progress, memo, bound),
 
-        Not(e, _) | BNot(e, _) | Neg(e, _) | FNeg(e, _) => {
+        Not { expr: e, .. } | BNot { expr: e, .. } | Neg { expr: e, .. } | FNeg { expr: e, .. } => {
             classify(fn_name, e, decls, globals, in_progress, memo, bound)
         }
-        AddressOf(e, _) | Deref(e, _) => Err(format!(
+        AddressOf { expr: e, .. } | Deref { expr: e, .. } => Err(format!(
             "dereference or take address '{}' (pointer access escapes local state)",
             match &**e {
-                Var(name, _) => name.clone(),
+                Var { name, .. } => name.clone(),
                 _ => "<expr>".to_string(),
             }
         )),
-        Add(l, r, _)
-        | Sub(l, r, _)
-        | Mul(l, r, _)
-        | Div(l, r, _)
-        | Mod(l, r, _)
-        | FAdd(l, r, _)
-        | FSub(l, r, _)
-        | FMul(l, r, _)
-        | FDiv(l, r, _)
-        | Eq(l, r, _)
-        | Ne(l, r, _)
-        | Lt(l, r, _)
-        | Le(l, r, _)
-        | Gt(l, r, _)
-        | Ge(l, r, _)
-        | FEq(l, r, _)
-        | FNe(l, r, _)
-        | FLt(l, r, _)
-        | FLe(l, r, _)
-        | FGt(l, r, _)
-        | FGe(l, r, _)
-        | Xor(l, r, _)
-        | LAnd(l, r, _)
-        | LOr(l, r, _)
-        | Shl(l, r, _)
-        | Shr(l, r, _)
-        | StrCat(l, r, _)
-        | Index(l, r, _) => {
+        Add {
+            left: l, right: r, ..
+        }
+        | Sub {
+            left: l, right: r, ..
+        }
+        | Mul {
+            left: l, right: r, ..
+        }
+        | Div {
+            left: l, right: r, ..
+        }
+        | Mod {
+            left: l, right: r, ..
+        }
+        | FAdd {
+            left: l, right: r, ..
+        }
+        | FSub {
+            left: l, right: r, ..
+        }
+        | FMul {
+            left: l, right: r, ..
+        }
+        | FDiv {
+            left: l, right: r, ..
+        }
+        | Eq {
+            left: l, right: r, ..
+        }
+        | Ne {
+            left: l, right: r, ..
+        }
+        | Lt {
+            left: l, right: r, ..
+        }
+        | Le {
+            left: l, right: r, ..
+        }
+        | Gt {
+            left: l, right: r, ..
+        }
+        | Ge {
+            left: l, right: r, ..
+        }
+        | FEq {
+            left: l, right: r, ..
+        }
+        | FNe {
+            left: l, right: r, ..
+        }
+        | FLt {
+            left: l, right: r, ..
+        }
+        | FLe {
+            left: l, right: r, ..
+        }
+        | FGt {
+            left: l, right: r, ..
+        }
+        | FGe {
+            left: l, right: r, ..
+        }
+        | Xor {
+            left: l, right: r, ..
+        }
+        | BAnd {
+            left: l, right: r, ..
+        }
+        | BOr {
+            left: l, right: r, ..
+        }
+        | LAnd {
+            left: l, right: r, ..
+        }
+        | LOr {
+            left: l, right: r, ..
+        }
+        | Shl {
+            left: l, right: r, ..
+        }
+        | Shr {
+            left: l, right: r, ..
+        }
+        | StrCat {
+            left: l, right: r, ..
+        }
+        | Index {
+            array: l, index: r, ..
+        } => {
             classify(fn_name, l, decls, globals, in_progress, memo, bound)?;
             classify(fn_name, r, decls, globals, in_progress, memo, bound)
         }
-        DerefAssign(_, _, _) => {
+        DerefAssign { .. } => {
             Err("pointer store (write through pointer) in a pure function".to_string())
         }
-        IndexAssign(_, _, _) => {
+        IndexAssign { .. } => {
             Err("array store (write through pointer) in a pure function".to_string())
         }
-        MemberAccess(obj, _, _) => classify(fn_name, obj, decls, globals, in_progress, memo, bound),
-        MemberAssign(obj, _, value, _) => {
+        MemberAccess { obj, .. } => {
+            classify(fn_name, obj, decls, globals, in_progress, memo, bound)
+        }
+        MemberAssign {
+            obj,
+            field: _,
+            value,
+            ..
+        } => {
             classify(fn_name, obj, decls, globals, in_progress, memo, bound)?;
             classify(fn_name, value, decls, globals, in_progress, memo, bound)
         }
-        VarAssign(name, value, _) => {
+        VarAssign { name, value, .. } => {
             if globals.contains(name) {
                 return Err(format!("write to global '{}'", name));
             }
             let result = classify(fn_name, value, decls, globals, in_progress, memo, bound);
             match value.as_ref() {
-                Var(..) => {
+                Var { .. } => {
                     bind_value(name, value, decls, globals, in_progress, memo, bound);
                 }
                 _ => {
@@ -253,53 +392,71 @@ fn classify(
             }
             result
         }
-        AddAssign(name, value, _)
-        | SubAssign(name, value, _)
-        | MulAssign(name, value, _)
-        | DivAssign(name, value, _)
-        | ModAssign(name, value, _)
-        | AndAssign(name, value, _)
-        | OrAssign(name, value, _)
-        | XorAssign(name, value, _)
-        | ShlAssign(name, value, _)
-        | ShrAssign(name, value, _) => {
+        AddAssign { name, value, .. }
+        | SubAssign { name, value, .. }
+        | MulAssign { name, value, .. }
+        | DivAssign { name, value, .. }
+        | ModAssign { name, value, .. }
+        | AndAssign { name, value, .. }
+        | OrAssign { name, value, .. }
+        | XorAssign { name, value, .. }
+        | ShlAssign { name, value, .. }
+        | ShrAssign { name, value, .. } => {
             if globals.contains(name) {
                 return Err(format!("write to global '{}'", name));
             }
             classify(fn_name, value, decls, globals, in_progress, memo, bound)
         }
-        Inc(name, _) | Dec(name, _) => {
+        Inc { name, .. } | Dec { name, .. } => {
             if globals.contains(name) {
                 return Err(format!("write to global '{}'", name));
             }
             Ok(())
         }
-        ArrayLiteral(items, _) => {
+        ArrayLiteral {
+            elements: items, ..
+        } => {
             for it in items {
                 classify(fn_name, it, decls, globals, in_progress, memo, bound)?;
             }
             Ok(())
         }
-        ArrayFill(_, size, _) => classify(fn_name, size, decls, globals, in_progress, memo, bound),
-        StructLiteral(_, _, fields, _) => {
+        ArrayFill {
+            elem_type: _,
+            len: size,
+            ..
+        } => classify(fn_name, size, decls, globals, in_progress, memo, bound),
+        StructLiteral {
+            name: _,
+            type_args: _,
+            fields,
+            ..
+        } => {
             for (_, v) in fields {
                 classify(fn_name, v, decls, globals, in_progress, memo, bound)?;
             }
             Ok(())
         }
-        UnionLiteral(_, _, fields, _) => {
+        UnionLiteral {
+            name: _,
+            type_args: _,
+            fields,
+            ..
+        } => {
             for (_, v) in fields {
                 classify(fn_name, v, decls, globals, in_progress, memo, bound)?;
             }
             Ok(())
         }
-        FString(parts, _) => {
+        FString { segs: parts, .. } => {
             for p in parts {
                 classify(fn_name, p, decls, globals, in_progress, memo, bound)?;
             }
             Ok(())
         }
-        Cast(inner, _, _) => classify(fn_name, inner, decls, globals, in_progress, memo, bound),
+        Cast { expr: inner, .. } => {
+            classify(fn_name, inner, decls, globals, in_progress, memo, bound)
+        }
     }
 }
 
@@ -351,7 +508,7 @@ fn bind_value(
     bound: &mut HashMap<String, String>,
 ) {
     match value {
-        Expr::Var(v, _) => {
+        Expr::Var { name: v, .. } => {
             if let Some(target) = bound.get(v) {
                 bound.insert(name.to_string(), target.clone());
             } else if v.starts_with("_lambda_") {
@@ -364,7 +521,11 @@ fn bind_value(
                 bound.insert(name.to_string(), v.clone());
             }
         }
-        Expr::Lambda(_, lbody, _, _) => {
+        Expr::Lambda {
+            params: _,
+            body: lbody,
+            ..
+        } => {
             let mut inner: HashMap<String, String> = HashMap::new();
             if classify(
                 "lambda",
@@ -406,7 +567,7 @@ fn check_lambda_body(
 
 fn callee_name(callee: &Expr) -> Option<&str> {
     match callee {
-        Expr::Var(name, _) => Some(name),
+        Expr::Var { name, .. } => Some(name),
         _ => None,
     }
 }

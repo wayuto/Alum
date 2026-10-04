@@ -46,6 +46,8 @@ struct Interval {
     start: usize,
     end: usize,
     range_mask: u32,
+
+    mask_volatile: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -55,6 +57,11 @@ pub struct Allocation {
     pub stack_size: usize,
     pub used_callee_saved: Vec<Reg>,
     pub xmm_saved: Vec<(Reg, usize)>,
+    pub is_leaf: bool,
+
+    pub call_saves: HashMap<usize, (Vec<Reg>, bool)>,
+
+    pub debug_intervals: Vec<(String, usize, usize, Reg)>,
 }
 
 fn build_label_map(instructions: &[Instruction]) -> HashMap<String, usize> {
@@ -144,22 +151,38 @@ fn arg_reg_bit(n: usize) -> u32 {
     }
 }
 
+fn src2_clobber(src2: Option<&Operand>, constants: &[IRConst]) -> u32 {
+    match src2 {
+        Some(Operand::ConstIdx(idx)) => match &constants[*idx] {
+            IRConst::Int(v) if *v >= i32::MIN as i64 && *v <= i32::MAX as i64 => R_RAX,
+            IRConst::Int(_) => R_RAX | R_R10,
+            _ => R_RAX | R_RBX | R_R10,
+        },
+        Some(Operand::Var(_) | Operand::Temp(_, _)) => R_RAX,
+        _ => R_RAX | R_RBX | R_R10,
+    }
+}
+
 fn op_clobbers(inst: &Instruction, constants: &[IRConst]) -> u32 {
     let base = match &inst.op {
         Op::Move | Op::Load | Op::Store | Op::GlobLoad | Op::GlobStore => R_RAX | R_R10,
         Op::FMove | Op::FLoad | Op::FStore | Op::FGlobLoad | Op::FGlobStore => R_R10,
-        Op::Add | Op::Sub | Op::Mul | Op::LAnd | Op::LOr | Op::Xor => R_RAX | R_RBX | R_R10,
+        Op::Add | Op::Sub | Op::Mul | Op::LAnd | Op::LOr | Op::And | Op::Or | Op::Xor => {
+            src2_clobber(inst.src2.as_ref(), constants)
+        }
         Op::Shl | Op::Shr => R_RAX | R_RCX | R_R10,
         Op::BNot => R_RAX | R_R10,
         Op::Div | Op::Mod => R_RAX | R_RDX | R_RBX | R_R10,
         Op::FAdd | Op::FSub | Op::FMul | Op::FDiv => R_R10,
-        Op::Eq | Op::Ne | Op::Gt | Op::Ge | Op::Lt | Op::Le => R_RAX | R_RBX | R_R10,
+        Op::Eq | Op::Ne | Op::Gt | Op::Ge | Op::Lt | Op::Le => {
+            src2_clobber(inst.src2.as_ref(), constants)
+        }
         Op::FEq | Op::FNe => R_RAX | R_RCX | R_R10,
         Op::FGt | Op::FGe | Op::FLt | Op::FLe => R_RAX | R_R10,
         Op::StrEq | Op::StrNe | Op::StrLt | Op::StrLe | Op::StrGt | Op::StrGe => ALL_VOLATILE,
         Op::Neg | Op::Inc | Op::Dec | Op::SizeOf | Op::Not => R_RAX | R_R10,
         Op::FNeg => R_R10,
-        Op::Range => ALL_VOLATILE,
+        Op::Range(..) => ALL_VOLATILE,
         Op::Arg(n) => {
             if *n < 6 {
                 arg_reg_bit(*n) | R_R10
@@ -179,7 +202,8 @@ fn op_clobbers(inst: &Instruction, constants: &[IRConst]) -> u32 {
         Op::JumpIfFalse | Op::JumpIfTrue => R_RAX | R_R10,
         Op::ArrayAccess | Op::ByteAccess => R_RAX | R_RCX | R_R10,
         Op::ArrayAssign | Op::ByteAssign => R_RAX | R_RCX | R_RDX | R_R10,
-        Op::StrByte | Op::StrCat => ALL_VOLATILE | R_R15,
+        Op::StrByte => ALL_VOLATILE | R_R15,
+        Op::StrCat => ALL_VOLATILE | R_RBX | R_R15,
         Op::Lea => R_RAX | R_R10,
         Op::Malloc | Op::Free => ALL_VOLATILE,
         Op::StoreAt | Op::LoadAt => R_RAX | R_R10 | R_R11,
@@ -197,16 +221,15 @@ fn op_clobbers(inst: &Instruction, constants: &[IRConst]) -> u32 {
     base
 }
 
+pub fn clobbers_all_volatile(inst: &Instruction, constants: &[IRConst]) -> bool {
+    op_clobbers(inst, constants) & ALL_VOLATILE == ALL_VOLATILE
+}
+
 fn compute_liveness(
     instructions: &[Instruction],
     label_map: &HashMap<String, usize>,
     constants: &[IRConst],
-) -> (
-    Vec<HashSet<String>>,
-    Vec<HashSet<String>>,
-    HashMap<String, usize>,
-    HashMap<String, usize>,
-) {
+) -> (HashMap<String, usize>, HashMap<String, usize>) {
     let inst_count = instructions.len();
     let mut live_in: Vec<HashSet<String>> = vec![HashSet::new(); inst_count];
     let mut live_out: Vec<HashSet<String>> = vec![HashSet::new(); inst_count];
@@ -323,7 +346,7 @@ fn compute_liveness(
         }
     }
 
-    (live_in, live_out, first_def_or_use, last_live)
+    (first_def_or_use, last_live)
 }
 
 fn compute_intervals(
@@ -342,12 +365,7 @@ fn compute_intervals(
         if seen.insert(k.clone()) {
             let start = first_def_or_use.get(&k).copied().unwrap_or(0);
             let end = last_live.get(&k).copied().unwrap_or(start);
-            let mut range_mask = 0u32;
-            for j in (start + 1)..=end {
-                if j < instructions.len() {
-                    range_mask |= op_clobbers(&instructions[j], constants);
-                }
-            }
+            let (range_mask, mask_volatile) = span_masks(instructions, start, end, constants);
             let is_float = match op {
                 Operand::Temp(_, ty) => *ty == IRType::Float,
                 Operand::Var(name) => float_vars.contains(name),
@@ -359,6 +377,7 @@ fn compute_intervals(
                 start,
                 end,
                 range_mask,
+                mask_volatile,
             });
         }
     };
@@ -368,18 +387,14 @@ fn compute_intervals(
         if seen.insert(k.clone()) {
             let start = 0;
             let end = last_live.get(&k).copied().unwrap_or(start);
-            let mut range_mask = 0u32;
-            for j in (start + 1)..=end {
-                if j < instructions.len() {
-                    range_mask |= op_clobbers(&instructions[j], constants);
-                }
-            }
+            let (range_mask, mask_volatile) = span_masks(instructions, start, end, constants);
             intervals.push(Interval {
                 vreg: k,
                 is_float: matches!(ty, IRType::Float),
                 start,
                 end,
                 range_mask,
+                mask_volatile,
             });
         }
     }
@@ -404,6 +419,7 @@ fn compute_intervals(
                         start,
                         end,
                         range_mask: 0,
+                        mask_volatile: 0,
                     });
                 }
             }
@@ -412,6 +428,29 @@ fn compute_intervals(
 
     intervals.sort_by_key(|iv| iv.start);
     intervals
+}
+
+fn span_masks(
+    instructions: &[Instruction],
+    start: usize,
+    end: usize,
+    constants: &[IRConst],
+) -> (u32, u32) {
+    let mut range_mask = 0u32;
+    let mut mask_volatile = 0u32;
+    for j in (start + 1)..=end {
+        if j >= instructions.len() {
+            break;
+        }
+        let c = op_clobbers(&instructions[j], constants);
+        range_mask |= c;
+        if c & ALL_VOLATILE == ALL_VOLATILE {
+            mask_volatile |= c & !ALL_VOLATILE;
+        } else {
+            mask_volatile |= c;
+        }
+    }
+    (range_mask, mask_volatile)
 }
 
 fn alloc_pool(
@@ -434,20 +473,26 @@ fn alloc_pool(
         }
 
         let used: HashSet<Reg> = active.iter().map(|(_, _, r)| *r).collect();
-        let mut chosen = None;
-        for reg in volatile {
-            if !used.contains(reg) && (iv.range_mask & gpr_bit(*reg)) == 0 {
-                chosen = Some(*reg);
-                break;
+
+        let spans_wrapped = iv.range_mask & ALL_VOLATILE != 0;
+        let mut chosen: Option<Reg> = None;
+        let try_pool = |pool: &[Reg], mask: u32, chosen: &mut Option<Reg>| {
+            if chosen.is_some() {
+                return;
             }
-        }
-        if chosen.is_none() {
-            for reg in callee {
-                if !used.contains(reg) {
-                    chosen = Some(*reg);
-                    break;
+            for reg in pool {
+                if !used.contains(reg) && (mask & gpr_bit(*reg)) == 0 {
+                    *chosen = Some(*reg);
+                    return;
                 }
             }
+        };
+        if spans_wrapped {
+            try_pool(callee, iv.range_mask, &mut chosen);
+            try_pool(volatile, iv.mask_volatile, &mut chosen);
+        } else {
+            try_pool(volatile, iv.mask_volatile, &mut chosen);
+            try_pool(callee, iv.range_mask, &mut chosen);
         }
 
         match chosen {
@@ -471,7 +516,7 @@ pub fn allocate_registers(func: &IRFunction, program_constants: &[IRConst]) -> A
                 | Op::Free
                 | Op::StrCat
                 | Op::StrByte
-                | Op::Range
+                | Op::Range(..)
                 | Op::StrEq
                 | Op::StrNe
                 | Op::StrLt
@@ -481,7 +526,7 @@ pub fn allocate_registers(func: &IRFunction, program_constants: &[IRConst]) -> A
         )
     });
     let label_map = build_label_map(&func.instructions);
-    let (_live_in, _live_out, first_def_or_use, last_live) =
+    let (first_def_or_use, last_live) =
         compute_liveness(&func.instructions, &label_map, program_constants);
     let intervals = compute_intervals(
         &func.instructions,
@@ -491,12 +536,11 @@ pub fn allocate_registers(func: &IRFunction, program_constants: &[IRConst]) -> A
         program_constants,
     );
 
-    const VOLATILE_GPR: [Reg; 10] = [
+    const VOLATILE_GPR: [Reg; 9] = [
         Reg::R8,
         Reg::R9,
         Reg::R10,
         Reg::R11,
-        Reg::R15,
         Reg::Rax,
         Reg::Rcx,
         Reg::Rdx,
@@ -504,12 +548,8 @@ pub fn allocate_registers(func: &IRFunction, program_constants: &[IRConst]) -> A
         Reg::Rdi,
     ];
 
-    let volatile_pool: Vec<Reg> = VOLATILE_GPR
-        .iter()
-        .copied()
-        .filter(|r| *r != Reg::R15)
-        .collect();
-    const CALLEE_GPR: [Reg; 3] = [Reg::R12, Reg::R13, Reg::R14];
+    let volatile_pool: Vec<Reg> = VOLATILE_GPR.to_vec();
+    const CALLEE_GPR: [Reg; 5] = [Reg::R12, Reg::R13, Reg::R14, Reg::Rbx, Reg::R15];
     const FLOAT_POOL: [Reg; 8] = [
         Reg::Xmm8,
         Reg::Xmm9,
@@ -530,7 +570,7 @@ pub fn allocate_registers(func: &IRFunction, program_constants: &[IRConst]) -> A
 
     let (mut int_registers, mut int_spilled) =
         alloc_pool(&int_intervals, &volatile_pool, &CALLEE_GPR);
-    let (mut flt_registers, flt_spilled) = alloc_pool(&flt_intervals, &[], &FLOAT_POOL);
+    let (mut flt_registers, mut flt_spilled) = alloc_pool(&flt_intervals, &[], &FLOAT_POOL);
 
     let must_spill: HashSet<String> = func
         .instructions
@@ -550,21 +590,43 @@ pub fn allocate_registers(func: &IRFunction, program_constants: &[IRConst]) -> A
     let mut registers = int_registers;
     registers.extend(flt_registers.drain());
 
+    let mut elem_temps: HashSet<String> = HashSet::new();
+    for inst in &func.instructions {
+        for op in [inst.dst.as_ref(), inst.src1.as_ref(), inst.src2.as_ref()]
+            .into_iter()
+            .flatten()
+        {
+            collect_array_element_temps(op, program_constants, &mut elem_temps);
+        }
+    }
+    for k in &elem_temps {
+        if let Some(r) = registers.get(k).copied() {
+            if r.is_caller_saved_gp() {
+                registers.remove(k);
+                let is_flt = intervals.iter().any(|iv| iv.vreg == *k && iv.is_float);
+                if is_flt {
+                    flt_spilled.push(k.clone());
+                } else {
+                    int_spilled.push(k.clone());
+                }
+            }
+        }
+    }
+
     let mut used_callee_saved: Vec<Reg> = registers
         .values()
         .copied()
-        .filter(|r| !r.is_xmm() && r.reg_id() >= 12)
+        .filter(|r| !r.is_xmm() && !r.is_caller_saved_gp())
         .collect();
 
     let writes_rbx = func.instructions.iter().any(|i| match i.op {
-        Op::Div | Op::Mod | Op::StrCat | Op::Eq | Op::Ne | Op::Gt | Op::Ge | Op::Lt | Op::Le => {
-            true
+        Op::Div | Op::Mod | Op::StrCat => true,
+        Op::Eq | Op::Ne | Op::Gt | Op::Ge | Op::Lt | Op::Le => {
+            src2_clobber(i.src2.as_ref(), program_constants) & R_RBX != 0
         }
-        Op::Add | Op::Sub | Op::Mul | Op::LAnd | Op::LOr | Op::Xor => match &i.src2 {
-            Some(Operand::ConstIdx(idx)) => !matches!(program_constants[*idx], IRConst::Int(_)),
-            Some(Operand::Var(_) | Operand::Temp(_, _)) => false,
-            _ => true,
-        },
+        Op::Add | Op::Sub | Op::Mul | Op::LAnd | Op::LOr | Op::And | Op::Or | Op::Xor => {
+            src2_clobber(i.src2.as_ref(), program_constants) & R_RBX != 0
+        }
         _ => false,
     });
     if writes_rbx {
@@ -581,16 +643,124 @@ pub fn allocate_registers(func: &IRFunction, program_constants: &[IRConst]) -> A
     used_callee_saved.sort_by_key(|r| r.reg_id());
     used_callee_saved.dedup();
 
+    let interval_pos: HashMap<&str, (usize, usize)> = intervals
+        .iter()
+        .map(|iv| (iv.vreg.as_str(), (iv.start, iv.end)))
+        .collect();
+    let iv_by_key: HashMap<&str, &Interval> =
+        intervals.iter().map(|iv| (iv.vreg.as_str(), iv)).collect();
+    let mut def_pos: HashMap<String, Vec<usize>> = HashMap::new();
+    for (i, inst) in func.instructions.iter().enumerate() {
+        if let Some(d) = &inst.dst {
+            let is_def = match d {
+                Operand::Temp(_, _) => {
+                    !matches!(inst.op, Op::ArrayAssign | Op::ByteAssign | Op::StoreAt)
+                }
+                Operand::Var(_) => matches!(
+                    inst.op,
+                    Op::Store
+                        | Op::FStore
+                        | Op::Move
+                        | Op::FMove
+                        | Op::Load
+                        | Op::FLoad
+                        | Op::GlobLoad
+                        | Op::FGlobLoad
+                ),
+                _ => false,
+            };
+            if is_def {
+                def_pos.entry(d.key()).or_default().push(i);
+            }
+        }
+    }
+    for inst in func.instructions.iter() {
+        match &inst.op {
+            Op::Move | Op::Load => {
+                let (Some(dst), Some(src)) = (&inst.dst, &inst.src1) else {
+                    continue;
+                };
+                if !matches!(dst, Operand::Temp(_, _)) {
+                    continue;
+                }
+                if !matches!(src, Operand::Var(_) | Operand::Temp(_, _)) {
+                    continue;
+                }
+                let Some(&home) = registers.get(&src.key()) else {
+                    continue;
+                };
+                let Some(&(tstart, tend)) = interval_pos.get(dst.key().as_str()) else {
+                    continue;
+                };
+
+                let home_ok = match iv_by_key.get(dst.key().as_str()) {
+                    Some(iv) => {
+                        let mask = if home.is_caller_saved_gp() {
+                            iv.mask_volatile
+                        } else {
+                            iv.range_mask
+                        };
+                        if mask & gpr_bit(home) != 0 {
+                            false
+                        } else {
+                            let (s1, e1) = (tstart, tend);
+                            !registers.iter().any(|(k2, r2)| {
+                                *r2 == home
+                                    && k2.as_str() != dst.key().as_str()
+                                    && k2.as_str() != src.key().as_str()
+                                    && iv_by_key
+                                        .get(k2.as_str())
+                                        .map(|iv2| iv2.start <= e1 && s1 <= iv2.end)
+                                        .unwrap_or(false)
+                            })
+                        }
+                    }
+                    None => false,
+                };
+                if !home_ok {
+                    continue;
+                }
+
+                let redefined = def_pos
+                    .get(&src.key())
+                    .map(|defs| defs.iter().any(|&p| p > tstart && p <= tend))
+                    .unwrap_or(false);
+                if !redefined {
+                    registers.insert(dst.key(), home);
+                }
+            }
+            _ => {}
+        }
+    }
+
     let mut spill_offsets: HashMap<String, usize> = HashMap::new();
-    let mut offset = 0;
-    for vreg in &int_spilled {
-        offset += 8;
-        spill_offsets.insert(vreg.clone(), offset);
-    }
-    for vreg in &flt_spilled {
-        offset += 8;
-        spill_offsets.insert(vreg.clone(), offset);
-    }
+    let mut offset = 0usize;
+
+    let mut assign_spills = |keys: &[String], offset: &mut usize| {
+        let mut sorted: Vec<&String> = keys.iter().collect();
+        sorted.sort_by_key(|k| iv_by_key.get(k.as_str()).map(|iv| iv.start).unwrap_or(0));
+        let mut buckets: Vec<(usize, usize)> = Vec::new();
+        for k in sorted {
+            let (start, end) = match iv_by_key.get(k.as_str()) {
+                Some(iv) => (iv.start, iv.end),
+                None => (0, usize::MAX),
+            };
+            let off = match buckets.iter_mut().find(|(bend, _)| *bend < start) {
+                Some((bend, off)) => {
+                    *bend = (*bend).max(end);
+                    *off
+                }
+                None => {
+                    *offset += 8;
+                    buckets.push((end, *offset));
+                    *offset
+                }
+            };
+            spill_offsets.insert(k.clone(), off);
+        }
+    };
+    assign_spills(&int_spilled, &mut offset);
+    assign_spills(&flt_spilled, &mut offset);
 
     let mut xmm_saved: Vec<(Reg, usize)> = Vec::new();
     for reg in &FLOAT_POOL {
@@ -600,7 +770,48 @@ pub fn allocate_registers(func: &IRFunction, program_constants: &[IRConst]) -> A
         }
     }
 
+    let mut call_saves: HashMap<usize, (Vec<Reg>, bool)> = HashMap::new();
+    let interval_of: HashMap<&str, (usize, usize)> = intervals
+        .iter()
+        .map(|iv| (iv.vreg.as_str(), (iv.start, iv.end)))
+        .collect();
+    let home_of: HashMap<&str, Reg> = registers.iter().map(|(k, r)| (k.as_str(), *r)).collect();
+    for (i, inst) in func.instructions.iter().enumerate() {
+        if !clobbers_all_volatile(inst, program_constants) {
+            continue;
+        }
+        let mut regs: Vec<Reg> = home_of
+            .iter()
+            .filter(|(k, r)| {
+                r.is_caller_saved_gp()
+                    && interval_of
+                        .get(*k)
+                        .is_some_and(|(start, end)| *start < i && i <= *end)
+            })
+            .map(|(_, r)| *r)
+            .collect();
+        regs.sort_by_key(|r| r.reg_id());
+        regs.dedup();
+        if !regs.is_empty() {
+            let pad = regs.len() % 2 == 1;
+            call_saves.insert(i, (regs, pad));
+        }
+    }
+
     let stack_size = ((offset + 15) & !15).max(if is_leaf { 0 } else { 16 });
+
+    let debug_intervals = if std::env::var("ALC_DEBUG_ALLOC").is_ok() {
+        registers
+            .iter()
+            .filter_map(|(k, r)| {
+                interval_of
+                    .get(k.as_str())
+                    .map(|&(s, e)| (k.clone(), s, e, *r))
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
 
     let allocation = Allocation {
         registers,
@@ -608,6 +819,9 @@ pub fn allocate_registers(func: &IRFunction, program_constants: &[IRConst]) -> A
         stack_size,
         used_callee_saved,
         xmm_saved,
+        is_leaf,
+        call_saves,
+        debug_intervals,
     };
     if std::env::var("ALC_DEBUG_ALLOC").is_ok() {
         eprintln!("=== ALLOC {} ===", func.name);

@@ -11,3 +11,7 @@ pub mod visitor;
 
 pub use error::CompilerError;
 pub use span::{SourceMap, Span};
+
+pub fn is_maybe_type_name(name: &str) -> bool {
+    name.rsplit("__").next() == Some("Maybe")
+}

@@ -19,7 +19,7 @@ The official tutorial series (中文教程) walks through the language from scra
 | [07-函数](https://cr0.dpdns.org/2026/02/28/07-Function/)           | [16-Result与Maybe类型](https://cr0.dpdns.org/2026/08/02/16-Result-Maybe/) |
 | [08-函数式编程](https://cr0.dpdns.org/2026/02/28/08-FP/)           | [17-函数注解](https://cr0.dpdns.org/2026/08/06/17-Function-Annotations/)  |
 | [09-外部函数接口](https://cr0.dpdns.org/2026/02/28/09-FFI/)        | [18-编译时求值](https://cr0.dpdns.org/2026/08/08/18-CTE/)                 |
-| [19-模块](https://cr0.dpdns.org/2026/08/17/19-Module/)             |
+| [19-模块](https://cr0.dpdns.org/2026/08/17/19-Module/)             | [20-移动与深拷贝](https://cr0.dpdns.org/2026/08/25/20-Move-DeepCopy/)     |
 
 ## Benchmarks
 
@@ -31,7 +31,7 @@ The official tutorial series (中文教程) walks through the language from scra
 
 - **Everything is an Expression (EiaE)** — there are no statements: blocks, `if`/`else`, `match`, loops and function bodies are all expressions, and the last expression is the result
 - **Strict Static Typing** — compile-time checking with full local inference; `int` and `float` never mix implicitly — conversions go through explicit `@` casts
-- **Explicit Casts (`@T`)** — `int`↔`float` (truncating), `int`↔`bool` (normalized to 0/1), anything → `void` (discard), `void` → any primitive (zero value)
+- **Explicit Casts (`@T`)** — `int`↔`float` (truncating), `int`↔`bool` (normalized to 0/1), anything → `void` (discard), `void` → any primitive (zero value), pointer ↔ pointer (bitwise reinterpretation: `malloc(n)@*Point`)
 - **Generics** — monomorphic instantiation with type inference at call sites
 - **Tagged `Result` / `Maybe`** — error handling and null-safety built from `struct` + `union` + `enum`
 
@@ -42,8 +42,8 @@ The official tutorial series (中文教程) walks through the language from scra
 
 ### Functional & Control Flow
 
-- **Lambdas & Higher-Order Functions** — first-class function types; struct method fields invoked through index sugar (`v[i] = x`)
-- **Expression-Oriented Control Flow** — `if`/`else`, `match` (arms need no separators, patterns evaluate lazily), `while`, `for-in` over arrays and ranges (`n..m`)
+- **Lambdas & Higher-Order Functions** — first-class function types; methods are function-pointer fields on structs, invoked through dot sugar with `&self` as the first argument (`vec.push(&vec, x)`)
+- **Expression-Oriented Control Flow** — `if`/`else`, `match` (arms need no separators, patterns evaluate lazily; `n..m` patterns match `n <= t < m`, `n..=m` patterns match `n <= t <= m`; arms may take a bool guard: `pat if cond: body`), `while`, `for-in` over arrays and ranges (`n..m` exclusive, `n..=m` inclusive); `break expr` makes the innermost loop evaluate to a value
 - **Short-Circuit Logic** — `&&` and `||` evaluate lazily
 - **F-String Interpolation** — `println(f"value: {x}")`; every primitive interpolates, including `void` rendered as `nil`
 - **Function Annotations** — `(pub)` export for modules, `(extern)` external symbols, `(pure)` pure functions; return-type annotations optional (default `void`)
@@ -319,23 +319,28 @@ links the `.so` into the final executable with an rpath (when using
 ## CLI Usage
 
 ```
-alc [OPTIONS] <INPUT>
+Alum compiler
+
+Usage: alc [OPTIONS] [INPUT]...
 
 Arguments:
-  <INPUT>...    Input files (.al source files or .o/.obj object files)
+  [INPUT]...  Input files (.al source files or .o/.obj object files)
 
 Options:
-  -o, --output <FILE>       Output file name
-  -c, --compile-only        Compile only, do not link
-  -r, --run                 Compile and run immediately
-  -E                        Preprocess only; do not compile, assemble or link
-  --ast                     Output AST representation
-  -I <DIR>                  Add include directory (can be used multiple times)
-  --nostdlib                Do not link with standard library
-  --cte-lib <PATH>          Shared library dlopened for compile-time evaluation of `fun(extern, pure)` (can be repeated; also linked into the final executable)
-  -v, --verbose             Verbose output
-  -h, --help                Print help
-  -V, --version             Print version
+  -o, --output <FILE>   Output file name
+  -c, --compile-only    Compile only, do not link
+      --emit-ast        Output AST representation
+      --emit-ir         Dump optimized IR to stderr, then continue compiling
+      --emit-asm        Dump generated assembly to stderr, then continue compiling
+  -r, --run             Compile and run immediately
+  -I <DIR>              Add include directory
+  -E                    Preprocess only; do not compile, assemble or link
+      --nostdlib        Do not link with standard library
+  -v, --verbose         Verbose output
+      --library <TYPE>  Build library (static or shared)
+      --cte-lib <PATH>  Shared library to dlopen for compile-time evaluation of fun(extern, pure) functions
+  -h, --help            Print help
+  -V, --version         Print version
 ```
 
 ## Development
@@ -365,7 +370,7 @@ cargo build --release
 - **[Grammar (EBNF)](./GRAMMAR.md)** - Formal grammar derived from the parser
 - **[Standard Library](./alum-std/README.md)** - Comprehensive standard library documentation
 - **[Build Tool](./alum-make/README.md)** - almk build tool documentation
-- **[Tutorial Series](https://cr0.dpdns.org)** - 19-part Chinese tutorial covering the language from scratch
+- **[Tutorial Series](https://cr0.dpdns.org)** - 20-part Chinese tutorial covering the language from scratch
 
 ## License
 

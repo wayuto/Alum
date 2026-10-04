@@ -1,0 +1,10 @@
+[package]
+name = "33_calculator"
+version = "0.1.0"
+author = ""
+license = "No License"
+language = "alum"
+
+[build]
+linker = "alc"
+alc = "alc"

@@ -3,7 +3,7 @@ use super::parser::{CompoundOp, make_compound_assign, make_inc_dec};
 use crate::compiler::{
     Span,
     lexer::{FstringSeg, Lexer, Token},
-    parser::{Expr, FuncAttrs, Parser, Type},
+    parser::{Expr, FuncAttrs, Parser, Primitive, Type},
 };
 
 impl<'a> Parser<'a> {
@@ -16,7 +16,7 @@ impl<'a> Parser<'a> {
                 span,
             });
         }
-        let lex = Lexer::new(src);
+        let lex = Lexer::with_position(src, span.line, span.col);
         let mut sub = Parser {
             lex: lex.peekable(),
             lookahead: Vec::new(),
@@ -42,6 +42,97 @@ impl<'a> Parser<'a> {
         self.deferred_module_decls.extend(sub.deferred_module_decls);
         self.has_fstring |= sub.has_fstring;
         r
+    }
+    fn parse_record_decl(&mut self, kw: &str, union: bool) -> Result<Expr, ParserError> {
+        self.next()?;
+        self.decl_pub = self.parse_global_annotation(kw)?;
+        let (token, span) = self.next()?;
+        let name = match token {
+            Token::IDENT(s) => s,
+            token => {
+                return Err(ParserError::UnexpectedToken {
+                    expected: Some(Token::IDENT(format!("{} NAME", kw.to_uppercase()))),
+                    found: token,
+                    span,
+                });
+            }
+        };
+        let type_params = if matches!(self.peek(), Some(Ok((Token::LT, _)))) {
+            self.next()?;
+            let params = self.get_type_params_list()?;
+            self.expect(Token::GT)?;
+            params
+        } else {
+            Vec::new()
+        };
+        if !type_params.is_empty() {
+            self.push_type_params(&type_params);
+        }
+        let parsed_fields = self.parse_field_list();
+        if !type_params.is_empty() {
+            self.type_param_scopes.pop();
+        }
+        let fields = parsed_fields?;
+        if union {
+            self.unions
+                .insert(name.clone(), (type_params.clone(), fields.clone()));
+            Ok(Expr::Union {
+                name,
+                type_params,
+                fields,
+                span,
+            })
+        } else {
+            self.structs
+                .insert(name.clone(), (type_params.clone(), fields.clone()));
+            Ok(Expr::Struct {
+                name,
+                type_params,
+                fields,
+                span,
+            })
+        }
+    }
+    fn parse_literal_fields(&mut self) -> Result<Vec<(String, Expr)>, ParserError> {
+        let mut fields = Vec::new();
+        loop {
+            match self.peek().cloned() {
+                Some(Ok((Token::RBRACE, _))) => {
+                    self.next()?;
+                    break;
+                }
+                Some(Ok((Token::IDENT(field_name), _))) => {
+                    self.next()?;
+                    self.expect(Token::COLON)?;
+                    let field_value = self.expr()?;
+                    fields.push((field_name, field_value));
+                    match self.peek().cloned() {
+                        Some(Ok((Token::COMMA, _))) => {
+                            self.next()?;
+                        }
+                        Some(Ok((Token::RBRACE, _))) => {
+                            self.next()?;
+                            break;
+                        }
+                        _ => {
+                            return Err(ParserError::UnexpectedToken {
+                                expected: Some(Token::COMMA),
+                                found: self.found_token_or_eof(),
+                                span: self.last_span,
+                            });
+                        }
+                    }
+                }
+                _ => {
+                    return Err(ParserError::UnexpectedToken {
+                        expected: Some(Token::IDENT("FIELD NAME".to_string())),
+                        found: self.found_token_or_eof(),
+                        span: self.last_span,
+                    });
+                }
+            }
+        }
+        Ok(fields)
     }
 
     pub(super) fn expr(&mut self) -> Result<Expr, ParserError> {
@@ -99,7 +190,13 @@ impl<'a> Parser<'a> {
                         None
                     };
                     if self.scope_depth == 0 {
-                        Ok(Expr::GlobalVar(name, is_pub, ty, init, span))
+                        Ok(Expr::GlobalVar {
+                            name,
+                            is_pub,
+                            ty,
+                            value: init,
+                            span,
+                        })
                     } else {
                         let init = match init {
                             Some(init) => init,
@@ -114,7 +211,12 @@ impl<'a> Parser<'a> {
                                 });
                             }
                         };
-                        Ok(Expr::VarDecl(name, ty, init, span))
+                        Ok(Expr::VarDecl {
+                            name,
+                            ty,
+                            value: init,
+                            span,
+                        })
                     }
                 }
                 Ok((Token::CST, _)) => {
@@ -153,13 +255,13 @@ impl<'a> Parser<'a> {
                         });
                     }
 
-                    Ok(Expr::ConstDecl(
+                    Ok(Expr::ConstDecl {
                         name,
                         ty,
-                        Box::new(self.expr()?),
+                        value: Box::new(self.expr()?),
                         is_pub,
                         span,
-                    ))
+                    })
                 }
                 Ok((Token::FUN, _)) => {
                     self.next()?;
@@ -237,15 +339,15 @@ impl<'a> Parser<'a> {
                         self.type_param_scopes.pop();
                     }
                     let (params, ret_type, body) = signature?;
-                    Ok(Expr::FuncDecl(
+                    Ok(Expr::FuncDecl {
                         name,
                         attrs,
                         type_params,
                         params,
-                        ret_type,
+                        return_type: ret_type,
                         body,
                         span,
-                    ))
+                    })
                 }
                 Ok((Token::EXTERN, _)) => {
                     self.next()?;
@@ -264,7 +366,7 @@ impl<'a> Parser<'a> {
                         Some(Ok((Token::COLON, _))) => {
                             self.next()?;
                             let ty = self.parse_type()?;
-                            Ok(Expr::ExternVar(name, ty, span))
+                            Ok(Expr::ExternVar { name, ty, span })
                         }
                         Some(Ok((Token::LPAREN, _))) => Err(ParserError::UnexpectedToken {
                             expected: Some(Token::IDENT(
@@ -310,7 +412,7 @@ impl<'a> Parser<'a> {
                     self.next()?;
                     let var = self.expr()?;
                     self.expect(Token::LBRACE)?;
-                    let mut cases: Vec<(Expr, Expr)> = Vec::new();
+                    let mut cases: Vec<(Expr, Option<Box<Expr>>, Expr)> = Vec::new();
                     let mut default: Option<Box<Expr>> = None;
                     loop {
                         match self.peek().cloned() {
@@ -318,7 +420,7 @@ impl<'a> Parser<'a> {
                                 self.next()?;
                                 break;
                             }
-                            Some(Ok((Token::IDENT(s), _))) if s == "_".to_string() => {
+                            Some(Ok((Token::IDENT(s), _))) if s == "_" => {
                                 self.next()?;
                                 self.expect(Token::COLON)?;
                                 default = Some(Box::new(self.expr()?));
@@ -327,9 +429,16 @@ impl<'a> Parser<'a> {
                             }
                             Some(Ok((_, _))) => {
                                 let case = self.expr()?;
+                                let guard = match self.peek() {
+                                    Some(Ok((Token::IF, _))) => {
+                                        self.next()?;
+                                        Some(Box::new(self.expr()?))
+                                    }
+                                    _ => None,
+                                };
                                 self.expect(Token::COLON)?;
                                 let ret = self.expr()?;
-                                cases.push((case, ret));
+                                cases.push((case, guard, ret));
                             }
                             Some(Err(e)) => return Err(ParserError::LexerError(e.clone())),
                             None => {
@@ -341,7 +450,12 @@ impl<'a> Parser<'a> {
                             }
                         }
                     }
-                    Ok(Expr::Match(Box::new(var), cases, default, span_))
+                    Ok(Expr::Match {
+                        target: Box::new(var),
+                        branches: cases,
+                        default,
+                        span: span_,
+                    })
                 }
                 Ok((Token::RET, span)) => {
                     self.next()?;
@@ -352,7 +466,7 @@ impl<'a> Parser<'a> {
                         }
                         _ => Box::new(self.expr()?),
                     };
-                    Ok(Expr::Return(val, span))
+                    Ok(Expr::Return { value: val, span })
                 }
                 Ok((Token::IF, _)) => {
                     self.next()?;
@@ -365,22 +479,48 @@ impl<'a> Parser<'a> {
                         }
                         _ => None,
                     };
-                    Ok(Expr::If(
-                        Box::new(cond),
-                        Box::new(then_branch),
+                    Ok(Expr::If {
+                        cond: Box::new(cond),
+                        then_branch: Box::new(then_branch),
                         else_branch,
-                        Span::new(0, 0),
-                    ))
+                        span: Span::new(0, 0),
+                    })
                 }
                 Ok((Token::WHILE, _)) => {
                     self.next()?;
                     let cond = self.expr()?;
                     let body = self.expr()?;
-                    Ok(Expr::While(Box::new(cond), Box::new(body), Span::new(0, 0)))
+                    Ok(Expr::While {
+                        cond: Box::new(cond),
+                        body: Box::new(body),
+                        span: Span::new(0, 0),
+                    })
                 }
                 Ok((Token::BREAK, span)) => {
                     self.next()?;
-                    Ok(Expr::Break(span))
+                    let value = match self.peek() {
+                        Some(Ok((Token::SEMICOLON, _))) | Some(Ok((Token::RBRACE, _))) | None => {
+                            None
+                        }
+                        Some(Ok((
+                            Token::VAR
+                            | Token::CST
+                            | Token::FUN
+                            | Token::STRUCT
+                            | Token::UNION
+                            | Token::ENUM
+                            | Token::TYPEDEF
+                            | Token::EXTERN
+                            | Token::IMPORT
+                            | Token::USING
+                            | Token::RET
+                            | Token::BREAK
+                            | Token::CONTINUE,
+                            _,
+                        ))) => None,
+                        _ => Some(Box::new(self.expr()?)),
+                    };
+                    Ok(Expr::Break { value, span })
                 }
                 Ok((Token::CONTINUE, span)) => {
                     self.next()?;
@@ -405,82 +545,16 @@ impl<'a> Parser<'a> {
                     let array_expr = self.expr()?;
                     let body = self.expr()?;
 
-                    Ok(Expr::For(
-                        var_name,
-                        Box::new(array_expr),
-                        Box::new(body),
+                    Ok(Expr::For {
+                        var: var_name,
+                        iterable: Box::new(array_expr),
+                        body: Box::new(body),
                         span,
-                    ))
+                    })
                 }
-                Ok((Token::STRUCT, _)) => {
-                    self.next()?;
-                    self.decl_pub = self.parse_global_annotation("struct")?;
-                    let (token, span) = self.next()?;
-                    let name = match token {
-                        Token::IDENT(s) => s,
-                        token => {
-                            return Err(ParserError::UnexpectedToken {
-                                expected: Some(Token::IDENT("STRUCT NAME".to_string())),
-                                found: token,
-                                span,
-                            });
-                        }
-                    };
-                    let type_params = if matches!(self.peek(), Some(Ok((Token::LT, _)))) {
-                        self.next()?;
-                        let params = self.get_type_params_list()?;
-                        self.expect(Token::GT)?;
-                        params
-                    } else {
-                        Vec::new()
-                    };
-                    if !type_params.is_empty() {
-                        self.push_type_params(&type_params);
-                    }
-                    let parsed_fields = self.parse_field_list();
-                    if !type_params.is_empty() {
-                        self.type_param_scopes.pop();
-                    }
-                    let fields = parsed_fields?;
-                    self.structs
-                        .insert(name.clone(), (type_params.clone(), fields.clone()));
-                    Ok(Expr::Struct(name, type_params, fields, span))
-                }
+                Ok((Token::STRUCT, _)) => self.parse_record_decl("struct", false),
 
-                Ok((Token::UNION, _)) => {
-                    self.next()?;
-                    self.decl_pub = self.parse_global_annotation("union")?;
-                    let (token, span) = self.next()?;
-                    let name = match token {
-                        Token::IDENT(s) => s,
-                        token => {
-                            return Err(ParserError::UnexpectedToken {
-                                expected: Some(Token::IDENT("UNION NAME".to_string())),
-                                found: token,
-                                span,
-                            });
-                        }
-                    };
-                    let type_params = if matches!(self.peek(), Some(Ok((Token::LT, _)))) {
-                        self.next()?;
-                        let params = self.get_type_params_list()?;
-                        self.expect(Token::GT)?;
-                        params
-                    } else {
-                        Vec::new()
-                    };
-                    if !type_params.is_empty() {
-                        self.push_type_params(&type_params);
-                    }
-                    let parsed_fields = self.parse_field_list();
-                    if !type_params.is_empty() {
-                        self.type_param_scopes.pop();
-                    }
-                    let fields = parsed_fields?;
-                    self.unions
-                        .insert(name.clone(), (type_params.clone(), fields.clone()));
-                    Ok(Expr::Union(name, type_params, fields, span))
-                }
+                Ok((Token::UNION, _)) => self.parse_record_decl("union", true),
 
                 Ok((Token::ENUM, span)) => {
                     self.next()?;
@@ -570,7 +644,11 @@ impl<'a> Parser<'a> {
                         }
                     }
                     self.enums.insert(name.clone(), members.clone());
-                    Ok(Expr::Enum(name, members, span))
+                    Ok(Expr::Enum {
+                        name,
+                        members,
+                        span,
+                    })
                 }
 
                 Ok((_, span)) => {
@@ -579,32 +657,45 @@ impl<'a> Parser<'a> {
                         self.next()?;
                         let val = self.expr()?;
                         return match &expr {
-                            Expr::Index(_, _, _) => {
-                                if let Expr::Index(arr, idx, _) = expr {
-                                    Ok(Expr::IndexAssign(
-                                        Box::new(Expr::Index(arr, idx, Span::new(0, 0))),
-                                        Box::new(val),
-                                        Span::new(0, 0),
-                                    ))
+                            Expr::Index { .. } => {
+                                if let Expr::Index {
+                                    array: arr,
+                                    index: idx,
+                                    ..
+                                } = expr
+                                {
+                                    Ok(Expr::IndexAssign {
+                                        target: Box::new(Expr::Index {
+                                            array: arr,
+                                            index: idx,
+                                            span: Span::new(0, 0),
+                                        }),
+                                        value: Box::new(val),
+                                        span: Span::new(0, 0),
+                                    })
                                 } else {
                                     unreachable!()
                                 }
                             }
-                            Expr::MemberAccess(_, _, _) => {
-                                if let Expr::MemberAccess(obj, field, _) = expr {
-                                    Ok(Expr::MemberAssign(
+                            Expr::MemberAccess { .. } => {
+                                if let Expr::MemberAccess { obj, field, .. } = expr {
+                                    Ok(Expr::MemberAssign {
                                         obj,
                                         field,
-                                        Box::new(val),
-                                        Span::new(0, 0),
-                                    ))
+                                        value: Box::new(val),
+                                        span: Span::new(0, 0),
+                                    })
                                 } else {
                                     unreachable!()
                                 }
                             }
-                            Expr::Deref(_, _) => {
-                                if let Expr::Deref(ptr, _) = expr {
-                                    Ok(Expr::DerefAssign(ptr, Box::new(val), Span::new(0, 0)))
+                            Expr::Deref { .. } => {
+                                if let Expr::Deref { expr: ptr, .. } = expr {
+                                    Ok(Expr::DerefAssign {
+                                        ptr,
+                                        value: Box::new(val),
+                                        span: Span::new(0, 0),
+                                    })
                                 } else {
                                     unreachable!()
                                 }
@@ -681,16 +772,56 @@ impl<'a> Parser<'a> {
             self.next()?;
             let val = self.expr()?;
             let assign = match op {
-                CompoundOp::Add => Expr::AddAssign(name.to_string(), Box::new(val), span),
-                CompoundOp::Sub => Expr::SubAssign(name.to_string(), Box::new(val), span),
-                CompoundOp::Mul => Expr::MulAssign(name.to_string(), Box::new(val), span),
-                CompoundOp::Div => Expr::DivAssign(name.to_string(), Box::new(val), span),
-                CompoundOp::Mod => Expr::ModAssign(name.to_string(), Box::new(val), span),
-                CompoundOp::And => Expr::AndAssign(name.to_string(), Box::new(val), span),
-                CompoundOp::Or => Expr::OrAssign(name.to_string(), Box::new(val), span),
-                CompoundOp::Xor => Expr::XorAssign(name.to_string(), Box::new(val), span),
-                CompoundOp::Shl => Expr::ShlAssign(name.to_string(), Box::new(val), span),
-                CompoundOp::Shr => Expr::ShrAssign(name.to_string(), Box::new(val), span),
+                CompoundOp::Add => Expr::AddAssign {
+                    name: name.to_string(),
+                    value: Box::new(val),
+                    span,
+                },
+                CompoundOp::Sub => Expr::SubAssign {
+                    name: name.to_string(),
+                    value: Box::new(val),
+                    span,
+                },
+                CompoundOp::Mul => Expr::MulAssign {
+                    name: name.to_string(),
+                    value: Box::new(val),
+                    span,
+                },
+                CompoundOp::Div => Expr::DivAssign {
+                    name: name.to_string(),
+                    value: Box::new(val),
+                    span,
+                },
+                CompoundOp::Mod => Expr::ModAssign {
+                    name: name.to_string(),
+                    value: Box::new(val),
+                    span,
+                },
+                CompoundOp::And => Expr::AndAssign {
+                    name: name.to_string(),
+                    value: Box::new(val),
+                    span,
+                },
+                CompoundOp::Or => Expr::OrAssign {
+                    name: name.to_string(),
+                    value: Box::new(val),
+                    span,
+                },
+                CompoundOp::Xor => Expr::XorAssign {
+                    name: name.to_string(),
+                    value: Box::new(val),
+                    span,
+                },
+                CompoundOp::Shl => Expr::ShlAssign {
+                    name: name.to_string(),
+                    value: Box::new(val),
+                    span,
+                },
+                CompoundOp::Shr => Expr::ShrAssign {
+                    name: name.to_string(),
+                    value: Box::new(val),
+                    span,
+                },
             };
             return Ok(Some(assign));
         }
@@ -699,48 +830,75 @@ impl<'a> Parser<'a> {
 
     pub(super) fn logical(&mut self) -> Result<Expr, ParserError> {
         let mut left = self.logical_and()?;
-        while let Some(Ok((op, _))) = self.peek().cloned() {
-            match op {
-                Token::OR | Token::LOR => {
-                    self.next()?;
-                    let right = self.logical_and()?;
-                    let span = left.span();
-                    left = Expr::LOr(Box::new(left), Box::new(right), span);
-                }
-                _ => break,
-            }
+        while let Some(Ok((Token::OR, _))) = self.peek().cloned() {
+            self.next()?;
+            let right = self.logical_and()?;
+            let span = left.span();
+            left = Expr::LOr {
+                left: Box::new(left),
+                right: Box::new(right),
+                span,
+            };
         }
         Ok(left)
     }
 
     pub(super) fn logical_and(&mut self) -> Result<Expr, ParserError> {
         let mut left = self.comparison()?;
-        while let Some(Ok((op, _))) = self.peek().cloned() {
-            match op {
-                Token::AND | Token::LAND => {
-                    self.next()?;
-                    let right = self.comparison()?;
-                    let span = left.span();
-                    left = Expr::LAnd(Box::new(left), Box::new(right), span);
-                }
-                _ => break,
-            }
+        while let Some(Ok((Token::AND, _))) = self.peek().cloned() {
+            self.next()?;
+            let right = self.comparison()?;
+            let span = left.span();
+            left = Expr::LAnd {
+                left: Box::new(left),
+                right: Box::new(right),
+                span,
+            };
         }
         Ok(left)
     }
 
     pub(super) fn bitwise(&mut self) -> Result<Expr, ParserError> {
+        let mut left = self.bitwise_xor()?;
+        while let Some(Ok((Token::LOR, _))) = self.peek().cloned() {
+            self.next()?;
+            let right = self.bitwise_xor()?;
+            let span = left.span();
+            left = Expr::BOr {
+                left: Box::new(left),
+                right: Box::new(right),
+                span,
+            };
+        }
+        Ok(left)
+    }
+
+    fn bitwise_xor(&mut self) -> Result<Expr, ParserError> {
+        let mut left = self.bitwise_and()?;
+        while let Some(Ok((Token::XOR, _))) = self.peek().cloned() {
+            self.next()?;
+            let right = self.bitwise_and()?;
+            let span = left.span();
+            left = Expr::Xor {
+                left: Box::new(left),
+                right: Box::new(right),
+                span,
+            };
+        }
+        Ok(left)
+    }
+
+    fn bitwise_and(&mut self) -> Result<Expr, ParserError> {
         let mut left = self.shift()?;
-        while let Some(Ok((op, _))) = self.peek().cloned() {
-            match op {
-                Token::XOR => {
-                    self.next()?;
-                    let right = self.shift()?;
-                    let span = left.span();
-                    left = Expr::Xor(Box::new(left), Box::new(right), span);
-                }
-                _ => break,
-            }
+        while let Some(Ok((Token::LAND, _))) = self.peek().cloned() {
+            self.next()?;
+            let right = self.shift()?;
+            let span = left.span();
+            left = Expr::BAnd {
+                left: Box::new(left),
+                right: Box::new(right),
+                span,
+            };
         }
         Ok(left)
     }
@@ -783,7 +941,12 @@ impl<'a> Parser<'a> {
                             }
                         }
                     }
-                    callee = Expr::Call(Box::new(callee), Vec::new(), args, Span::new(0, 0));
+                    callee = Expr::Call {
+                        callee: Box::new(callee),
+                        type_args: Vec::new(),
+                        args,
+                        span: Span::new(0, 0),
+                    };
                 }
                 Some(Ok((Token::LBRACKET, _))) => {
                     self.next()?;
@@ -799,7 +962,11 @@ impl<'a> Parser<'a> {
                             });
                         }
                     }
-                    callee = Expr::Index(Box::new(callee), Box::new(index), Span::new(0, 0));
+                    callee = Expr::Index {
+                        array: Box::new(callee),
+                        index: Box::new(index),
+                        span: Span::new(0, 0),
+                    };
                 }
                 Some(Ok((Token::DOT, _))) => {
                     self.next()?;
@@ -814,24 +981,32 @@ impl<'a> Parser<'a> {
                             });
                         }
                     };
-                    callee = Expr::MemberAccess(Box::new(callee), field_name, Span::new(0, 0));
+                    callee = Expr::MemberAccess {
+                        obj: Box::new(callee),
+                        field: field_name,
+                        span: Span::new(0, 0),
+                    };
                 }
                 Some(Ok((Token::AT, _))) => {
                     self.next()?;
                     let target_type = self.parse_type()?;
-                    callee = Expr::Cast(Box::new(callee), target_type, Span::new(0, 0));
+                    callee = Expr::Cast {
+                        expr: Box::new(callee),
+                        ty: target_type,
+                        span: Span::new(0, 0),
+                    };
                 }
                 Some(Ok((Token::PLUSPLUS, span))) => {
                     self.next()?;
                     callee = match callee {
-                        Expr::Var(name, _) => Expr::Inc(name, span),
+                        Expr::Var { name, .. } => Expr::Inc { name, span },
                         other => make_inc_dec(other, true, span)?,
                     };
                 }
                 Some(Ok((Token::MINUSMINUS, span))) => {
                     self.next()?;
                     callee = match callee {
-                        Expr::Var(name, _) => Expr::Dec(name, span),
+                        Expr::Var { name, .. } => Expr::Dec { name, span },
                         other => make_inc_dec(other, false, span)?,
                     };
                 }
@@ -851,12 +1026,36 @@ impl<'a> Parser<'a> {
                     let right = self.bitwise()?;
                     let span = left.span();
                     left = match op {
-                        Token::CEQ => Expr::Eq(Box::new(left), Box::new(right), span),
-                        Token::NE => Expr::Ne(Box::new(left), Box::new(right), span),
-                        Token::LT => Expr::Lt(Box::new(left), Box::new(right), span),
-                        Token::LE => Expr::Le(Box::new(left), Box::new(right), span),
-                        Token::GT => Expr::Gt(Box::new(left), Box::new(right), span),
-                        Token::GE => Expr::Ge(Box::new(left), Box::new(right), span),
+                        Token::CEQ => Expr::Eq {
+                            left: Box::new(left),
+                            right: Box::new(right),
+                            span,
+                        },
+                        Token::NE => Expr::Ne {
+                            left: Box::new(left),
+                            right: Box::new(right),
+                            span,
+                        },
+                        Token::LT => Expr::Lt {
+                            left: Box::new(left),
+                            right: Box::new(right),
+                            span,
+                        },
+                        Token::LE => Expr::Le {
+                            left: Box::new(left),
+                            right: Box::new(right),
+                            span,
+                        },
+                        Token::GT => Expr::Gt {
+                            left: Box::new(left),
+                            right: Box::new(right),
+                            span,
+                        },
+                        Token::GE => Expr::Ge {
+                            left: Box::new(left),
+                            right: Box::new(right),
+                            span,
+                        },
                         _ => unreachable!(),
                     };
                 }
@@ -875,8 +1074,16 @@ impl<'a> Parser<'a> {
                     let right = self.additive()?;
                     let span = left.span();
                     left = match op {
-                        Token::SHL => Expr::Shl(Box::new(left), Box::new(right), span),
-                        Token::SHR => Expr::Shr(Box::new(left), Box::new(right), span),
+                        Token::SHL => Expr::Shl {
+                            left: Box::new(left),
+                            right: Box::new(right),
+                            span,
+                        },
+                        Token::SHR => Expr::Shr {
+                            left: Box::new(left),
+                            right: Box::new(right),
+                            span,
+                        },
                         _ => unreachable!(),
                     };
                 }
@@ -889,34 +1096,48 @@ impl<'a> Parser<'a> {
     pub(super) fn additive(&mut self) -> Result<Expr, ParserError> {
         let mut left = self.term()?;
 
-        if self
-            .peek()
-            .cloned()
-            .map(|r| matches!(r, Ok((Token::DOTDOT, _))))
-            .unwrap_or(false)
-        {
-            self.next()?;
-            let right = self.additive()?;
-            let span = left.span();
-            return Ok(Expr::Range(Box::new(left), Box::new(right), span));
-        }
-
-        while let Some(Ok((op, _))) = self.peek().cloned() {
-            match op {
-                Token::PLUS | Token::MINUS => {
-                    self.next()?;
-                    let right = self.term()?;
-                    let span = left.span();
-                    left = match op {
-                        Token::PLUS => Expr::Add(Box::new(left), Box::new(right), span),
-                        Token::MINUS => Expr::Sub(Box::new(left), Box::new(right), span),
-                        _ => unreachable!(),
-                    };
-                }
-                _ => break,
+        let inclusive = match self.peek().cloned() {
+            Some(Ok((Token::DOTDOT, _))) => false,
+            Some(Ok((Token::DOTDOTEQ, _))) => true,
+            _ => {
+                return {
+                    while let Some(Ok((op, _))) = self.peek().cloned() {
+                        match op {
+                            Token::PLUS | Token::MINUS => {
+                                self.next()?;
+                                let right = self.term()?;
+                                let span = left.span();
+                                left = match op {
+                                    Token::PLUS => Expr::Add {
+                                        left: Box::new(left),
+                                        right: Box::new(right),
+                                        span,
+                                    },
+                                    Token::MINUS => Expr::Sub {
+                                        left: Box::new(left),
+                                        right: Box::new(right),
+                                        span,
+                                    },
+                                    _ => unreachable!(),
+                                };
+                            }
+                            _ => break,
+                        }
+                    }
+                    Ok(left)
+                };
             }
-        }
-        Ok(left)
+        };
+        self.next()?;
+        let right = self.additive()?;
+        let span = left.span();
+
+        Ok(Expr::Range {
+            start: Box::new(left),
+            end: Box::new(right),
+            inclusive,
+            span,
+        })
     }
 
     pub(super) fn term(&mut self) -> Result<Expr, ParserError> {
@@ -928,9 +1149,21 @@ impl<'a> Parser<'a> {
                     let right = self.prefix()?;
                     let span = left.span();
                     left = match op {
-                        Token::STAR => Expr::Mul(Box::new(left), Box::new(right), span),
-                        Token::SLASH => Expr::Div(Box::new(left), Box::new(right), span),
-                        Token::PERCENT => Expr::Mod(Box::new(left), Box::new(right), span),
+                        Token::STAR => Expr::Mul {
+                            left: Box::new(left),
+                            right: Box::new(right),
+                            span,
+                        },
+                        Token::SLASH => Expr::Div {
+                            left: Box::new(left),
+                            right: Box::new(right),
+                            span,
+                        },
+                        Token::PERCENT => Expr::Mod {
+                            left: Box::new(left),
+                            right: Box::new(right),
+                            span,
+                        },
                         _ => unreachable!(),
                     };
                 }
@@ -964,24 +1197,33 @@ impl<'a> Parser<'a> {
                 } else {
                     inner.span()
                 };
-                return Ok(Expr::Call(
-                    Box::new(Expr::Var("_alum_copy".to_string(), sp)),
-                    Vec::new(),
-                    vec![inner],
-                    sp,
-                ));
+                return Ok(Expr::Call {
+                    callee: Box::new(Expr::Var {
+                        name: "_alum_copy".to_string(),
+                        span: sp,
+                    }),
+                    type_args: Vec::new(),
+                    args: vec![inner],
+                    span: sp,
+                });
             }
             Some(Ok((Token::STAR, span))) => {
                 self.next()?;
                 self.deref_depth += 1;
                 let operand = self.prefix()?;
                 self.deref_depth -= 1;
-                Ok(Expr::Deref(Box::new(operand), span))
+                Ok(Expr::Deref {
+                    expr: Box::new(operand),
+                    span,
+                })
             }
             Some(Ok((Token::LAND, span))) => {
                 self.next()?;
                 let operand = self.prefix()?;
-                Ok(Expr::AddressOf(Box::new(operand), span))
+                Ok(Expr::AddressOf {
+                    expr: Box::new(operand),
+                    span,
+                })
             }
             _ => self.call(),
         }
@@ -992,19 +1234,23 @@ impl<'a> Parser<'a> {
             match peeked {
                 Ok((Token::INT(n), span)) => {
                     self.next()?;
-                    return Ok(Expr::Int(n, span));
+                    return Ok(Expr::Int { value: n, span });
+                }
+                Ok((Token::CHAR(c), span)) => {
+                    self.next()?;
+                    return Ok(Expr::Char { value: c, span });
                 }
                 Ok((Token::FLOAT(f), span)) => {
                     self.next()?;
-                    return Ok(Expr::Float(f, span));
+                    return Ok(Expr::Float { value: f, span });
                 }
                 Ok((Token::BOOL(b), span)) => {
                     self.next()?;
-                    return Ok(Expr::Bool(b, span));
+                    return Ok(Expr::Bool { value: b, span });
                 }
                 Ok((Token::STRING(s), span)) => {
                     self.next()?;
-                    return Ok(Expr::String(s, span));
+                    return Ok(Expr::String { value: s, span });
                 }
                 Ok((Token::FSTRING(segs), span)) => {
                     self.next()?;
@@ -1012,13 +1258,13 @@ impl<'a> Parser<'a> {
                     let mut parts: Vec<Expr> = Vec::new();
                     for seg in segs {
                         match seg {
-                            FstringSeg::Lit(s) => parts.push(Expr::String(s, span)),
+                            FstringSeg::Lit(s) => parts.push(Expr::String { value: s, span }),
                             FstringSeg::Expr(raw) => {
                                 parts.push(self.parse_sub_expr(&raw, span)?);
                             }
                         }
                     }
-                    return Ok(Expr::FString(parts, span));
+                    return Ok(Expr::FString { segs: parts, span });
                 }
                 Ok((Token::NIL, span)) => {
                     self.next()?;
@@ -1029,12 +1275,21 @@ impl<'a> Parser<'a> {
                     self.expect(Token::LPAREN)?;
                     let params = self.get_params_list()?;
                     self.expect(Token::RPAREN)?;
-                    self.expect(Token::COLON)?;
-                    let ret_type = self.parse_type()?;
+                    let ret_type = if matches!(self.peek(), Some(Ok((Token::COLON, _)))) {
+                        self.next()?;
+                        self.parse_type()?
+                    } else {
+                        Type::Primitive(Primitive::Void)
+                    };
                     self.scope_depth += 1;
                     let body = self.expr();
                     self.scope_depth -= 1;
-                    return Ok(Expr::Lambda(params, Box::new(body?), ret_type, span));
+                    return Ok(Expr::Lambda {
+                        params,
+                        body: Box::new(body?),
+                        return_type: ret_type,
+                        span,
+                    });
                 }
                 Ok((Token::LPAREN, _)) => {
                     self.next()?;
@@ -1084,7 +1339,11 @@ impl<'a> Parser<'a> {
                         self.expect(Token::SEMICOLON)?;
                         let len = self.expr()?;
                         self.expect(Token::RBRACKET)?;
-                        return Ok(Expr::ArrayFill(elem_type, Box::new(len), span));
+                        return Ok(Expr::ArrayFill {
+                            elem_type,
+                            len: Box::new(len),
+                            span,
+                        });
                     } else {
                         let mut elements = Vec::new();
                         loop {
@@ -1117,7 +1376,7 @@ impl<'a> Parser<'a> {
                                 }
                             }
                         }
-                        return Ok(Expr::ArrayLiteral(elements, span));
+                        return Ok(Expr::ArrayLiteral { elements, span });
                     }
                 }
                 Ok((Token::IDENT(s), span)) | Ok((Token::TYPE(s), span)) => {
@@ -1160,96 +1419,40 @@ impl<'a> Parser<'a> {
                             self.expect(Token::GT)?;
                             if let Some(Ok((Token::LBRACE, _))) = self.peek() {
                                 self.next()?;
-                                let mut fields = Vec::new();
-                                loop {
-                                    match self.peek().cloned() {
-                                        Some(Ok((Token::RBRACE, _))) => {
-                                            self.next()?;
-                                            break;
-                                        }
-                                        Some(Ok((Token::IDENT(field_name), _))) => {
-                                            self.next()?;
-                                            self.expect(Token::COLON)?;
-                                            let field_value = self.expr()?;
-                                            fields.push((field_name, field_value));
-                                            match self.peek().cloned() {
-                                                Some(Ok((Token::COMMA, _))) => {
-                                                    self.next()?;
-                                                }
-                                                Some(Ok((Token::RBRACE, _))) => {
-                                                    self.next()?;
-                                                    break;
-                                                }
-                                                _ => {
-                                                    return Err(ParserError::UnexpectedToken {
-                                                        expected: Some(Token::COMMA),
-                                                        found: self.found_token_or_eof(),
-                                                        span: self.last_span,
-                                                    });
-                                                }
-                                            }
-                                        }
-                                        _ => {
-                                            return Err(ParserError::UnexpectedToken {
-                                                expected: Some(Token::IDENT(
-                                                    "FIELD NAME".to_string(),
-                                                )),
-                                                found: self.found_token_or_eof(),
-                                                span: self.last_span,
-                                            });
-                                        }
-                                    }
-                                }
+                                let fields = self.parse_literal_fields()?;
                                 if is_union {
-                                    return Ok(Expr::UnionLiteral(name, type_args, fields, span));
+                                    return Ok(Expr::UnionLiteral {
+                                        name,
+                                        type_args,
+                                        fields,
+                                        span,
+                                    });
                                 } else {
-                                    return Ok(Expr::StructLiteral(name, type_args, fields, span));
+                                    return Ok(Expr::StructLiteral {
+                                        name,
+                                        type_args,
+                                        fields,
+                                        span,
+                                    });
                                 }
                             }
                         } else if let Some(Ok((Token::LBRACE, _))) = self.peek() {
                             self.next()?;
-                            let mut fields = Vec::new();
-                            loop {
-                                match self.peek().cloned() {
-                                    Some(Ok((Token::RBRACE, _))) => {
-                                        self.next()?;
-                                        break;
-                                    }
-                                    Some(Ok((Token::IDENT(field_name), _))) => {
-                                        self.next()?;
-                                        self.expect(Token::COLON)?;
-                                        let field_value = self.expr()?;
-                                        fields.push((field_name, field_value));
-                                        match self.peek().cloned() {
-                                            Some(Ok((Token::COMMA, _))) => {
-                                                self.next()?;
-                                            }
-                                            Some(Ok((Token::RBRACE, _))) => {
-                                                self.next()?;
-                                                break;
-                                            }
-                                            _ => {
-                                                return Err(ParserError::UnexpectedToken {
-                                                    expected: Some(Token::COMMA),
-                                                    found: self.found_token_or_eof(),
-                                                    span: self.last_span,
-                                                });
-                                            }
-                                        }
-                                    }
-                                    _ => {
-                                        return Err(ParserError::UnexpectedToken {
-                                            expected: Some(Token::IDENT("FIELD NAME".to_string())),
-                                            found: self.found_token_or_eof(),
-                                            span: self.last_span,
-                                        });
-                                    }
-                                }
-                            }
+                            let fields = self.parse_literal_fields()?;
                             if is_union {
-                                return Ok(Expr::UnionLiteral(name, Vec::new(), fields, span));
+                                return Ok(Expr::UnionLiteral {
+                                    name,
+                                    type_args: Vec::new(),
+                                    fields,
+                                    span,
+                                });
                             } else {
-                                return Ok(Expr::StructLiteral(name, Vec::new(), fields, span));
+                                return Ok(Expr::StructLiteral {
+                                    name,
+                                    type_args: Vec::new(),
+                                    fields,
+                                    span,
+                                });
                             }
                         }
                     }
@@ -1258,7 +1461,11 @@ impl<'a> Parser<'a> {
                         if let Some(Ok((Token::EQ, _))) = self.peek() {
                             self.next()?;
                             let val = self.expr()?;
-                            return Ok(Expr::VarAssign(name, Box::new(val), span));
+                            return Ok(Expr::VarAssign {
+                                name,
+                                value: Box::new(val),
+                                span,
+                            });
                         }
                         if let Some(e) = self.try_compound_assign_name(&name, span)? {
                             return Ok(e);
@@ -1267,50 +1474,43 @@ impl<'a> Parser<'a> {
                     if self.deref_depth == 0 {
                         if let Some(Ok((Token::PLUSPLUS, _))) = self.peek() {
                             self.next()?;
-                            return Ok(Expr::Inc(name, span));
+                            return Ok(Expr::Inc { name, span });
                         }
                         if let Some(Ok((Token::MINUSMINUS, _))) = self.peek() {
                             self.next()?;
-                            return Ok(Expr::Dec(name, span));
+                            return Ok(Expr::Dec { name, span });
                         }
                     }
-                    return Ok(Expr::Var(name, span));
+                    return Ok(Expr::Var { name, span });
                 }
                 Ok((Token::MINUS, span)) => {
                     self.next()?;
                     let operand = self.call();
-                    return Ok(Expr::Neg(Box::new(operand?), span));
+                    return Ok(Expr::Neg {
+                        expr: Box::new(operand?),
+                        span,
+                    });
                 }
                 Ok((Token::PLUS, _span)) => {
                     self.next()?;
-                    let operand = self.call();
-                    return Ok(operand?);
+                    return self.call();
                 }
-                Ok((Token::PLUSPLUS, span)) => {
-                    self.next()?;
-                    let operand = self.prefix()?;
-                    return Ok(match operand {
-                        Expr::Var(name, _) => Expr::Inc(name, span),
-                        other => make_inc_dec(other, true, span)?,
-                    });
-                }
-                Ok((Token::MINUSMINUS, span)) => {
-                    self.next()?;
-                    let operand = self.prefix()?;
-                    return Ok(match operand {
-                        Expr::Var(name, _) => Expr::Dec(name, span),
-                        other => make_inc_dec(other, false, span)?,
-                    });
-                }
+
                 Ok((Token::NOT, span)) => {
                     self.next()?;
                     let operand = self.call();
-                    return Ok(Expr::Not(Box::new(operand?), span));
+                    return Ok(Expr::Not {
+                        expr: Box::new(operand?),
+                        span,
+                    });
                 }
                 Ok((Token::BNOT, span)) => {
                     self.next()?;
                     let operand = self.call();
-                    return Ok(Expr::BNot(Box::new(operand?), span));
+                    return Ok(Expr::BNot {
+                        expr: Box::new(operand?),
+                        span,
+                    });
                 }
                 Ok((token, span)) => {
                     return Err(ParserError::UnexpectedToken {

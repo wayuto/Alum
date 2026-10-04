@@ -7,6 +7,30 @@ use crate::compiler::{
 };
 
 impl IRGen {
+    pub(super) fn compile_scoped_value(
+        &mut self,
+        expr: Expr,
+        res_tmp: &Operand,
+        ctx: &mut Context,
+    ) -> Result<(), CodeGenError> {
+        ctx.enter_scope();
+        let info = self.resource_copy_info(&expr, ctx);
+        let value = self.compile_expr(expr, ctx)?;
+        let value = match info {
+            Some(ty) => self.copy_resource(ctx, value, &ty)?,
+            None => value,
+        };
+        ctx.instructions.push(Instruction {
+            op: Op::Move,
+            dst: Some(res_tmp.clone()),
+            src1: Some(value),
+            src2: None,
+        });
+        self.emit_scope_frees(ctx)?;
+        ctx.exit_scope()?;
+        Ok(())
+    }
+
     pub(super) fn compile_if(
         &mut self,
         condition: Box<Expr>,
@@ -28,21 +52,7 @@ impl IRGen {
 
         let res_tmp = ctx.new_tmp(IRType::Void);
 
-        ctx.enter_scope();
-        let then_info = self.resource_copy_info(&then_branch, ctx);
-        let then_op = self.compile_expr(*then_branch, ctx)?;
-        let then_op = match then_info {
-            Some(ty) => self.copy_resource(ctx, then_op, &ty)?,
-            None => then_op,
-        };
-        ctx.instructions.push(Instruction {
-            op: Op::Move,
-            dst: Some(res_tmp.clone()),
-            src1: Some(then_op),
-            src2: None,
-        });
-        self.emit_scope_frees(ctx)?;
-        ctx.exit_scope()?;
+        self.compile_scoped_value(*then_branch, &res_tmp, ctx)?;
 
         ctx.instructions.push(Instruction {
             op: Op::Jump,
@@ -59,21 +69,7 @@ impl IRGen {
         });
 
         if let Some(else_expr) = else_branch {
-            ctx.enter_scope();
-            let else_info = self.resource_copy_info(&else_expr, ctx);
-            let else_op = self.compile_expr(*else_expr, ctx)?;
-            let else_op = match else_info {
-                Some(ty) => self.copy_resource(ctx, else_op, &ty)?,
-                None => else_op,
-            };
-            ctx.instructions.push(Instruction {
-                op: Op::Move,
-                dst: Some(res_tmp.clone()),
-                src1: Some(else_op),
-                src2: None,
-            });
-            self.emit_scope_frees(ctx)?;
-            ctx.exit_scope()?;
+            self.compile_scoped_value(*else_expr, &res_tmp, ctx)?;
         }
 
         ctx.instructions.push(Instruction {
@@ -93,7 +89,6 @@ impl IRGen {
         ctx: &mut Context,
     ) -> Result<Operand, CodeGenError> {
         let label_start = ctx.new_label("while_start");
-        let label_body = ctx.new_label("while_body");
         let label_cont = ctx.new_label("while_cont");
         let label_end = ctx.new_label("while_end");
 
@@ -101,6 +96,7 @@ impl IRGen {
         ctx.loop_inc_labels.push(label_cont.clone());
 
         ctx.loop_scope_depths.push(ctx.scope.len());
+        ctx.loop_results.push(None);
 
         ctx.instructions.push(Instruction {
             op: Op::Label(label_start.clone()),
@@ -115,13 +111,6 @@ impl IRGen {
             dst: None,
             src1: Some(cond),
             src2: Some(Operand::Label(label_end.clone())),
-        });
-
-        ctx.instructions.push(Instruction {
-            op: Op::Label(label_body.clone()),
-            dst: None,
-            src1: None,
-            src2: None,
         });
 
         let moved_before = ctx.moved.clone();
@@ -156,7 +145,7 @@ impl IRGen {
         ctx.loop_inc_labels.pop();
         ctx.loop_scope_depths.pop();
 
-        Ok(ctx.new_tmp(IRType::Void))
+        Ok(self.take_loop_result(ctx))
     }
 
     pub(super) fn compile_for(
@@ -166,7 +155,13 @@ impl IRGen {
         body: Box<Expr>,
         ctx: &mut Context,
     ) -> Result<Operand, CodeGenError> {
-        if let Expr::Range(start, end, _) = *iter {
+        if let Expr::Range {
+            start,
+            end,
+            inclusive,
+            ..
+        } = *iter
+        {
             let start_op = self.compile_expr(*start, ctx)?;
             let end_op = self.compile_expr(*end, ctx)?;
             let label_cond = ctx.new_label("rfor_cond");
@@ -175,6 +170,7 @@ impl IRGen {
             ctx.loop_end_labels.push(label_end.clone());
             ctx.loop_inc_labels.push(label_inc.clone());
             ctx.loop_scope_depths.push(ctx.scope.len());
+            ctx.loop_results.push(None);
             let moved_before = ctx.moved.clone();
             ctx.enter_scope();
             let idx_name = ctx.new_label("idx");
@@ -201,7 +197,7 @@ impl IRGen {
             });
             let cond_tmp = ctx.new_tmp(IRType::Bool);
             ctx.instructions.push(Instruction {
-                op: Op::Lt,
+                op: if inclusive { Op::Le } else { Op::Lt },
                 dst: Some(cond_tmp.clone()),
                 src1: Some(curr_idx.clone()),
                 src2: Some(end_op),
@@ -267,7 +263,7 @@ impl IRGen {
             ctx.loop_end_labels.pop();
             ctx.loop_inc_labels.pop();
             ctx.loop_scope_depths.pop();
-            return Ok(ctx.new_tmp(IRType::Void));
+            return Ok(self.take_loop_result(ctx));
         }
         if let Some(Type::Struct(sname, ta)) = self.expr_high_type(&iter, ctx) {
             let maybe_ty = self
@@ -276,7 +272,7 @@ impl IRGen {
                     message: format!("type '{}' has no 'next' method", sname),
                 })?;
             let elem_ir = match &maybe_ty {
-                Type::Struct(mname, margs) if mname == "Maybe" => margs
+                Type::Struct(mname, margs) if crate::compiler::is_maybe_type_name(mname) => margs
                     .first()
                     .map(Context::type_to_ir_type)
                     .unwrap_or(IRType::Int),
@@ -290,7 +286,9 @@ impl IRGen {
                 }
             };
             let elem_hty = match &maybe_ty {
-                Type::Struct(mname, margs) if mname == "Maybe" => margs.first().cloned(),
+                Type::Struct(mname, margs) if crate::compiler::is_maybe_type_name(mname) => {
+                    margs.first().cloned()
+                }
                 _ => None,
             };
             let s_op = self.compile_expr(*iter, ctx)?;
@@ -304,6 +302,7 @@ impl IRGen {
             ctx.loop_inc_labels.push(label_cond.clone());
 
             ctx.loop_scope_depths.push(ctx.scope.len());
+            ctx.loop_results.push(None);
             let moved_before = ctx.moved.clone();
             ctx.enter_scope();
 
@@ -394,7 +393,7 @@ impl IRGen {
             ctx.loop_inc_labels.pop();
             ctx.loop_scope_depths.pop();
 
-            return Ok(ctx.new_tmp(IRType::Void));
+            return Ok(self.take_loop_result(ctx));
         }
         let is_string = matches!(
             self.expr_high_type(&iter, ctx),
@@ -405,8 +404,8 @@ impl IRGen {
             .as_ref()
             .map_or(IRType::Int, |t| Context::type_to_ir_type(t));
         let known_len = match &*iter {
-            Expr::ArrayLiteral(elements, _) => Some(elements.len()),
-            Expr::Var(name, _) => ctx.array_lengths.get(name).copied(),
+            Expr::ArrayLiteral { elements, .. } => Some(elements.len()),
+            Expr::Var { name, .. } => ctx.array_lengths.get(name).copied(),
             _ => None,
         };
         let array_operand = self.compile_expr(*iter, ctx)?;
@@ -449,6 +448,7 @@ impl IRGen {
         ctx.loop_inc_labels.push(label_inc.clone());
 
         ctx.loop_scope_depths.push(ctx.scope.len());
+        ctx.loop_results.push(None);
         let moved_before = ctx.moved.clone();
         ctx.enter_scope();
         let idx_name = ctx.new_label("idx");
@@ -569,10 +569,21 @@ impl IRGen {
         ctx.loop_inc_labels.pop();
         ctx.loop_scope_depths.pop();
 
-        Ok(ctx.new_tmp(IRType::Void))
+        Ok(self.take_loop_result(ctx))
     }
 
-    pub(super) fn compile_break(&mut self, ctx: &mut Context) -> Result<Operand, CodeGenError> {
+    fn take_loop_result(&mut self, ctx: &mut Context) -> Operand {
+        match ctx.loop_results.pop().flatten() {
+            Some(op) => op,
+            None => ctx.new_tmp(IRType::Void),
+        }
+    }
+
+    pub(super) fn compile_break(
+        &mut self,
+        value: Option<Box<Expr>>,
+        ctx: &mut Context,
+    ) -> Result<Operand, CodeGenError> {
         let end = ctx
             .loop_end_labels
             .last()
@@ -580,6 +591,32 @@ impl IRGen {
                 message: "break outside of loop".to_string(),
             })?
             .clone();
+
+        if let Some(v) = value {
+            let val_op = self.compile_expr(*v, ctx)?;
+            let has_loop = ctx.loop_results.last().is_some();
+            if !has_loop {
+                return Err(CodeGenError::SyntaxError {
+                    message: "break outside of loop".to_string(),
+                });
+            }
+            let already = ctx.loop_results.last().cloned().flatten();
+            let slot = match already {
+                Some(op) => op,
+                None => {
+                    let ty = ctx.get_operand_type(&val_op, &self.constants)?;
+                    let tmp = ctx.new_tmp(ty);
+                    *ctx.loop_results.last_mut().unwrap() = Some(tmp.clone());
+                    tmp
+                }
+            };
+            ctx.instructions.push(Instruction {
+                op: Op::Move,
+                dst: Some(slot),
+                src1: Some(val_op),
+                src2: None,
+            });
+        }
 
         if let Some(depth) = ctx.loop_scope_depths.last() {
             self.emit_scope_frees_from(ctx, *depth)?;

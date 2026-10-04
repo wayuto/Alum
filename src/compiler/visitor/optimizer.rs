@@ -16,7 +16,7 @@ impl Optimizer {
             .body
             .iter()
             .filter_map(|e| match e {
-                Expr::FuncDecl(name, attrs, _, _, _, _, _) if attrs.is_pure => Some(name.clone()),
+                Expr::FuncDecl { name, attrs, .. } if attrs.is_pure => Some(name.clone()),
                 _ => None,
             })
             .collect();
@@ -24,7 +24,7 @@ impl Optimizer {
             .body
             .iter()
             .filter_map(|e| match e {
-                Expr::FuncDecl(name, _, _, _, _, _, _) => Some(name.clone()),
+                Expr::FuncDecl { name, .. } => Some(name.clone()),
                 _ => None,
             })
             .collect();
@@ -32,7 +32,7 @@ impl Optimizer {
             .body
             .iter()
             .filter_map(|e| match e {
-                Expr::ConstDecl(name, _, _, _, _) => Some(name.clone()),
+                Expr::ConstDecl { name, .. } => Some(name.clone()),
                 _ => None,
             })
             .collect();
@@ -74,17 +74,24 @@ impl Optimizer {
         }
         let before = program.body.len();
         program.body.retain(|expr| match expr {
-            Expr::FuncDecl(name, attrs, ..) => {
+            Expr::FuncDecl { name, attrs, .. } => {
                 if attrs.is_external || attrs.is_pub || name == "main" {
                     true
                 } else {
                     fn_used.contains(name)
                 }
             }
-            Expr::ConstDecl(name, _, init, is_pub, _) => {
-                *is_pub || const_used.contains(name) || matches!(init.as_ref(), Expr::FuncDecl(..))
+            Expr::ConstDecl {
+                name,
+                ty: _,
+                value: init,
+                is_pub,
+                ..
+            } => {
+                *is_pub
+                    || const_used.contains(name)
+                    || matches!(init.as_ref(), Expr::FuncDecl { .. })
             }
-            Expr::GlobalVar(_, _, _, _, _) => true,
             _ => true,
         });
         before - program.body.len()
@@ -100,13 +107,22 @@ impl Optimizer {
 
     fn prune_locals(&self, expr: &mut Expr, used: &HashSet<String>, pure_fns: &HashSet<String>) {
         match expr {
-            Expr::Block(body, _) => {
+            Expr::Block { stmts: body, .. } => {
                 let mut kept = Vec::new();
                 for stmt in body.drain(..) {
                     let drop = match &stmt {
-                        Expr::VarDecl(name, _, init, _) | Expr::ConstDecl(name, _, init, _, _) => {
-                            !used.contains(name) && self.discardable(init, pure_fns)
+                        Expr::VarDecl {
+                            name,
+                            ty: _,
+                            value: init,
+                            ..
                         }
+                        | Expr::ConstDecl {
+                            name,
+                            ty: _,
+                            value: init,
+                            ..
+                        } => !used.contains(name) && self.discardable(init, pure_fns),
                         _ => false,
                     };
                     if !drop {
@@ -118,127 +134,276 @@ impl Optimizer {
                     self.prune_locals(e, used, pure_fns);
                 }
             }
-            Expr::If(cond, t, e, _) => {
+            Expr::If {
+                cond,
+                then_branch: t,
+                else_branch: e,
+                ..
+            } => {
                 self.prune_locals(cond, used, pure_fns);
                 self.prune_locals(t, used, pure_fns);
                 if let Some(e) = e {
                     self.prune_locals(e, used, pure_fns);
                 }
             }
-            Expr::While(cond, body, _) => {
+            Expr::While { cond, body, .. } => {
                 self.prune_locals(cond, used, pure_fns);
                 self.prune_locals(body, used, pure_fns);
             }
-            Expr::For(_, array, body, _) => {
+            Expr::For {
+                var: _,
+                iterable: array,
+                body,
+                ..
+            } => {
                 self.prune_locals(array, used, pure_fns);
                 self.prune_locals(body, used, pure_fns);
             }
-            Expr::Lambda(_, body, _, _) => self.prune_locals(body, used, pure_fns),
-            Expr::FuncDecl(_, _, _, _, _, body, _) => self.prune_locals(body, used, pure_fns),
-            Expr::VarDecl(_, _, v, _)
-            | Expr::ConstDecl(_, _, v, _, _)
-            | Expr::VarAssign(_, v, _)
-            | Expr::AddAssign(_, v, _)
-            | Expr::SubAssign(_, v, _)
-            | Expr::MulAssign(_, v, _)
-            | Expr::DivAssign(_, v, _)
-            | Expr::ModAssign(_, v, _)
-            | Expr::AndAssign(_, v, _)
-            | Expr::OrAssign(_, v, _)
-            | Expr::XorAssign(_, v, _)
-            | Expr::ShlAssign(_, v, _)
-            | Expr::ShrAssign(_, v, _)
-            | Expr::Return(v, _) => self.prune_locals(v, used, pure_fns),
-            Expr::Call(f, _, args, _) => {
+            Expr::Lambda {
+                params: _, body, ..
+            } => self.prune_locals(body, used, pure_fns),
+            Expr::FuncDecl {
+                name: _,
+                attrs: _,
+                type_params: _,
+                params: _,
+                return_type: _,
+                body,
+                ..
+            } => self.prune_locals(body, used, pure_fns),
+            Expr::VarDecl {
+                name: _,
+                ty: _,
+                value: v,
+                ..
+            }
+            | Expr::ConstDecl {
+                name: _,
+                ty: _,
+                value: v,
+                ..
+            }
+            | Expr::VarAssign {
+                name: _, value: v, ..
+            }
+            | Expr::AddAssign {
+                name: _, value: v, ..
+            }
+            | Expr::SubAssign {
+                name: _, value: v, ..
+            }
+            | Expr::MulAssign {
+                name: _, value: v, ..
+            }
+            | Expr::DivAssign {
+                name: _, value: v, ..
+            }
+            | Expr::ModAssign {
+                name: _, value: v, ..
+            }
+            | Expr::AndAssign {
+                name: _, value: v, ..
+            }
+            | Expr::OrAssign {
+                name: _, value: v, ..
+            }
+            | Expr::XorAssign {
+                name: _, value: v, ..
+            }
+            | Expr::ShlAssign {
+                name: _, value: v, ..
+            }
+            | Expr::ShrAssign {
+                name: _, value: v, ..
+            }
+            | Expr::Return { value: v, .. } => self.prune_locals(v, used, pure_fns),
+            Expr::Call {
+                callee: f,
+                type_args: _,
+                args,
+                ..
+            } => {
                 self.prune_locals(f, used, pure_fns);
                 for a in args {
                     self.prune_locals(a, used, pure_fns);
                 }
             }
-            Expr::IndexAssign(a, v, _) => {
+            Expr::IndexAssign {
+                target: a,
+                value: v,
+                ..
+            } => {
                 self.prune_locals(a, used, pure_fns);
                 self.prune_locals(v, used, pure_fns);
             }
-            Expr::MemberAssign(o, _, v, _) => {
+            Expr::MemberAssign {
+                obj: o,
+                field: _,
+                value: v,
+                ..
+            } => {
                 self.prune_locals(o, used, pure_fns);
                 self.prune_locals(v, used, pure_fns);
             }
-            Expr::DerefAssign(p, v, _) => {
+            Expr::DerefAssign {
+                ptr: p, value: v, ..
+            } => {
                 self.prune_locals(p, used, pure_fns);
                 self.prune_locals(v, used, pure_fns);
             }
-            Expr::Cast(inner, _, _) => self.prune_locals(inner, used, pure_fns),
-            Expr::ArrayLiteral(es, _) => {
+            Expr::Cast { expr: inner, .. } => self.prune_locals(inner, used, pure_fns),
+            Expr::ArrayLiteral { elements: es, .. } => {
                 for e in es {
                     self.prune_locals(e, used, pure_fns);
                 }
             }
-            Expr::ArrayFill(_, len, _) => self.prune_locals(len, used, pure_fns),
-            Expr::Index(arr, idx, _) => {
+            Expr::ArrayFill {
+                elem_type: _, len, ..
+            } => self.prune_locals(len, used, pure_fns),
+            Expr::Index {
+                array: arr,
+                index: idx,
+                ..
+            } => {
                 self.prune_locals(arr, used, pure_fns);
                 self.prune_locals(idx, used, pure_fns);
             }
-            Expr::StructLiteral(_, _, fs, _) | Expr::UnionLiteral(_, _, fs, _) => {
+            Expr::StructLiteral {
+                name: _,
+                type_args: _,
+                fields: fs,
+                ..
+            }
+            | Expr::UnionLiteral {
+                name: _,
+                type_args: _,
+                fields: fs,
+                ..
+            } => {
                 for (_, v) in fs {
                     self.prune_locals(v, used, pure_fns);
                 }
             }
-            Expr::MemberAccess(o, _, _) => self.prune_locals(o, used, pure_fns),
-            Expr::AddressOf(e, _)
-            | Expr::Deref(e, _)
-            | Expr::Not(e, _)
-            | Expr::Neg(e, _)
-            | Expr::FNeg(e, _) => self.prune_locals(e, used, pure_fns),
-            Expr::Match(t, br, default, _) => {
+            Expr::MemberAccess { obj: o, .. } => self.prune_locals(o, used, pure_fns),
+            Expr::AddressOf { expr: e, .. }
+            | Expr::Deref { expr: e, .. }
+            | Expr::Not { expr: e, .. }
+            | Expr::Neg { expr: e, .. }
+            | Expr::FNeg { expr: e, .. } => self.prune_locals(e, used, pure_fns),
+            Expr::Match {
+                target: t,
+                branches: br,
+                default,
+                ..
+            } => {
                 self.prune_locals(t, used, pure_fns);
-                for (c, r) in br {
+                for (c, g, r) in br {
                     self.prune_locals(c, used, pure_fns);
+                    if let Some(g) = g {
+                        self.prune_locals(g, used, pure_fns);
+                    }
                     self.prune_locals(r, used, pure_fns);
                 }
                 if let Some(d) = default {
                     self.prune_locals(d, used, pure_fns);
                 }
             }
-            Expr::Range(s, e, _) => {
+            Expr::Range {
+                start: s, end: e, ..
+            } => {
                 self.prune_locals(s, used, pure_fns);
                 self.prune_locals(e, used, pure_fns);
             }
-            Expr::FString(segs, _) => {
+            Expr::FString { segs, .. } => {
                 for seg in segs {
                     self.prune_locals(seg, used, pure_fns);
                 }
             }
-            Expr::Add(l, r, _)
-            | Expr::Sub(l, r, _)
-            | Expr::Mul(l, r, _)
-            | Expr::Div(l, r, _)
-            | Expr::Mod(l, r, _)
-            | Expr::Xor(l, r, _)
-            | Expr::FAdd(l, r, _)
-            | Expr::FSub(l, r, _)
-            | Expr::FMul(l, r, _)
-            | Expr::FDiv(l, r, _)
-            | Expr::Eq(l, r, _)
-            | Expr::Ne(l, r, _)
-            | Expr::Lt(l, r, _)
-            | Expr::Le(l, r, _)
-            | Expr::Gt(l, r, _)
-            | Expr::Ge(l, r, _)
-            | Expr::FEq(l, r, _)
-            | Expr::FNe(l, r, _)
-            | Expr::FLt(l, r, _)
-            | Expr::FLe(l, r, _)
-            | Expr::FGt(l, r, _)
-            | Expr::FGe(l, r, _)
-            | Expr::LAnd(l, r, _)
-            | Expr::LOr(l, r, _)
-            | Expr::Shl(l, r, _)
-            | Expr::Shr(l, r, _)
-            | Expr::StrCat(l, r, _) => {
+            Expr::Add {
+                left: l, right: r, ..
+            }
+            | Expr::Sub {
+                left: l, right: r, ..
+            }
+            | Expr::Mul {
+                left: l, right: r, ..
+            }
+            | Expr::Div {
+                left: l, right: r, ..
+            }
+            | Expr::Mod {
+                left: l, right: r, ..
+            }
+            | Expr::Xor {
+                left: l, right: r, ..
+            }
+            | Expr::FAdd {
+                left: l, right: r, ..
+            }
+            | Expr::FSub {
+                left: l, right: r, ..
+            }
+            | Expr::FMul {
+                left: l, right: r, ..
+            }
+            | Expr::FDiv {
+                left: l, right: r, ..
+            }
+            | Expr::Eq {
+                left: l, right: r, ..
+            }
+            | Expr::Ne {
+                left: l, right: r, ..
+            }
+            | Expr::Lt {
+                left: l, right: r, ..
+            }
+            | Expr::Le {
+                left: l, right: r, ..
+            }
+            | Expr::Gt {
+                left: l, right: r, ..
+            }
+            | Expr::Ge {
+                left: l, right: r, ..
+            }
+            | Expr::FEq {
+                left: l, right: r, ..
+            }
+            | Expr::FNe {
+                left: l, right: r, ..
+            }
+            | Expr::FLt {
+                left: l, right: r, ..
+            }
+            | Expr::FLe {
+                left: l, right: r, ..
+            }
+            | Expr::FGt {
+                left: l, right: r, ..
+            }
+            | Expr::FGe {
+                left: l, right: r, ..
+            }
+            | Expr::LAnd {
+                left: l, right: r, ..
+            }
+            | Expr::LOr {
+                left: l, right: r, ..
+            }
+            | Expr::Shl {
+                left: l, right: r, ..
+            }
+            | Expr::Shr {
+                left: l, right: r, ..
+            }
+            | Expr::StrCat {
+                left: l, right: r, ..
+            } => {
                 self.prune_locals(l, used, pure_fns);
                 self.prune_locals(r, used, pure_fns);
             }
-            Expr::BNot(e, _) => self.prune_locals(e, used, pure_fns),
+            Expr::BNot { expr: e, .. } => self.prune_locals(e, used, pure_fns),
             _ => {}
         }
     }
@@ -263,599 +428,1206 @@ impl Optimizer {
 
     fn for_each_name(&self, expr: &Expr, f: &mut dyn FnMut(&str)) {
         match expr {
-            Expr::FuncDecl(_, _, _, _, _, body, _) => self.for_each_name(body, f),
-            Expr::Var(name, _) | Expr::Inc(name, _) | Expr::Dec(name, _) => f(name),
-            Expr::VarAssign(name, v, _)
-            | Expr::AddAssign(name, v, _)
-            | Expr::SubAssign(name, v, _)
-            | Expr::MulAssign(name, v, _)
-            | Expr::DivAssign(name, v, _)
-            | Expr::ModAssign(name, v, _)
-            | Expr::AndAssign(name, v, _)
-            | Expr::OrAssign(name, v, _)
-            | Expr::XorAssign(name, v, _)
-            | Expr::ShlAssign(name, v, _)
-            | Expr::ShrAssign(name, v, _) => {
+            Expr::FuncDecl {
+                name: _,
+                attrs: _,
+                type_params: _,
+                params: _,
+                return_type: _,
+                body,
+                ..
+            } => self.for_each_name(body, f),
+            Expr::Var { name, .. } | Expr::Inc { name, .. } | Expr::Dec { name, .. } => f(name),
+            Expr::VarAssign { name, value: v, .. }
+            | Expr::AddAssign { name, value: v, .. }
+            | Expr::SubAssign { name, value: v, .. }
+            | Expr::MulAssign { name, value: v, .. }
+            | Expr::DivAssign { name, value: v, .. }
+            | Expr::ModAssign { name, value: v, .. }
+            | Expr::AndAssign { name, value: v, .. }
+            | Expr::OrAssign { name, value: v, .. }
+            | Expr::XorAssign { name, value: v, .. }
+            | Expr::ShlAssign { name, value: v, .. }
+            | Expr::ShrAssign { name, value: v, .. } => {
                 f(name);
                 self.for_each_name(v, f);
             }
-            Expr::VarDecl(_, _, v, _) | Expr::ConstDecl(_, _, v, _, _) | Expr::Return(v, _) => {
-                self.for_each_name(v, f)
+            Expr::VarDecl {
+                name: _,
+                ty: _,
+                value: v,
+                ..
             }
-            Expr::GlobalVar(_, _, _, v, _) => {
+            | Expr::ConstDecl {
+                name: _,
+                ty: _,
+                value: v,
+                ..
+            }
+            | Expr::Return { value: v, .. } => self.for_each_name(v, f),
+            Expr::GlobalVar {
+                name: _,
+                is_pub: _,
+                ty: _,
+                value: v,
+                ..
+            } => {
                 if let Some(v) = v {
                     self.for_each_name(v, f);
                 }
             }
-            Expr::Call(callee, _, args, _) => {
+            Expr::Call {
+                callee,
+                type_args: _,
+                args,
+                ..
+            } => {
                 self.for_each_name(callee, f);
                 for a in args {
                     self.for_each_name(a, f);
                 }
             }
-            Expr::Block(body, _) => {
+            Expr::Block { stmts: body, .. } => {
                 for e in body {
                     self.for_each_name(e, f);
                 }
             }
-            Expr::If(cond, t, e, _) => {
+            Expr::If {
+                cond,
+                then_branch: t,
+                else_branch: e,
+                ..
+            } => {
                 self.for_each_name(cond, f);
                 self.for_each_name(t, f);
                 if let Some(e) = e {
                     self.for_each_name(e, f);
                 }
             }
-            Expr::While(cond, body, _) => {
+            Expr::While { cond, body, .. } => {
                 self.for_each_name(cond, f);
                 self.for_each_name(body, f);
             }
-            Expr::For(_, array, body, _) => {
+            Expr::For {
+                var: _,
+                iterable: array,
+                body,
+                ..
+            } => {
                 self.for_each_name(array, f);
                 self.for_each_name(body, f);
             }
-            Expr::Lambda(_, body, _, _) => self.for_each_name(body, f),
-            Expr::Index(a, i, _) => {
+            Expr::Lambda {
+                params: _, body, ..
+            } => self.for_each_name(body, f),
+            Expr::Index {
+                array: a, index: i, ..
+            } => {
                 self.for_each_name(a, f);
                 self.for_each_name(i, f);
             }
-            Expr::IndexAssign(a, v, _) => {
+            Expr::IndexAssign {
+                target: a,
+                value: v,
+                ..
+            } => {
                 self.for_each_name(a, f);
                 self.for_each_name(v, f);
             }
-            Expr::ArrayLiteral(es, _) => {
+            Expr::ArrayLiteral { elements: es, .. } => {
                 for e in es {
                     self.for_each_name(e, f);
                 }
             }
-            Expr::ArrayFill(_, len, _) => self.for_each_name(len, f),
-            Expr::Range(s, e, _) => {
+            Expr::ArrayFill {
+                elem_type: _, len, ..
+            } => self.for_each_name(len, f),
+            Expr::Range {
+                start: s, end: e, ..
+            } => {
                 self.for_each_name(s, f);
                 self.for_each_name(e, f);
             }
-            Expr::Match(t, br, default, _) => {
+            Expr::Match {
+                target: t,
+                branches: br,
+                default,
+                ..
+            } => {
                 self.for_each_name(t, f);
-                for (c, r) in br {
+                for (c, g, r) in br {
                     self.for_each_name(c, f);
+                    if let Some(g) = g {
+                        self.for_each_name(g, f);
+                    }
                     self.for_each_name(r, f);
                 }
                 if let Some(d) = default {
                     self.for_each_name(d, f);
                 }
             }
-            Expr::StructLiteral(_, _, fs, _) | Expr::UnionLiteral(_, _, fs, _) => {
+            Expr::StructLiteral {
+                name: _,
+                type_args: _,
+                fields: fs,
+                ..
+            }
+            | Expr::UnionLiteral {
+                name: _,
+                type_args: _,
+                fields: fs,
+                ..
+            } => {
                 for (_, v) in fs {
                     self.for_each_name(v, f);
                 }
             }
-            Expr::MemberAccess(o, _, _) => self.for_each_name(o, f),
-            Expr::MemberAssign(o, _, v, _) => {
+            Expr::MemberAccess { obj: o, .. } => self.for_each_name(o, f),
+            Expr::MemberAssign {
+                obj: o,
+                field: _,
+                value: v,
+                ..
+            } => {
                 self.for_each_name(o, f);
                 self.for_each_name(v, f);
             }
-            Expr::AddressOf(e, _)
-            | Expr::Deref(e, _)
-            | Expr::Not(e, _)
-            | Expr::Neg(e, _)
-            | Expr::FNeg(e, _)
-            | Expr::Cast(e, _, _) => self.for_each_name(e, f),
-            Expr::DerefAssign(p, v, _) => {
+            Expr::AddressOf { expr: e, .. }
+            | Expr::Deref { expr: e, .. }
+            | Expr::Not { expr: e, .. }
+            | Expr::Neg { expr: e, .. }
+            | Expr::FNeg { expr: e, .. }
+            | Expr::Cast { expr: e, .. } => self.for_each_name(e, f),
+            Expr::DerefAssign {
+                ptr: p, value: v, ..
+            } => {
                 self.for_each_name(p, f);
                 self.for_each_name(v, f);
             }
-            Expr::FString(segs, _) => {
+            Expr::FString { segs, .. } => {
                 for seg in segs {
                     self.for_each_name(seg, f);
                 }
             }
-            Expr::Add(l, r, _)
-            | Expr::Sub(l, r, _)
-            | Expr::Mul(l, r, _)
-            | Expr::Div(l, r, _)
-            | Expr::Mod(l, r, _)
-            | Expr::Xor(l, r, _)
-            | Expr::FAdd(l, r, _)
-            | Expr::FSub(l, r, _)
-            | Expr::FMul(l, r, _)
-            | Expr::FDiv(l, r, _)
-            | Expr::Eq(l, r, _)
-            | Expr::Ne(l, r, _)
-            | Expr::Lt(l, r, _)
-            | Expr::Le(l, r, _)
-            | Expr::Gt(l, r, _)
-            | Expr::Ge(l, r, _)
-            | Expr::FEq(l, r, _)
-            | Expr::FNe(l, r, _)
-            | Expr::FLt(l, r, _)
-            | Expr::FLe(l, r, _)
-            | Expr::FGt(l, r, _)
-            | Expr::FGe(l, r, _)
-            | Expr::LAnd(l, r, _)
-            | Expr::LOr(l, r, _)
-            | Expr::Shl(l, r, _)
-            | Expr::Shr(l, r, _)
-            | Expr::StrCat(l, r, _) => {
+            Expr::Add {
+                left: l, right: r, ..
+            }
+            | Expr::Sub {
+                left: l, right: r, ..
+            }
+            | Expr::Mul {
+                left: l, right: r, ..
+            }
+            | Expr::Div {
+                left: l, right: r, ..
+            }
+            | Expr::Mod {
+                left: l, right: r, ..
+            }
+            | Expr::Xor {
+                left: l, right: r, ..
+            }
+            | Expr::FAdd {
+                left: l, right: r, ..
+            }
+            | Expr::FSub {
+                left: l, right: r, ..
+            }
+            | Expr::FMul {
+                left: l, right: r, ..
+            }
+            | Expr::FDiv {
+                left: l, right: r, ..
+            }
+            | Expr::Eq {
+                left: l, right: r, ..
+            }
+            | Expr::Ne {
+                left: l, right: r, ..
+            }
+            | Expr::Lt {
+                left: l, right: r, ..
+            }
+            | Expr::Le {
+                left: l, right: r, ..
+            }
+            | Expr::Gt {
+                left: l, right: r, ..
+            }
+            | Expr::Ge {
+                left: l, right: r, ..
+            }
+            | Expr::FEq {
+                left: l, right: r, ..
+            }
+            | Expr::FNe {
+                left: l, right: r, ..
+            }
+            | Expr::FLt {
+                left: l, right: r, ..
+            }
+            | Expr::FLe {
+                left: l, right: r, ..
+            }
+            | Expr::FGt {
+                left: l, right: r, ..
+            }
+            | Expr::FGe {
+                left: l, right: r, ..
+            }
+            | Expr::LAnd {
+                left: l, right: r, ..
+            }
+            | Expr::LOr {
+                left: l, right: r, ..
+            }
+            | Expr::Shl {
+                left: l, right: r, ..
+            }
+            | Expr::Shr {
+                left: l, right: r, ..
+            }
+            | Expr::StrCat {
+                left: l, right: r, ..
+            } => {
                 self.for_each_name(l, f);
                 self.for_each_name(r, f);
             }
-            Expr::BNot(e, _) => self.for_each_name(e, f),
+            Expr::BNot { expr: e, .. } => self.for_each_name(e, f),
             _ => {}
         }
     }
 
     fn discardable(&self, expr: &Expr, pure_fns: &HashSet<String>) -> bool {
         match expr {
-            Expr::Int(_, _)
-            | Expr::Float(_, _)
-            | Expr::Bool(_, _)
-            | Expr::String(_, _)
+            Expr::Int { .. }
+            | Expr::Float { .. }
+            | Expr::Char { .. }
+            | Expr::Bool { .. }
+            | Expr::String { .. }
             | Expr::Nil(_)
-            | Expr::Var(_, _) => true,
-            Expr::Call(callee, _, args, _) => match callee.as_ref() {
-                Expr::Var(name, _) => {
+            | Expr::Var { .. } => true,
+            Expr::Call {
+                callee,
+                type_args: _,
+                args,
+                ..
+            } => match callee.as_ref() {
+                Expr::Var { name, .. } => {
                     pure_fns.contains(name) && args.iter().all(|a| self.discardable(a, pure_fns))
                 }
                 _ => false,
             },
-            Expr::Index(l, r, _) => self.discardable(l, pure_fns) && self.discardable(r, pure_fns),
-            Expr::ArrayLiteral(es, _) => es.iter().all(|e| self.discardable(e, pure_fns)),
-            Expr::ArrayFill(_, len, _) => self.discardable(len, pure_fns),
-            Expr::StructLiteral(_, _, fs, _) | Expr::UnionLiteral(_, _, fs, _) => {
-                fs.iter().all(|(_, v)| self.discardable(v, pure_fns))
+            Expr::Index {
+                array: l, index: r, ..
+            } => self.discardable(l, pure_fns) && self.discardable(r, pure_fns),
+            Expr::ArrayLiteral { elements: es, .. } => {
+                es.iter().all(|e| self.discardable(e, pure_fns))
             }
-            Expr::MemberAccess(o, _, _) => self.discardable(o, pure_fns),
-            Expr::AddressOf(e, _)
-            | Expr::Deref(e, _)
-            | Expr::Not(e, _)
-            | Expr::Neg(e, _)
-            | Expr::FNeg(e, _)
-            | Expr::Cast(e, _, _) => self.discardable(e, pure_fns),
-            Expr::Range(s, e, _) => self.discardable(s, pure_fns) && self.discardable(e, pure_fns),
-            Expr::FString(segs, _) => segs.iter().all(|s| self.discardable(s, pure_fns)),
-            Expr::Add(l, r, _)
-            | Expr::Sub(l, r, _)
-            | Expr::Mul(l, r, _)
-            | Expr::Div(l, r, _)
-            | Expr::Mod(l, r, _)
-            | Expr::Xor(l, r, _)
-            | Expr::FAdd(l, r, _)
-            | Expr::FSub(l, r, _)
-            | Expr::FMul(l, r, _)
-            | Expr::FDiv(l, r, _)
-            | Expr::Eq(l, r, _)
-            | Expr::Ne(l, r, _)
-            | Expr::Lt(l, r, _)
-            | Expr::Le(l, r, _)
-            | Expr::Gt(l, r, _)
-            | Expr::Ge(l, r, _)
-            | Expr::FEq(l, r, _)
-            | Expr::FNe(l, r, _)
-            | Expr::FLt(l, r, _)
-            | Expr::FLe(l, r, _)
-            | Expr::FGt(l, r, _)
-            | Expr::FGe(l, r, _)
-            | Expr::LAnd(l, r, _)
-            | Expr::LOr(l, r, _)
-            | Expr::StrCat(l, r, _) => {
-                self.discardable(l, pure_fns) && self.discardable(r, pure_fns)
+            Expr::ArrayFill {
+                elem_type: _, len, ..
+            } => self.discardable(len, pure_fns),
+            Expr::StructLiteral {
+                name: _,
+                type_args: _,
+                fields: fs,
+                ..
             }
+            | Expr::UnionLiteral {
+                name: _,
+                type_args: _,
+                fields: fs,
+                ..
+            } => fs.iter().all(|(_, v)| self.discardable(v, pure_fns)),
+            Expr::MemberAccess { obj: o, .. } => self.discardable(o, pure_fns),
+            Expr::AddressOf { expr: e, .. }
+            | Expr::Deref { expr: e, .. }
+            | Expr::Not { expr: e, .. }
+            | Expr::Neg { expr: e, .. }
+            | Expr::FNeg { expr: e, .. }
+            | Expr::Cast { expr: e, .. } => self.discardable(e, pure_fns),
+            Expr::Range {
+                start: s, end: e, ..
+            } => self.discardable(s, pure_fns) && self.discardable(e, pure_fns),
+            Expr::FString { segs, .. } => segs.iter().all(|s| self.discardable(s, pure_fns)),
+            Expr::Add {
+                left: l, right: r, ..
+            }
+            | Expr::Sub {
+                left: l, right: r, ..
+            }
+            | Expr::Mul {
+                left: l, right: r, ..
+            }
+            | Expr::Div {
+                left: l, right: r, ..
+            }
+            | Expr::Mod {
+                left: l, right: r, ..
+            }
+            | Expr::Xor {
+                left: l, right: r, ..
+            }
+            | Expr::FAdd {
+                left: l, right: r, ..
+            }
+            | Expr::FSub {
+                left: l, right: r, ..
+            }
+            | Expr::FMul {
+                left: l, right: r, ..
+            }
+            | Expr::FDiv {
+                left: l, right: r, ..
+            }
+            | Expr::Eq {
+                left: l, right: r, ..
+            }
+            | Expr::Ne {
+                left: l, right: r, ..
+            }
+            | Expr::Lt {
+                left: l, right: r, ..
+            }
+            | Expr::Le {
+                left: l, right: r, ..
+            }
+            | Expr::Gt {
+                left: l, right: r, ..
+            }
+            | Expr::Ge {
+                left: l, right: r, ..
+            }
+            | Expr::FEq {
+                left: l, right: r, ..
+            }
+            | Expr::FNe {
+                left: l, right: r, ..
+            }
+            | Expr::FLt {
+                left: l, right: r, ..
+            }
+            | Expr::FLe {
+                left: l, right: r, ..
+            }
+            | Expr::FGt {
+                left: l, right: r, ..
+            }
+            | Expr::FGe {
+                left: l, right: r, ..
+            }
+            | Expr::LAnd {
+                left: l, right: r, ..
+            }
+            | Expr::LOr {
+                left: l, right: r, ..
+            }
+            | Expr::StrCat {
+                left: l, right: r, ..
+            } => self.discardable(l, pure_fns) && self.discardable(r, pure_fns),
             _ => false,
         }
     }
 
     fn visit(&self, expr: &mut Expr) {
         match expr {
-            Expr::Block(body, _) => body.iter_mut().for_each(|e| self.optimize_expr(e)),
-            Expr::FuncDecl(_, _, _, _, _, body, _) => self.optimize_expr(body),
-            Expr::Lambda(_, body, _, _) => self.optimize_expr(body),
-            Expr::If(cond, t, e, _) => {
+            Expr::Block { stmts: body, .. } => body.iter_mut().for_each(|e| self.optimize_expr(e)),
+            Expr::FuncDecl {
+                name: _,
+                attrs: _,
+                type_params: _,
+                params: _,
+                return_type: _,
+                body,
+                ..
+            } => self.optimize_expr(body),
+            Expr::Lambda {
+                params: _, body, ..
+            } => self.optimize_expr(body),
+            Expr::If {
+                cond,
+                then_branch: t,
+                else_branch: e,
+                ..
+            } => {
                 self.optimize_expr(cond);
                 self.optimize_expr(t);
                 if let Some(e) = e {
                     self.optimize_expr(e);
                 }
             }
-            Expr::While(cond, body, _) => {
+            Expr::While { cond, body, .. } => {
                 self.optimize_expr(cond);
                 self.optimize_expr(body);
             }
-            Expr::For(_, array, body, _) => {
+            Expr::For {
+                var: _,
+                iterable: array,
+                body,
+                ..
+            } => {
                 self.optimize_expr(array);
                 self.optimize_expr(body);
             }
-            Expr::VarDecl(_, _, v, _)
-            | Expr::ConstDecl(_, _, v, _, _)
-            | Expr::VarAssign(_, v, _)
-            | Expr::Return(v, _)
-            | Expr::AddAssign(_, v, _)
-            | Expr::SubAssign(_, v, _)
-            | Expr::MulAssign(_, v, _)
-            | Expr::DivAssign(_, v, _)
-            | Expr::ModAssign(_, v, _)
-            | Expr::AndAssign(_, v, _)
-            | Expr::OrAssign(_, v, _)
-            | Expr::XorAssign(_, v, _)
-            | Expr::ShlAssign(_, v, _)
-            | Expr::ShrAssign(_, v, _) => self.optimize_expr(v),
-            Expr::GlobalVar(_, _, _, v, _) => {
+            Expr::VarDecl {
+                name: _,
+                ty: _,
+                value: v,
+                ..
+            }
+            | Expr::ConstDecl {
+                name: _,
+                ty: _,
+                value: v,
+                ..
+            }
+            | Expr::VarAssign {
+                name: _, value: v, ..
+            }
+            | Expr::Return { value: v, .. }
+            | Expr::AddAssign {
+                name: _, value: v, ..
+            }
+            | Expr::SubAssign {
+                name: _, value: v, ..
+            }
+            | Expr::MulAssign {
+                name: _, value: v, ..
+            }
+            | Expr::DivAssign {
+                name: _, value: v, ..
+            }
+            | Expr::ModAssign {
+                name: _, value: v, ..
+            }
+            | Expr::AndAssign {
+                name: _, value: v, ..
+            }
+            | Expr::OrAssign {
+                name: _, value: v, ..
+            }
+            | Expr::XorAssign {
+                name: _, value: v, ..
+            }
+            | Expr::ShlAssign {
+                name: _, value: v, ..
+            }
+            | Expr::ShrAssign {
+                name: _, value: v, ..
+            } => self.optimize_expr(v),
+            Expr::GlobalVar {
+                name: _,
+                is_pub: _,
+                ty: _,
+                value: v,
+                ..
+            } => {
                 if let Some(v) = v {
                     self.optimize_expr(v);
                 }
             }
-            Expr::Inc(_, _) | Expr::Dec(_, _) => {}
-            Expr::Call(f, _, args, _) => {
+            Expr::Inc { .. } | Expr::Dec { .. } => {}
+            Expr::Call {
+                callee: f,
+                type_args: _,
+                args,
+                ..
+            } => {
                 self.optimize_expr(f);
                 args.iter_mut().for_each(|a| self.optimize_expr(a));
             }
-            Expr::ArrayLiteral(elems, _) => elems.iter_mut().for_each(|e| self.optimize_expr(e)),
-            Expr::ArrayFill(_, len, _) => self.optimize_expr(len),
-            Expr::Index(arr, idx, _) => {
+            Expr::ArrayLiteral {
+                elements: elems, ..
+            } => elems.iter_mut().for_each(|e| self.optimize_expr(e)),
+            Expr::ArrayFill {
+                elem_type: _, len, ..
+            } => self.optimize_expr(len),
+            Expr::Index {
+                array: arr,
+                index: idx,
+                ..
+            } => {
                 self.optimize_expr(arr);
                 self.optimize_expr(idx);
             }
-            Expr::IndexAssign(arr_idx, _, _) => self.optimize_expr(arr_idx),
-            Expr::StructLiteral(_, _, fields, _) => {
+            Expr::IndexAssign {
+                target: arr_idx, ..
+            } => self.optimize_expr(arr_idx),
+            Expr::StructLiteral {
+                name: _,
+                type_args: _,
+                fields,
+                ..
+            } => {
                 fields.iter_mut().for_each(|(_, v)| self.optimize_expr(v));
             }
-            Expr::UnionLiteral(_, _, fields, _) => {
+            Expr::UnionLiteral {
+                name: _,
+                type_args: _,
+                fields,
+                ..
+            } => {
                 fields.iter_mut().for_each(|(_, v)| self.optimize_expr(v));
             }
-            Expr::MemberAccess(obj, _, _) => self.optimize_expr(obj),
-            Expr::MemberAssign(obj, _, val, _) => {
+            Expr::MemberAccess { obj, .. } => self.optimize_expr(obj),
+            Expr::MemberAssign {
+                obj,
+                field: _,
+                value: val,
+                ..
+            } => {
                 self.optimize_expr(obj);
                 self.optimize_expr(val);
             }
-            Expr::AddressOf(expr, _) => self.optimize_expr(expr),
-            Expr::Deref(expr, _) => self.optimize_expr(expr),
-            Expr::Cast(expr, _, _) => self.optimize_expr(expr),
-            Expr::DerefAssign(ptr, val, _) => {
+            Expr::AddressOf { expr, .. } => self.optimize_expr(expr),
+            Expr::Deref { expr, .. } => self.optimize_expr(expr),
+            Expr::Cast { expr, .. } => self.optimize_expr(expr),
+            Expr::DerefAssign {
+                ptr, value: val, ..
+            } => {
                 self.optimize_expr(ptr);
                 self.optimize_expr(val);
             }
-            Expr::Add(l, r, _)
-            | Expr::Sub(l, r, _)
-            | Expr::Mul(l, r, _)
-            | Expr::Div(l, r, _)
-            | Expr::Mod(l, r, _)
-            | Expr::Xor(l, r, _)
-            | Expr::FAdd(l, r, _)
-            | Expr::FSub(l, r, _)
-            | Expr::FMul(l, r, _)
-            | Expr::FDiv(l, r, _)
-            | Expr::Eq(l, r, _)
-            | Expr::Ne(l, r, _)
-            | Expr::Lt(l, r, _)
-            | Expr::Le(l, r, _)
-            | Expr::Gt(l, r, _)
-            | Expr::Ge(l, r, _)
-            | Expr::FEq(l, r, _)
-            | Expr::FNe(l, r, _)
-            | Expr::FLt(l, r, _)
-            | Expr::FLe(l, r, _)
-            | Expr::FGt(l, r, _)
-            | Expr::FGe(l, r, _)
-            | Expr::LAnd(l, r, _)
-            | Expr::LOr(l, r, _)
-            | Expr::Shl(l, r, _)
-            | Expr::Shr(l, r, _)
-            | Expr::StrCat(l, r, _) => {
+            Expr::Add {
+                left: l, right: r, ..
+            }
+            | Expr::Sub {
+                left: l, right: r, ..
+            }
+            | Expr::Mul {
+                left: l, right: r, ..
+            }
+            | Expr::Div {
+                left: l, right: r, ..
+            }
+            | Expr::Mod {
+                left: l, right: r, ..
+            }
+            | Expr::Xor {
+                left: l, right: r, ..
+            }
+            | Expr::FAdd {
+                left: l, right: r, ..
+            }
+            | Expr::FSub {
+                left: l, right: r, ..
+            }
+            | Expr::FMul {
+                left: l, right: r, ..
+            }
+            | Expr::FDiv {
+                left: l, right: r, ..
+            }
+            | Expr::Eq {
+                left: l, right: r, ..
+            }
+            | Expr::Ne {
+                left: l, right: r, ..
+            }
+            | Expr::Lt {
+                left: l, right: r, ..
+            }
+            | Expr::Le {
+                left: l, right: r, ..
+            }
+            | Expr::Gt {
+                left: l, right: r, ..
+            }
+            | Expr::Ge {
+                left: l, right: r, ..
+            }
+            | Expr::FEq {
+                left: l, right: r, ..
+            }
+            | Expr::FNe {
+                left: l, right: r, ..
+            }
+            | Expr::FLt {
+                left: l, right: r, ..
+            }
+            | Expr::FLe {
+                left: l, right: r, ..
+            }
+            | Expr::FGt {
+                left: l, right: r, ..
+            }
+            | Expr::FGe {
+                left: l, right: r, ..
+            }
+            | Expr::LAnd {
+                left: l, right: r, ..
+            }
+            | Expr::LOr {
+                left: l, right: r, ..
+            }
+            | Expr::Shl {
+                left: l, right: r, ..
+            }
+            | Expr::Shr {
+                left: l, right: r, ..
+            }
+            | Expr::StrCat {
+                left: l, right: r, ..
+            } => {
                 self.optimize_expr(l);
                 self.optimize_expr(r);
             }
-            Expr::BNot(e, _) => self.optimize_expr(e),
-            Expr::FString(segs, _) => segs.iter_mut().for_each(|s| self.optimize_expr(s)),
-            Expr::Match(target, branches, default, _) => {
+            Expr::BNot { expr: e, .. } => self.optimize_expr(e),
+            Expr::FString { segs, .. } => segs.iter_mut().for_each(|s| self.optimize_expr(s)),
+            Expr::Match {
+                target,
+                branches,
+                default,
+                ..
+            } => {
                 self.optimize_expr(target);
-                for (c, v) in branches.iter_mut() {
+                for (c, g, v) in branches.iter_mut() {
                     self.optimize_expr(c);
+                    if let Some(g) = g {
+                        self.optimize_expr(g);
+                    }
                     self.optimize_expr(v);
                 }
                 if let Some(d) = default {
                     self.optimize_expr(d);
                 }
             }
-            Expr::Not(e, _) | Expr::Neg(e, _) | Expr::FNeg(e, _) => self.optimize_expr(e),
+            Expr::Not { expr: e, .. } | Expr::Neg { expr: e, .. } | Expr::FNeg { expr: e, .. } => {
+                self.optimize_expr(e)
+            }
             _ => {}
         }
     }
 
     fn is_effect_free(&self, expr: &Expr) -> bool {
         match expr {
-            Expr::Call(..)
-            | Expr::VarAssign(..)
-            | Expr::AddAssign(..)
-            | Expr::SubAssign(..)
-            | Expr::MulAssign(..)
-            | Expr::DivAssign(..)
-            | Expr::ModAssign(..)
-            | Expr::AndAssign(..)
-            | Expr::OrAssign(..)
-            | Expr::XorAssign(..)
-            | Expr::ShlAssign(..)
-            | Expr::ShrAssign(..)
-            | Expr::IndexAssign(..)
-            | Expr::MemberAssign(..)
-            | Expr::DerefAssign(..)
-            | Expr::Inc(..)
-            | Expr::Dec(..)
-            | Expr::While(..)
-            | Expr::For(..)
-            | Expr::FuncDecl(..)
-            | Expr::GlobalVar(..)
-            | Expr::ExternVar(..)
-            | Expr::Break(_)
+            Expr::Call { .. }
+            | Expr::VarAssign { .. }
+            | Expr::AddAssign { .. }
+            | Expr::SubAssign { .. }
+            | Expr::MulAssign { .. }
+            | Expr::DivAssign { .. }
+            | Expr::ModAssign { .. }
+            | Expr::AndAssign { .. }
+            | Expr::OrAssign { .. }
+            | Expr::XorAssign { .. }
+            | Expr::ShlAssign { .. }
+            | Expr::ShrAssign { .. }
+            | Expr::IndexAssign { .. }
+            | Expr::MemberAssign { .. }
+            | Expr::DerefAssign { .. }
+            | Expr::Inc { .. }
+            | Expr::Dec { .. }
+            | Expr::While { .. }
+            | Expr::For { .. }
+            | Expr::FuncDecl { .. }
+            | Expr::GlobalVar { .. }
+            | Expr::ExternVar { .. }
             | Expr::Continue(_) => false,
-            Expr::Int(_, _)
-            | Expr::Float(_, _)
-            | Expr::Bool(_, _)
-            | Expr::String(_, _)
+            Expr::Break { value: v, .. } => {
+                v.as_ref().map(|v| self.is_effect_free(v)).unwrap_or(true)
+            }
+            Expr::Int { .. }
+            | Expr::Float { .. }
+            | Expr::Bool { .. }
+            | Expr::String { .. }
             | Expr::Nil(_)
-            | Expr::Var(_, _) => true,
-            Expr::Block(body, _) => body.iter().all(|e| self.is_effect_free(e)),
-            Expr::If(c, t, e, _) => {
+            | Expr::Var { .. } => true,
+            Expr::Block { stmts: body, .. } => body.iter().all(|e| self.is_effect_free(e)),
+            Expr::If {
+                cond: c,
+                then_branch: t,
+                else_branch: e,
+                ..
+            } => {
                 self.is_effect_free(c)
                     && self.is_effect_free(t)
                     && e.as_ref().map(|e| self.is_effect_free(e)).unwrap_or(true)
             }
-            Expr::Lambda(_, b, _, _) => self.is_effect_free(b),
-            Expr::VarDecl(_, _, v, _) | Expr::ConstDecl(_, _, v, _, _) | Expr::Return(v, _) => {
-                self.is_effect_free(v)
+            Expr::Lambda {
+                params: _, body: b, ..
+            } => self.is_effect_free(b),
+            Expr::VarDecl {
+                name: _,
+                ty: _,
+                value: v,
+                ..
             }
-            Expr::ArrayLiteral(es, _) => es.iter().all(|e| self.is_effect_free(e)),
-            Expr::ArrayFill(_, len, _) => self.is_effect_free(len),
-            Expr::Range(s, e, _) => self.is_effect_free(s) && self.is_effect_free(e),
-            Expr::Match(t, br, d, _) => {
+            | Expr::ConstDecl {
+                name: _,
+                ty: _,
+                value: v,
+                ..
+            }
+            | Expr::Return { value: v, .. } => self.is_effect_free(v),
+            Expr::ArrayLiteral { elements: es, .. } => es.iter().all(|e| self.is_effect_free(e)),
+            Expr::ArrayFill {
+                elem_type: _, len, ..
+            } => self.is_effect_free(len),
+            Expr::Range {
+                start: s, end: e, ..
+            } => self.is_effect_free(s) && self.is_effect_free(e),
+            Expr::Match {
+                target: t,
+                branches: br,
+                default: d,
+                ..
+            } => {
                 self.is_effect_free(t)
-                    && br
-                        .iter()
-                        .all(|(c, r)| self.is_effect_free(c) && self.is_effect_free(r))
+                    && br.iter().all(|(c, g, r)| {
+                        self.is_effect_free(c)
+                            && g.as_ref().map(|g| self.is_effect_free(g)).unwrap_or(true)
+                            && self.is_effect_free(r)
+                    })
                     && d.as_ref().map(|d| self.is_effect_free(d)).unwrap_or(true)
             }
-            Expr::StructLiteral(_, _, fs, _) | Expr::UnionLiteral(_, _, fs, _) => {
-                fs.iter().all(|(_, v)| self.is_effect_free(v))
+            Expr::StructLiteral {
+                name: _,
+                type_args: _,
+                fields: fs,
+                ..
             }
-            Expr::FString(segs, _) => segs.iter().all(|s| self.is_effect_free(s)),
-            Expr::Index(a, i, _) => self.is_effect_free(a) && self.is_effect_free(i),
-            Expr::MemberAccess(a, _, _)
-            | Expr::AddressOf(a, _)
-            | Expr::Deref(a, _)
-            | Expr::Cast(a, _, _)
-            | Expr::Not(a, _)
-            | Expr::Neg(a, _)
-            | Expr::FNeg(a, _) => self.is_effect_free(a),
-            Expr::Add(l, r, _)
-            | Expr::Sub(l, r, _)
-            | Expr::Mul(l, r, _)
-            | Expr::Div(l, r, _)
-            | Expr::Mod(l, r, _)
-            | Expr::Xor(l, r, _)
-            | Expr::Shl(l, r, _)
-            | Expr::Shr(l, r, _)
-            | Expr::FAdd(l, r, _)
-            | Expr::FSub(l, r, _)
-            | Expr::FMul(l, r, _)
-            | Expr::FDiv(l, r, _)
-            | Expr::Eq(l, r, _)
-            | Expr::Ne(l, r, _)
-            | Expr::Lt(l, r, _)
-            | Expr::Le(l, r, _)
-            | Expr::Gt(l, r, _)
-            | Expr::Ge(l, r, _)
-            | Expr::FEq(l, r, _)
-            | Expr::FNe(l, r, _)
-            | Expr::FLt(l, r, _)
-            | Expr::FLe(l, r, _)
-            | Expr::FGt(l, r, _)
-            | Expr::FGe(l, r, _)
-            | Expr::LAnd(l, r, _)
-            | Expr::LOr(l, r, _)
-            | Expr::StrCat(l, r, _) => self.is_effect_free(l) && self.is_effect_free(r),
+            | Expr::UnionLiteral {
+                name: _,
+                type_args: _,
+                fields: fs,
+                ..
+            } => fs.iter().all(|(_, v)| self.is_effect_free(v)),
+            Expr::FString { segs, .. } => segs.iter().all(|s| self.is_effect_free(s)),
+            Expr::Index {
+                array: a, index: i, ..
+            } => self.is_effect_free(a) && self.is_effect_free(i),
+            Expr::MemberAccess { obj: a, .. }
+            | Expr::AddressOf { expr: a, .. }
+            | Expr::Deref { expr: a, .. }
+            | Expr::Cast { expr: a, .. }
+            | Expr::Not { expr: a, .. }
+            | Expr::Neg { expr: a, .. }
+            | Expr::FNeg { expr: a, .. } => self.is_effect_free(a),
+            Expr::Add {
+                left: l, right: r, ..
+            }
+            | Expr::Sub {
+                left: l, right: r, ..
+            }
+            | Expr::Mul {
+                left: l, right: r, ..
+            }
+            | Expr::Div {
+                left: l, right: r, ..
+            }
+            | Expr::Mod {
+                left: l, right: r, ..
+            }
+            | Expr::Xor {
+                left: l, right: r, ..
+            }
+            | Expr::Shl {
+                left: l, right: r, ..
+            }
+            | Expr::Shr {
+                left: l, right: r, ..
+            }
+            | Expr::FAdd {
+                left: l, right: r, ..
+            }
+            | Expr::FSub {
+                left: l, right: r, ..
+            }
+            | Expr::FMul {
+                left: l, right: r, ..
+            }
+            | Expr::FDiv {
+                left: l, right: r, ..
+            }
+            | Expr::Eq {
+                left: l, right: r, ..
+            }
+            | Expr::Ne {
+                left: l, right: r, ..
+            }
+            | Expr::Lt {
+                left: l, right: r, ..
+            }
+            | Expr::Le {
+                left: l, right: r, ..
+            }
+            | Expr::Gt {
+                left: l, right: r, ..
+            }
+            | Expr::Ge {
+                left: l, right: r, ..
+            }
+            | Expr::FEq {
+                left: l, right: r, ..
+            }
+            | Expr::FNe {
+                left: l, right: r, ..
+            }
+            | Expr::FLt {
+                left: l, right: r, ..
+            }
+            | Expr::FLe {
+                left: l, right: r, ..
+            }
+            | Expr::FGt {
+                left: l, right: r, ..
+            }
+            | Expr::FGe {
+                left: l, right: r, ..
+            }
+            | Expr::LAnd {
+                left: l, right: r, ..
+            }
+            | Expr::LOr {
+                left: l, right: r, ..
+            }
+            | Expr::StrCat {
+                left: l, right: r, ..
+            } => self.is_effect_free(l) && self.is_effect_free(r),
             _ => false,
         }
     }
 
     fn fold(&self, expr: &Expr) -> Option<Expr> {
         match expr {
-            Expr::Add(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Int(a, _), Expr::Int(b, _)) => {
-                    Some(Expr::Int(a.wrapping_add(*b), Span::new(0, 0)))
-                }
-                (Expr::Float(a, _), Expr::Float(b, _)) => Some(Expr::Float(a + b, Span::new(0, 0))),
+            Expr::Add {
+                left: l, right: r, ..
+            } => match (l.as_ref(), r.as_ref()) {
+                (Expr::Int { value: a, .. }, Expr::Int { value: b, .. }) => Some(Expr::Int {
+                    value: a.wrapping_add(*b),
+                    span: Span::new(0, 0),
+                }),
+                (Expr::Float { value: a, .. }, Expr::Float { value: b, .. }) => Some(Expr::Float {
+                    value: a + b,
+                    span: Span::new(0, 0),
+                }),
 
-                (Expr::Int(0, _), _) => Some(*r.clone()),
-                (_, Expr::Int(0, _)) => Some(*l.clone()),
+                (Expr::Int { value: 0, .. }, _) => Some(*r.clone()),
+                (_, Expr::Int { value: 0, .. }) => Some(*l.clone()),
                 _ => None,
             },
-            Expr::Sub(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Int(a, _), Expr::Int(b, _)) => {
-                    Some(Expr::Int(a.wrapping_sub(*b), Span::new(0, 0)))
-                }
-                (Expr::Float(a, _), Expr::Float(b, _)) => Some(Expr::Float(a - b, Span::new(0, 0))),
+            Expr::Sub {
+                left: l, right: r, ..
+            } => match (l.as_ref(), r.as_ref()) {
+                (Expr::Int { value: a, .. }, Expr::Int { value: b, .. }) => Some(Expr::Int {
+                    value: a.wrapping_sub(*b),
+                    span: Span::new(0, 0),
+                }),
+                (Expr::Float { value: a, .. }, Expr::Float { value: b, .. }) => Some(Expr::Float {
+                    value: a - b,
+                    span: Span::new(0, 0),
+                }),
 
-                (_, Expr::Int(0, _)) => Some(*l.clone()),
-                (_, Expr::Float(0.0, _)) => Some(*l.clone()),
+                (_, Expr::Int { value: 0, .. }) => Some(*l.clone()),
+                (_, Expr::Float { value: 0.0, .. }) => Some(*l.clone()),
                 _ => None,
             },
-            Expr::Mul(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Int(a, _), Expr::Int(b, _)) => {
-                    Some(Expr::Int(a.wrapping_mul(*b), Span::new(0, 0)))
-                }
-                (Expr::Float(a, _), Expr::Float(b, _)) => Some(Expr::Float(a * b, Span::new(0, 0))),
+            Expr::Mul {
+                left: l, right: r, ..
+            } => match (l.as_ref(), r.as_ref()) {
+                (Expr::Int { value: a, .. }, Expr::Int { value: b, .. }) => Some(Expr::Int {
+                    value: a.wrapping_mul(*b),
+                    span: Span::new(0, 0),
+                }),
+                (Expr::Float { value: a, .. }, Expr::Float { value: b, .. }) => Some(Expr::Float {
+                    value: a * b,
+                    span: Span::new(0, 0),
+                }),
 
-                (Expr::Int(1, _), _) => Some(*r.clone()),
-                (_, Expr::Int(1, _)) => Some(*l.clone()),
-                (Expr::Float(1.0, _), _) => Some(*r.clone()),
-                (_, Expr::Float(1.0, _)) => Some(*l.clone()),
+                (Expr::Int { value: 1, .. }, _) => Some(*r.clone()),
+                (_, Expr::Int { value: 1, .. }) => Some(*l.clone()),
+                (Expr::Float { value: 1.0, .. }, _) => Some(*r.clone()),
+                (_, Expr::Float { value: 1.0, .. }) => Some(*l.clone()),
                 _ => None,
             },
-            Expr::Div(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Int(a, _), Expr::Int(b, _)) => {
+            Expr::Div {
+                left: l, right: r, ..
+            } => match (l.as_ref(), r.as_ref()) {
+                (Expr::Int { value: a, .. }, Expr::Int { value: b, .. }) => {
                     if *b == 0 || (*a == isize::MIN && *b == -1) {
                         None
                     } else {
-                        Some(Expr::Int(a.wrapping_div(*b), Span::new(0, 0)))
+                        Some(Expr::Int {
+                            value: a.wrapping_div(*b),
+                            span: Span::new(0, 0),
+                        })
                     }
                 }
-                (Expr::Float(a, _), Expr::Float(b, _)) => Some(Expr::Float(a / b, Span::new(0, 0))),
+                (Expr::Float { value: a, .. }, Expr::Float { value: b, .. }) => Some(Expr::Float {
+                    value: a / b,
+                    span: Span::new(0, 0),
+                }),
 
-                (_, Expr::Int(1, _)) => Some(*l.clone()),
-                (_, Expr::Float(1.0, _)) => Some(*l.clone()),
+                (_, Expr::Int { value: 1, .. }) => Some(*l.clone()),
+                (_, Expr::Float { value: 1.0, .. }) => Some(*l.clone()),
                 _ => None,
             },
-            Expr::Mod(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Int(a, _), Expr::Int(b, _)) => {
+            Expr::Mod {
+                left: l, right: r, ..
+            } => match (l.as_ref(), r.as_ref()) {
+                (Expr::Int { value: a, .. }, Expr::Int { value: b, .. }) => {
                     if *b == 0 || (*a == isize::MIN && *b == -1) {
                         None
                     } else {
-                        Some(Expr::Int(a.wrapping_rem(*b), Span::new(0, 0)))
+                        Some(Expr::Int {
+                            value: a.wrapping_rem(*b),
+                            span: Span::new(0, 0),
+                        })
                     }
                 }
                 _ => None,
             },
-            Expr::Xor(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Int(a, _), Expr::Int(b, _)) => Some(Expr::Int(a ^ b, Span::new(0, 0))),
-                (Expr::Int(0, _), _) => Some(*r.clone()),
-                (_, Expr::Int(0, _)) => Some(*l.clone()),
+            Expr::Xor {
+                left: l, right: r, ..
+            } => match (l.as_ref(), r.as_ref()) {
+                (Expr::Int { value: a, .. }, Expr::Int { value: b, .. }) => Some(Expr::Int {
+                    value: a ^ b,
+                    span: Span::new(0, 0),
+                }),
+                (Expr::Int { value: 0, .. }, _) => Some(*r.clone()),
+                (_, Expr::Int { value: 0, .. }) => Some(*l.clone()),
                 _ => None,
             },
-            Expr::FAdd(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Float(a, _), Expr::Float(b, _)) => Some(Expr::Float(a + b, Span::new(0, 0))),
+            Expr::FAdd {
+                left: l, right: r, ..
+            } => match (l.as_ref(), r.as_ref()) {
+                (Expr::Float { value: a, .. }, Expr::Float { value: b, .. }) => Some(Expr::Float {
+                    value: a + b,
+                    span: Span::new(0, 0),
+                }),
                 _ => None,
             },
-            Expr::FSub(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Float(a, _), Expr::Float(b, _)) => Some(Expr::Float(a - b, Span::new(0, 0))),
-                (_, Expr::Float(0.0, _)) => Some(*l.clone()),
+            Expr::FSub {
+                left: l, right: r, ..
+            } => match (l.as_ref(), r.as_ref()) {
+                (Expr::Float { value: a, .. }, Expr::Float { value: b, .. }) => Some(Expr::Float {
+                    value: a - b,
+                    span: Span::new(0, 0),
+                }),
+                (_, Expr::Float { value: 0.0, .. }) => Some(*l.clone()),
                 _ => None,
             },
-            Expr::FMul(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Float(a, _), Expr::Float(b, _)) => Some(Expr::Float(a * b, Span::new(0, 0))),
+            Expr::FMul {
+                left: l, right: r, ..
+            } => match (l.as_ref(), r.as_ref()) {
+                (Expr::Float { value: a, .. }, Expr::Float { value: b, .. }) => Some(Expr::Float {
+                    value: a * b,
+                    span: Span::new(0, 0),
+                }),
 
-                (Expr::Float(1.0, _), _) => Some(*r.clone()),
-                (_, Expr::Float(1.0, _)) => Some(*l.clone()),
+                (Expr::Float { value: 1.0, .. }, _) => Some(*r.clone()),
+                (_, Expr::Float { value: 1.0, .. }) => Some(*l.clone()),
                 _ => None,
             },
-            Expr::FDiv(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Float(a, _), Expr::Float(b, _)) => Some(Expr::Float(a / b, Span::new(0, 0))),
-                (_, Expr::Float(1.0, _)) => Some(*l.clone()),
+            Expr::FDiv {
+                left: l, right: r, ..
+            } => match (l.as_ref(), r.as_ref()) {
+                (Expr::Float { value: a, .. }, Expr::Float { value: b, .. }) => Some(Expr::Float {
+                    value: a / b,
+                    span: Span::new(0, 0),
+                }),
+                (_, Expr::Float { value: 1.0, .. }) => Some(*l.clone()),
                 _ => None,
             },
-            Expr::Eq(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Int(a, _), Expr::Int(b, _)) => Some(Expr::Bool(a == b, Span::new(0, 0))),
-                (Expr::Bool(a, _), Expr::Bool(b, _)) => Some(Expr::Bool(a == b, Span::new(0, 0))),
+            Expr::Eq {
+                left: l, right: r, ..
+            } => match (l.as_ref(), r.as_ref()) {
+                (Expr::Int { value: a, .. }, Expr::Int { value: b, .. }) => Some(Expr::Bool {
+                    value: a == b,
+                    span: Span::new(0, 0),
+                }),
+                (Expr::Bool { value: a, .. }, Expr::Bool { value: b, .. }) => Some(Expr::Bool {
+                    value: a == b,
+                    span: Span::new(0, 0),
+                }),
                 _ => None,
             },
-            Expr::Ne(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Int(a, _), Expr::Int(b, _)) => Some(Expr::Bool(a != b, Span::new(0, 0))),
-                (Expr::Bool(a, _), Expr::Bool(b, _)) => Some(Expr::Bool(a != b, Span::new(0, 0))),
+            Expr::Ne {
+                left: l, right: r, ..
+            } => match (l.as_ref(), r.as_ref()) {
+                (Expr::Int { value: a, .. }, Expr::Int { value: b, .. }) => Some(Expr::Bool {
+                    value: a != b,
+                    span: Span::new(0, 0),
+                }),
+                (Expr::Bool { value: a, .. }, Expr::Bool { value: b, .. }) => Some(Expr::Bool {
+                    value: a != b,
+                    span: Span::new(0, 0),
+                }),
                 _ => None,
             },
-            Expr::Lt(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Int(a, _), Expr::Int(b, _)) => Some(Expr::Bool(a < b, Span::new(0, 0))),
+            Expr::Lt {
+                left: l, right: r, ..
+            } => match (l.as_ref(), r.as_ref()) {
+                (Expr::Int { value: a, .. }, Expr::Int { value: b, .. }) => Some(Expr::Bool {
+                    value: a < b,
+                    span: Span::new(0, 0),
+                }),
                 _ => None,
             },
-            Expr::Le(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Int(a, _), Expr::Int(b, _)) => Some(Expr::Bool(a <= b, Span::new(0, 0))),
+            Expr::Le {
+                left: l, right: r, ..
+            } => match (l.as_ref(), r.as_ref()) {
+                (Expr::Int { value: a, .. }, Expr::Int { value: b, .. }) => Some(Expr::Bool {
+                    value: a <= b,
+                    span: Span::new(0, 0),
+                }),
                 _ => None,
             },
-            Expr::Gt(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Int(a, _), Expr::Int(b, _)) => Some(Expr::Bool(a > b, Span::new(0, 0))),
+            Expr::Gt {
+                left: l, right: r, ..
+            } => match (l.as_ref(), r.as_ref()) {
+                (Expr::Int { value: a, .. }, Expr::Int { value: b, .. }) => Some(Expr::Bool {
+                    value: a > b,
+                    span: Span::new(0, 0),
+                }),
                 _ => None,
             },
-            Expr::Ge(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Int(a, _), Expr::Int(b, _)) => Some(Expr::Bool(a >= b, Span::new(0, 0))),
+            Expr::Ge {
+                left: l, right: r, ..
+            } => match (l.as_ref(), r.as_ref()) {
+                (Expr::Int { value: a, .. }, Expr::Int { value: b, .. }) => Some(Expr::Bool {
+                    value: a >= b,
+                    span: Span::new(0, 0),
+                }),
                 _ => None,
             },
-            Expr::FEq(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Float(a, _), Expr::Float(b, _)) => Some(Expr::Bool(a == b, Span::new(0, 0))),
+            Expr::FEq {
+                left: l, right: r, ..
+            } => match (l.as_ref(), r.as_ref()) {
+                (Expr::Float { value: a, .. }, Expr::Float { value: b, .. }) => Some(Expr::Bool {
+                    value: a == b,
+                    span: Span::new(0, 0),
+                }),
                 _ => None,
             },
-            Expr::FNe(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Float(a, _), Expr::Float(b, _)) => Some(Expr::Bool(a != b, Span::new(0, 0))),
+            Expr::FNe {
+                left: l, right: r, ..
+            } => match (l.as_ref(), r.as_ref()) {
+                (Expr::Float { value: a, .. }, Expr::Float { value: b, .. }) => Some(Expr::Bool {
+                    value: a != b,
+                    span: Span::new(0, 0),
+                }),
                 _ => None,
             },
-            Expr::FLt(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Float(a, _), Expr::Float(b, _)) => Some(Expr::Bool(a < b, Span::new(0, 0))),
+            Expr::FLt {
+                left: l, right: r, ..
+            } => match (l.as_ref(), r.as_ref()) {
+                (Expr::Float { value: a, .. }, Expr::Float { value: b, .. }) => Some(Expr::Bool {
+                    value: a < b,
+                    span: Span::new(0, 0),
+                }),
                 _ => None,
             },
-            Expr::FLe(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Float(a, _), Expr::Float(b, _)) => Some(Expr::Bool(a <= b, Span::new(0, 0))),
+            Expr::FLe {
+                left: l, right: r, ..
+            } => match (l.as_ref(), r.as_ref()) {
+                (Expr::Float { value: a, .. }, Expr::Float { value: b, .. }) => Some(Expr::Bool {
+                    value: a <= b,
+                    span: Span::new(0, 0),
+                }),
                 _ => None,
             },
-            Expr::FGt(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Float(a, _), Expr::Float(b, _)) => Some(Expr::Bool(a > b, Span::new(0, 0))),
+            Expr::FGt {
+                left: l, right: r, ..
+            } => match (l.as_ref(), r.as_ref()) {
+                (Expr::Float { value: a, .. }, Expr::Float { value: b, .. }) => Some(Expr::Bool {
+                    value: a > b,
+                    span: Span::new(0, 0),
+                }),
                 _ => None,
             },
-            Expr::FGe(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Float(a, _), Expr::Float(b, _)) => Some(Expr::Bool(a >= b, Span::new(0, 0))),
+            Expr::FGe {
+                left: l, right: r, ..
+            } => match (l.as_ref(), r.as_ref()) {
+                (Expr::Float { value: a, .. }, Expr::Float { value: b, .. }) => Some(Expr::Bool {
+                    value: a >= b,
+                    span: Span::new(0, 0),
+                }),
                 _ => None,
             },
-            Expr::LAnd(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Bool(true, _), e) => Some(e.clone()),
-                (Expr::Bool(false, _), e) if self.is_effect_free(e) => {
-                    Some(Expr::Bool(false, Span::new(0, 0)))
+            Expr::LAnd {
+                left: l, right: r, ..
+            } => match (l.as_ref(), r.as_ref()) {
+                (Expr::Bool { value: true, .. }, e) => Some(e.clone()),
+                (Expr::Bool { value: false, .. }, e) if self.is_effect_free(e) => {
+                    Some(Expr::Bool {
+                        value: false,
+                        span: Span::new(0, 0),
+                    })
                 }
-                (e, Expr::Bool(true, _)) => Some(e.clone()),
-                (e, Expr::Bool(false, _)) if self.is_effect_free(e) => {
-                    Some(Expr::Bool(false, Span::new(0, 0)))
+                (e, Expr::Bool { value: true, .. }) => Some(e.clone()),
+                (e, Expr::Bool { value: false, .. }) if self.is_effect_free(e) => {
+                    Some(Expr::Bool {
+                        value: false,
+                        span: Span::new(0, 0),
+                    })
                 }
                 _ => None,
             },
-            Expr::LOr(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Bool(true, _), e) if self.is_effect_free(e) => {
-                    Some(Expr::Bool(true, Span::new(0, 0)))
+            Expr::LOr {
+                left: l, right: r, ..
+            } => match (l.as_ref(), r.as_ref()) {
+                (Expr::Bool { value: true, .. }, e) if self.is_effect_free(e) => Some(Expr::Bool {
+                    value: true,
+                    span: Span::new(0, 0),
+                }),
+                (Expr::Bool { value: false, .. }, e) => Some(e.clone()),
+                (e, Expr::Bool { value: true, .. }) if self.is_effect_free(e) => Some(Expr::Bool {
+                    value: true,
+                    span: Span::new(0, 0),
+                }),
+                (e, Expr::Bool { value: false, .. }) => Some(e.clone()),
+                _ => None,
+            },
+            Expr::Not { expr: e, .. } => match e.as_ref() {
+                Expr::Bool { value: b, .. } => Some(Expr::Bool {
+                    value: !b,
+                    span: Span::new(0, 0),
+                }),
+                _ => None,
+            },
+            Expr::Shl {
+                left: l, right: r, ..
+            } => match (l.as_ref(), r.as_ref()) {
+                (Expr::Int { value: a, .. }, Expr::Int { value: b, .. }) if *b >= 0 && *b < 64 => {
+                    Some(Expr::Int {
+                        value: a.wrapping_shl(*b as u32),
+                        span: Span::new(0, 0),
+                    })
                 }
-                (Expr::Bool(false, _), e) => Some(e.clone()),
-                (e, Expr::Bool(true, _)) if self.is_effect_free(e) => {
-                    Some(Expr::Bool(true, Span::new(0, 0)))
-                }
-                (e, Expr::Bool(false, _)) => Some(e.clone()),
                 _ => None,
             },
-            Expr::Not(e, _) => match e.as_ref() {
-                Expr::Bool(b, _) => Some(Expr::Bool(!b, Span::new(0, 0))),
-                _ => None,
-            },
-            Expr::Shl(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Int(a, _), Expr::Int(b, _)) if *b >= 0 && *b < 64 => {
-                    Some(Expr::Int(a.wrapping_shl(*b as u32), Span::new(0, 0)))
+            Expr::Shr {
+                left: l, right: r, ..
+            } => match (l.as_ref(), r.as_ref()) {
+                (Expr::Int { value: a, .. }, Expr::Int { value: b, .. }) if *b >= 0 && *b < 64 => {
+                    Some(Expr::Int {
+                        value: a.wrapping_shr(*b as u32),
+                        span: Span::new(0, 0),
+                    })
                 }
                 _ => None,
             },
-            Expr::Shr(l, r, _) => match (l.as_ref(), r.as_ref()) {
-                (Expr::Int(a, _), Expr::Int(b, _)) if *b >= 0 && *b < 64 => {
-                    Some(Expr::Int(a.wrapping_shr(*b as u32), Span::new(0, 0)))
-                }
+            Expr::BNot { expr: e, .. } => match e.as_ref() {
+                Expr::Int { value: n, .. } => Some(Expr::Int {
+                    value: !*n,
+                    span: Span::new(0, 0),
+                }),
                 _ => None,
             },
-            Expr::BNot(e, _) => match e.as_ref() {
-                Expr::Int(n, _) => Some(Expr::Int(!*n, Span::new(0, 0))),
+            Expr::Neg { expr: e, .. } => match e.as_ref() {
+                Expr::Int { value: n, .. } => Some(Expr::Int {
+                    value: n.wrapping_neg(),
+                    span: Span::new(0, 0),
+                }),
                 _ => None,
             },
-            Expr::Neg(e, _) => match e.as_ref() {
-                Expr::Int(n, _) => Some(Expr::Int(n.wrapping_neg(), Span::new(0, 0))),
-                _ => None,
-            },
-            Expr::FNeg(e, _) => match e.as_ref() {
-                Expr::Float(n, _) => Some(Expr::Float(-n, Span::new(0, 0))),
+            Expr::FNeg { expr: e, .. } => match e.as_ref() {
+                Expr::Float { value: n, .. } => Some(Expr::Float {
+                    value: -n,
+                    span: Span::new(0, 0),
+                }),
                 _ => None,
             },
             _ => None,
@@ -864,7 +1636,7 @@ impl Optimizer {
 
     fn dce(&self, expr: &mut Expr, pure_fns: &HashSet<String>) {
         match expr {
-            Expr::Block(body, _) => {
+            Expr::Block { stmts: body, .. } => {
                 let last = body.len().saturating_sub(1);
                 *body = body
                     .drain(..)
@@ -879,237 +1651,416 @@ impl Optimizer {
                 let last_idx = body.len().saturating_sub(1);
                 let mut i = 0usize;
                 body.retain(|e| {
-                    let keep = i == last_idx || !matches!(e, Expr::Block(b, _) if b.is_empty());
+                    let keep =
+                        i == last_idx || !matches!(e, Expr::Block { stmts: b, .. } if b.is_empty());
                     i += 1;
                     keep
                 });
             }
-            Expr::If(cond, t, e, _) => {
+            Expr::If {
+                cond,
+                then_branch: t,
+                else_branch: e,
+                ..
+            } => {
                 self.dce(cond, pure_fns);
                 self.dce(t, pure_fns);
                 if let Some(e) = e {
                     self.dce(e, pure_fns);
                 }
-                if let Expr::Bool(true, _) = cond.as_ref() {
+                if let Expr::Bool { value: true, .. } = cond.as_ref() {
                     *expr = *t.clone();
-                } else if let Expr::Bool(false, _) = cond.as_ref() {
+                } else if let Expr::Bool { value: false, .. } = cond.as_ref() {
                     if let Some(else_expr) = e {
                         *expr = *else_expr.clone();
                     } else {
-                        *expr = Expr::Block(vec![], Span::new(0, 0));
+                        *expr = Expr::Block {
+                            stmts: vec![],
+                            span: Span::new(0, 0),
+                        };
                     }
                 }
             }
-            Expr::While(cond, body, _) => {
+            Expr::While { cond, body, .. } => {
                 self.dce(cond, pure_fns);
                 self.dce(body, pure_fns);
-                if let Expr::Bool(false, _) = cond.as_ref() {
-                    *expr = Expr::Block(vec![], Span::new(0, 0));
+                if let Expr::Bool { value: false, .. } = cond.as_ref() {
+                    *expr = Expr::Block {
+                        stmts: vec![],
+                        span: Span::new(0, 0),
+                    };
                 }
             }
-            Expr::For(_, array, body, _) => {
+            Expr::For {
+                var: _,
+                iterable: array,
+                body,
+                ..
+            } => {
                 self.dce(array, pure_fns);
                 self.dce(body, pure_fns);
             }
-            Expr::FuncDecl(_, _, _, _, _, body, _) => self.dce(body, pure_fns),
-            Expr::Lambda(_, body, _, _) => self.dce(body, pure_fns),
-            Expr::VarDecl(_, _, v, _) => self.dce(v, pure_fns),
-            Expr::ConstDecl(_, _, v, _, _) => self.dce(v, pure_fns),
-            Expr::GlobalVar(_, _, _, v, _) => {
+            Expr::FuncDecl {
+                name: _,
+                attrs: _,
+                type_params: _,
+                params: _,
+                return_type: _,
+                body,
+                ..
+            } => self.dce(body, pure_fns),
+            Expr::Lambda {
+                params: _, body, ..
+            } => self.dce(body, pure_fns),
+            Expr::VarDecl {
+                name: _,
+                ty: _,
+                value: v,
+                ..
+            } => self.dce(v, pure_fns),
+            Expr::ConstDecl {
+                name: _,
+                ty: _,
+                value: v,
+                ..
+            } => self.dce(v, pure_fns),
+            Expr::GlobalVar {
+                name: _,
+                is_pub: _,
+                ty: _,
+                value: v,
+                ..
+            } => {
                 if let Some(v) = v {
                     self.dce(v, pure_fns);
                 }
             }
-            Expr::VarAssign(_, v, _)
-            | Expr::AddAssign(_, v, _)
-            | Expr::SubAssign(_, v, _)
-            | Expr::MulAssign(_, v, _)
-            | Expr::DivAssign(_, v, _)
-            | Expr::ModAssign(_, v, _)
-            | Expr::AndAssign(_, v, _)
-            | Expr::OrAssign(_, v, _)
-            | Expr::XorAssign(_, v, _)
-            | Expr::ShlAssign(_, v, _)
-            | Expr::ShrAssign(_, v, _) => self.dce(v, pure_fns),
-            Expr::Return(v, _) => self.dce(v, pure_fns),
-            Expr::Inc(_, _) | Expr::Dec(_, _) => {}
-            Expr::Call(f, _, args, _) => {
+            Expr::VarAssign {
+                name: _, value: v, ..
+            }
+            | Expr::AddAssign {
+                name: _, value: v, ..
+            }
+            | Expr::SubAssign {
+                name: _, value: v, ..
+            }
+            | Expr::MulAssign {
+                name: _, value: v, ..
+            }
+            | Expr::DivAssign {
+                name: _, value: v, ..
+            }
+            | Expr::ModAssign {
+                name: _, value: v, ..
+            }
+            | Expr::AndAssign {
+                name: _, value: v, ..
+            }
+            | Expr::OrAssign {
+                name: _, value: v, ..
+            }
+            | Expr::XorAssign {
+                name: _, value: v, ..
+            }
+            | Expr::ShlAssign {
+                name: _, value: v, ..
+            }
+            | Expr::ShrAssign {
+                name: _, value: v, ..
+            } => self.dce(v, pure_fns),
+            Expr::Return { value: v, .. } => self.dce(v, pure_fns),
+            Expr::Inc { .. } | Expr::Dec { .. } => {}
+            Expr::Call {
+                callee: f,
+                type_args: _,
+                args,
+                ..
+            } => {
                 self.dce(f, pure_fns);
                 for a in args {
                     self.dce(a, pure_fns);
                 }
             }
-            Expr::ArrayLiteral(elems, _) => {
+            Expr::ArrayLiteral {
+                elements: elems, ..
+            } => {
                 for e in elems {
                     self.dce(e, pure_fns);
                 }
             }
-            Expr::ArrayFill(_, len, _) => self.dce(len, pure_fns),
-            Expr::Index(arr, idx, _) => {
+            Expr::ArrayFill {
+                elem_type: _, len, ..
+            } => self.dce(len, pure_fns),
+            Expr::Index {
+                array: arr,
+                index: idx,
+                ..
+            } => {
                 self.dce(arr, pure_fns);
                 self.dce(idx, pure_fns);
             }
-            Expr::IndexAssign(arr_idx, v, _) => {
+            Expr::IndexAssign {
+                target: arr_idx,
+                value: v,
+                ..
+            } => {
                 self.dce(arr_idx, pure_fns);
                 self.dce(v, pure_fns);
             }
-            Expr::StructLiteral(_, _, fields, _) => {
+            Expr::StructLiteral {
+                name: _,
+                type_args: _,
+                fields,
+                ..
+            } => {
                 for (_, v) in fields {
                     self.dce(v, pure_fns);
                 }
             }
-            Expr::UnionLiteral(_, _, fields, _) => {
+            Expr::UnionLiteral {
+                name: _,
+                type_args: _,
+                fields,
+                ..
+            } => {
                 for (_, v) in fields {
                     self.dce(v, pure_fns);
                 }
             }
-            Expr::MemberAccess(obj, _, _) => self.dce(obj, pure_fns),
-            Expr::MemberAssign(obj, _, val, _) => {
+            Expr::MemberAccess { obj, .. } => self.dce(obj, pure_fns),
+            Expr::MemberAssign {
+                obj,
+                field: _,
+                value: val,
+                ..
+            } => {
                 self.dce(obj, pure_fns);
                 self.dce(val, pure_fns);
             }
-            Expr::AddressOf(expr, _) => self.dce(expr, pure_fns),
-            Expr::Deref(expr, _) => self.dce(expr, pure_fns),
-            Expr::Cast(expr, _, _) => self.dce(expr, pure_fns),
-            Expr::DerefAssign(ptr, val, _) => {
+            Expr::AddressOf { expr, .. } => self.dce(expr, pure_fns),
+            Expr::Deref { expr, .. } => self.dce(expr, pure_fns),
+            Expr::Cast { expr, .. } => self.dce(expr, pure_fns),
+            Expr::DerefAssign {
+                ptr, value: val, ..
+            } => {
                 self.dce(ptr, pure_fns);
                 self.dce(val, pure_fns);
             }
-            Expr::Add(l, r, _)
-            | Expr::Sub(l, r, _)
-            | Expr::Mul(l, r, _)
-            | Expr::Div(l, r, _)
-            | Expr::Mod(l, r, _)
-            | Expr::Xor(l, r, _)
-            | Expr::FAdd(l, r, _)
-            | Expr::FSub(l, r, _)
-            | Expr::FMul(l, r, _)
-            | Expr::FDiv(l, r, _)
-            | Expr::Eq(l, r, _)
-            | Expr::Ne(l, r, _)
-            | Expr::Lt(l, r, _)
-            | Expr::Le(l, r, _)
-            | Expr::Gt(l, r, _)
-            | Expr::Ge(l, r, _)
-            | Expr::FEq(l, r, _)
-            | Expr::FNe(l, r, _)
-            | Expr::FLt(l, r, _)
-            | Expr::FLe(l, r, _)
-            | Expr::FGt(l, r, _)
-            | Expr::FGe(l, r, _)
-            | Expr::LAnd(l, r, _)
-            | Expr::LOr(l, r, _)
-            | Expr::Shl(l, r, _)
-            | Expr::Shr(l, r, _)
-            | Expr::StrCat(l, r, _) => {
+            Expr::Add {
+                left: l, right: r, ..
+            }
+            | Expr::Sub {
+                left: l, right: r, ..
+            }
+            | Expr::Mul {
+                left: l, right: r, ..
+            }
+            | Expr::Div {
+                left: l, right: r, ..
+            }
+            | Expr::Mod {
+                left: l, right: r, ..
+            }
+            | Expr::Xor {
+                left: l, right: r, ..
+            }
+            | Expr::FAdd {
+                left: l, right: r, ..
+            }
+            | Expr::FSub {
+                left: l, right: r, ..
+            }
+            | Expr::FMul {
+                left: l, right: r, ..
+            }
+            | Expr::FDiv {
+                left: l, right: r, ..
+            }
+            | Expr::Eq {
+                left: l, right: r, ..
+            }
+            | Expr::Ne {
+                left: l, right: r, ..
+            }
+            | Expr::Lt {
+                left: l, right: r, ..
+            }
+            | Expr::Le {
+                left: l, right: r, ..
+            }
+            | Expr::Gt {
+                left: l, right: r, ..
+            }
+            | Expr::Ge {
+                left: l, right: r, ..
+            }
+            | Expr::FEq {
+                left: l, right: r, ..
+            }
+            | Expr::FNe {
+                left: l, right: r, ..
+            }
+            | Expr::FLt {
+                left: l, right: r, ..
+            }
+            | Expr::FLe {
+                left: l, right: r, ..
+            }
+            | Expr::FGt {
+                left: l, right: r, ..
+            }
+            | Expr::FGe {
+                left: l, right: r, ..
+            }
+            | Expr::LAnd {
+                left: l, right: r, ..
+            }
+            | Expr::LOr {
+                left: l, right: r, ..
+            }
+            | Expr::Shl {
+                left: l, right: r, ..
+            }
+            | Expr::Shr {
+                left: l, right: r, ..
+            }
+            | Expr::StrCat {
+                left: l, right: r, ..
+            } => {
                 self.dce(l, pure_fns);
                 self.dce(r, pure_fns);
             }
-            Expr::BNot(e, _) => self.dce(e, pure_fns),
-            Expr::Not(e, _) | Expr::Neg(e, _) | Expr::FNeg(e, _) => self.dce(e, pure_fns),
+            Expr::BNot { expr: e, .. } => self.dce(e, pure_fns),
+            Expr::Not { expr: e, .. } | Expr::Neg { expr: e, .. } | Expr::FNeg { expr: e, .. } => {
+                self.dce(e, pure_fns)
+            }
             _ => {}
         }
     }
-
     fn is_pure_dead(&self, expr: &Expr, pure_fns: &HashSet<String>) -> bool {
-        self.is_pure(expr, pure_fns) && !self.has_side_effect(expr, pure_fns)
+        self.is_pure(expr, pure_fns)
     }
 
     fn is_pure(&self, expr: &Expr, pure_fns: &HashSet<String>) -> bool {
         match expr {
-            Expr::Int(_, _)
-            | Expr::Float(_, _)
-            | Expr::Bool(_, _)
-            | Expr::String(_, _)
+            Expr::Int { .. }
+            | Expr::Float { .. }
+            | Expr::Bool { .. }
+            | Expr::String { .. }
             | Expr::Nil(_)
-            | Expr::Var(_, _) => true,
-            Expr::Add(l, r, _)
-            | Expr::Sub(l, r, _)
-            | Expr::Mul(l, r, _)
-            | Expr::Div(l, r, _)
-            | Expr::Mod(l, r, _)
-            | Expr::Xor(l, r, _)
-            | Expr::FAdd(l, r, _)
-            | Expr::FSub(l, r, _)
-            | Expr::FMul(l, r, _)
-            | Expr::FDiv(l, r, _)
-            | Expr::Eq(l, r, _)
-            | Expr::Ne(l, r, _)
-            | Expr::Lt(l, r, _)
-            | Expr::Le(l, r, _)
-            | Expr::Gt(l, r, _)
-            | Expr::Ge(l, r, _)
-            | Expr::FEq(l, r, _)
-            | Expr::FNe(l, r, _)
-            | Expr::FLt(l, r, _)
-            | Expr::FLe(l, r, _)
-            | Expr::FGt(l, r, _)
-            | Expr::FGe(l, r, _)
-            | Expr::LAnd(l, r, _)
-            | Expr::LOr(l, r, _) => self.is_pure(l, pure_fns) && self.is_pure(r, pure_fns),
-            Expr::Not(e, _) | Expr::Neg(e, _) | Expr::FNeg(e, _) => self.is_pure(e, pure_fns),
-            Expr::Index(l, r, _) => self.is_pure(l, pure_fns) && self.is_pure(r, pure_fns),
-            Expr::ArrayLiteral(elems, _) => elems.iter().all(|e| self.is_pure(e, pure_fns)),
-            Expr::ArrayFill(_, len, _) => self.is_pure(len, pure_fns),
-            Expr::StructLiteral(_, _, fields, _) => {
-                fields.iter().all(|(_, v)| self.is_pure(v, pure_fns))
+            | Expr::Var { .. } => true,
+            Expr::Add {
+                left: l, right: r, ..
             }
-            Expr::UnionLiteral(_, _, fields, _) => {
-                fields.iter().all(|(_, v)| self.is_pure(v, pure_fns))
+            | Expr::Sub {
+                left: l, right: r, ..
             }
-            Expr::MemberAccess(obj, _, _) => self.is_pure(obj, pure_fns),
-            Expr::AddressOf(expr, _) => self.is_pure(expr, pure_fns),
-            Expr::Deref(expr, _) => self.is_pure(expr, pure_fns),
-            Expr::Cast(expr, _, _) => self.is_pure(expr, pure_fns),
-            Expr::DerefAssign(ptr, val, _) => {
-                self.is_pure(ptr, pure_fns) && self.is_pure(val, pure_fns)
+            | Expr::Mul {
+                left: l, right: r, ..
             }
-            Expr::ConstDecl(_, _, v, _, _) => self.is_pure(v, pure_fns),
-            Expr::GlobalVar(_, _, _, v, _) => match v {
-                Some(v) => self.is_pure(v, pure_fns),
-                None => true,
-            },
-            Expr::Call(callee, _, args, _) => match callee.as_ref() {
-                Expr::Var(name, _) => {
+            | Expr::Div {
+                left: l, right: r, ..
+            }
+            | Expr::Mod {
+                left: l, right: r, ..
+            }
+            | Expr::Xor {
+                left: l, right: r, ..
+            }
+            | Expr::FAdd {
+                left: l, right: r, ..
+            }
+            | Expr::FSub {
+                left: l, right: r, ..
+            }
+            | Expr::FMul {
+                left: l, right: r, ..
+            }
+            | Expr::FDiv {
+                left: l, right: r, ..
+            }
+            | Expr::Eq {
+                left: l, right: r, ..
+            }
+            | Expr::Ne {
+                left: l, right: r, ..
+            }
+            | Expr::Lt {
+                left: l, right: r, ..
+            }
+            | Expr::Le {
+                left: l, right: r, ..
+            }
+            | Expr::Gt {
+                left: l, right: r, ..
+            }
+            | Expr::Ge {
+                left: l, right: r, ..
+            }
+            | Expr::FEq {
+                left: l, right: r, ..
+            }
+            | Expr::FNe {
+                left: l, right: r, ..
+            }
+            | Expr::FLt {
+                left: l, right: r, ..
+            }
+            | Expr::FLe {
+                left: l, right: r, ..
+            }
+            | Expr::FGt {
+                left: l, right: r, ..
+            }
+            | Expr::FGe {
+                left: l, right: r, ..
+            }
+            | Expr::LAnd {
+                left: l, right: r, ..
+            }
+            | Expr::LOr {
+                left: l, right: r, ..
+            } => self.is_pure(l, pure_fns) && self.is_pure(r, pure_fns),
+            Expr::Not { expr: e, .. } | Expr::Neg { expr: e, .. } | Expr::FNeg { expr: e, .. } => {
+                self.is_pure(e, pure_fns)
+            }
+            Expr::Index {
+                array: l, index: r, ..
+            } => self.is_pure(l, pure_fns) && self.is_pure(r, pure_fns),
+            Expr::ArrayLiteral {
+                elements: elems, ..
+            } => elems.iter().all(|e| self.is_pure(e, pure_fns)),
+            Expr::ArrayFill {
+                elem_type: _, len, ..
+            } => self.is_pure(len, pure_fns),
+            Expr::StructLiteral {
+                name: _,
+                type_args: _,
+                fields,
+                ..
+            } => fields.iter().all(|(_, v)| self.is_pure(v, pure_fns)),
+            Expr::UnionLiteral {
+                name: _,
+                type_args: _,
+                fields,
+                ..
+            } => fields.iter().all(|(_, v)| self.is_pure(v, pure_fns)),
+            Expr::MemberAccess { obj, .. } => self.is_pure(obj, pure_fns),
+            Expr::AddressOf { expr, .. } => self.is_pure(expr, pure_fns),
+            Expr::Deref { expr, .. } => self.is_pure(expr, pure_fns),
+            Expr::Cast { expr, .. } => self.is_pure(expr, pure_fns),
+            Expr::Call {
+                callee,
+                type_args: _,
+                args,
+                ..
+            } => match callee.as_ref() {
+                Expr::Var { name, .. } => {
                     pure_fns.contains(name) && args.iter().all(|a| self.is_pure(a, pure_fns))
                 }
                 _ => false,
             },
             _ => false,
-        }
-    }
-
-    fn has_side_effect(&self, expr: &Expr, pure_fns: &HashSet<String>) -> bool {
-        match expr {
-            Expr::Call(callee, _, _, _) => match callee.as_ref() {
-                Expr::Var(name, _) => !pure_fns.contains(name),
-                _ => true,
-            },
-            _ => matches!(
-                expr,
-                Expr::VarDecl(_, _, _, _)
-                    | Expr::VarAssign(_, _, _)
-                    | Expr::ConstDecl(_, _, _, _, _)
-                    | Expr::GlobalVar(_, _, _, _, _)
-                    | Expr::AddAssign(_, _, _)
-                    | Expr::SubAssign(_, _, _)
-                    | Expr::MulAssign(_, _, _)
-                    | Expr::DivAssign(_, _, _)
-                    | Expr::ModAssign(_, _, _)
-                    | Expr::AndAssign(_, _, _)
-                    | Expr::OrAssign(_, _, _)
-                    | Expr::XorAssign(_, _, _)
-                    | Expr::ShlAssign(_, _, _)
-                    | Expr::ShrAssign(_, _, _)
-                    | Expr::Inc(_, _)
-                    | Expr::Dec(_, _)
-                    | Expr::IndexAssign(_, _, _)
-                    | Expr::MemberAssign(_, _, _, _)
-                    | Expr::DerefAssign(_, _, _)
-                    | Expr::Return(_, _)
-                    | Expr::Break(_)
-                    | Expr::Continue(_)
-            ),
         }
     }
 }

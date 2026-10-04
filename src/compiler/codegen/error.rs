@@ -38,6 +38,10 @@ pub enum CodeGenError {
         message: String,
     },
     AssemblyError(String),
+    Located {
+        err: Box<CodeGenError>,
+        span: Span,
+    },
 }
 
 impl Display for CodeGenError {
@@ -65,6 +69,7 @@ impl Display for CodeGenError {
                 write!(f, "Unsupported operation: {}", message)
             }
             CodeGenError::AssemblyError(msg) => write!(f, "Assembly error: {}", msg),
+            CodeGenError::Located { err, .. } => write!(f, "{}", err),
         }
     }
 }
@@ -77,7 +82,25 @@ impl CodeGenError {
             CodeGenError::UndefinedVariable { span, .. }
             | CodeGenError::UndefinedFunction { span, .. }
             | CodeGenError::UseAfterMove { span, .. } => *span,
+            CodeGenError::Located { err, span } => {
+                let inner = err.span();
+                if inner == Span::new(0, 0) {
+                    *span
+                } else {
+                    inner
+                }
+            }
             _ => Span::new(0, 0),
+        }
+    }
+
+    pub fn with_fallback_span(self, span: Span) -> Self {
+        if self.span() != Span::new(0, 0) || span == Span::new(0, 0) {
+            return self;
+        }
+        CodeGenError::Located {
+            err: Box::new(self),
+            span,
         }
     }
 }

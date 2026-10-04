@@ -11,7 +11,6 @@ pub enum CheckerError {
     },
     UndefinedVariable(String, Span),
     #[allow(dead_code)]
-    UndefinedFunction(String, Span),
     UndefinedStruct(String, Span),
     UndefinedUnion(String, Span),
     UndefinedField {
@@ -64,9 +63,6 @@ impl fmt::Display for CheckerError {
             }
             CheckerError::UndefinedVariable(name, _) => {
                 write!(f, "Undefined variable: {}", name)
-            }
-            CheckerError::UndefinedFunction(name, _) => {
-                write!(f, "Undefined function: {}", name)
             }
             CheckerError::UndefinedStruct(name, _) => {
                 write!(f, "Undefined struct: {}", name)
@@ -131,7 +127,6 @@ impl CheckerError {
             | CheckerError::InvalidOperation { span, .. }
             | CheckerError::NonExhaustiveMatch { span, .. } => *span,
             CheckerError::UndefinedVariable(_, s)
-            | CheckerError::UndefinedFunction(_, s)
             | CheckerError::UndefinedStruct(_, s)
             | CheckerError::UndefinedUnion(_, s)
             | CheckerError::NonStructMemberAccess(_, s) => *s,

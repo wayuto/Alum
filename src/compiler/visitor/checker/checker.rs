@@ -105,7 +105,14 @@ impl TypeChecker {
     fn collect_declarations(&mut self, program: &Program) {
         for expr in &program.body {
             match expr {
-                Expr::FuncDecl(name, attrs, type_params, params, ret_type, _, _) => {
+                Expr::FuncDecl {
+                    name,
+                    attrs,
+                    type_params,
+                    params,
+                    return_type: ret_type,
+                    ..
+                } => {
                     let param_types: Vec<Type> = params.iter().map(|(_, t)| t.clone()).collect();
                     if attrs.is_external {
                         self.functions
@@ -117,52 +124,46 @@ impl TypeChecker {
                         );
                     }
                 }
-                Expr::ExternVar(name, ty, _) => {
+                Expr::ExternVar { name, ty, .. } => {
                     self.extern_vars.insert(name.clone(), ty.clone());
                 }
-                Expr::GlobalVar(name, _, ty, _, _) => {
+                Expr::GlobalVar {
+                    name,
+                    is_pub: _,
+                    ty,
+                    ..
+                } => {
                     self.globals.insert(name.clone(), ty.clone());
                 }
-                Expr::ConstDecl(name, ty, _, _, _) => {
+                Expr::ConstDecl { name, ty, .. } => {
                     if !matches!(ty, Type::Unknown) {
                         self.constants.insert(name.clone(), ty.clone());
                     }
                 }
-                Expr::Struct(name, type_params, fields, _) => {
+                Expr::Struct {
+                    name,
+                    type_params,
+                    fields,
+                    ..
+                } => {
                     self.structs
                         .insert(name.clone(), (type_params.clone(), fields.clone()));
                 }
-                Expr::Union(name, type_params, fields, _) => {
+                Expr::Union {
+                    name,
+                    type_params,
+                    fields,
+                    ..
+                } => {
                     self.unions
                         .insert(name.clone(), (type_params.clone(), fields.clone()));
                 }
-                Expr::Enum(name, members, _) => {
+                Expr::Enum { name, members, .. } => {
                     self.enums.insert(name.clone(), members.clone());
                 }
                 _ => {}
             }
         }
-    }
-
-    pub fn check(mut self, program: &mut Program) -> Result<(), CheckerError> {
-        self.collect_declarations(program);
-
-        for expr in &mut program.body {
-            match self.check_expr(expr) {
-                Ok(_) => {}
-                Err(e) => self.errors.push(e),
-            }
-
-            if self.errors.first().is_some() {
-                return Err(self.errors.remove(0));
-            }
-        }
-
-        for expr in &mut program.body {
-            self.resolve_call_type_args(expr);
-        }
-
-        Ok(())
     }
 
     pub fn check_collect(mut self, program: &mut Program) -> Vec<CheckerError> {
@@ -256,8 +257,8 @@ impl TypeChecker {
         let mut e = expr;
         loop {
             match e {
-                Expr::Var(name, _) => return self.is_constant(name).then(|| name.clone()),
-                Expr::Index(base, _, _) | Expr::MemberAccess(base, _, _) => {
+                Expr::Var { name, .. } => return self.is_constant(name).then(|| name.clone()),
+                Expr::Index { array: base, .. } | Expr::MemberAccess { obj: base, .. } => {
                     e = base;
                 }
                 _ => return None,
@@ -289,7 +290,7 @@ impl TypeChecker {
 
     fn enum_member_of(&self, expr: &Expr) -> Option<(String, isize)> {
         match expr {
-            Expr::Var(name, _) => match self.resolve_enum_member(name) {
+            Expr::Var { name, .. } => match self.resolve_enum_member(name) {
                 Ok(Some(value)) => {
                     let owners: Vec<String> = self
                         .enums
@@ -305,8 +306,11 @@ impl TypeChecker {
                 }
                 _ => None,
             },
-            Expr::MemberAccess(obj, field, _) => {
-                if let Expr::Var(enum_name, _) = obj.as_ref() {
+            Expr::MemberAccess { obj, field, .. } => {
+                if let Expr::Var {
+                    name: enum_name, ..
+                } = obj.as_ref()
+                {
                     if let Some(members) = self.enums.get(enum_name) {
                         for (m, v) in members {
                             if m == field {
@@ -324,7 +328,7 @@ impl TypeChecker {
     pub(super) fn check_match_exhaustiveness(
         &self,
         target_ty: &Type,
-        branches: &[(Expr, Expr)],
+        branches: &[(Expr, Option<Box<Expr>>, Expr)],
         has_default: bool,
         span: Span,
     ) -> Result<(), CheckerError> {
@@ -334,8 +338,11 @@ impl TypeChecker {
         match self.resolve_type(target_ty) {
             Type::Primitive(Primitive::Boolean) => {
                 let mut covered: HashSet<bool> = HashSet::new();
-                for (case, _) in branches {
-                    if let Expr::Bool(b, _) = case {
+                for (case, guard, _) in branches {
+                    if guard.is_some() {
+                        continue;
+                    }
+                    if let Expr::Bool { value: b, .. } = case {
                         covered.insert(*b);
                     } else {
                         return Ok(());
@@ -358,7 +365,10 @@ impl TypeChecker {
             Type::Primitive(Primitive::Int) => {
                 let mut enum_name: Option<String> = None;
                 let mut covered: HashSet<isize> = HashSet::new();
-                for (case, _) in branches {
+                for (case, guard, _) in branches {
+                    if guard.is_some() {
+                        continue;
+                    }
                     match self.enum_member_of(case) {
                         Some((en, value)) => {
                             if let Some(cur) = &enum_name {
@@ -413,7 +423,10 @@ impl TypeChecker {
 
     pub(super) fn resolve_type(&self, ty: &Type) -> Type {
         match ty {
-            Type::TypeVar(_) => self.resolve_type_var(ty),
+            Type::TypeVar(id) => match self.type_bindings.get(id) {
+                Some(bound_type) => self.resolve_type(bound_type),
+                None => ty.clone(),
+            },
             Type::Array(inner) => Type::Array(Box::new(self.resolve_type(inner))),
             Type::Pointer(inner) => Type::Pointer(Box::new(self.resolve_type(inner))),
             Type::Function(params, ret) => Type::Function(
@@ -431,158 +444,305 @@ impl TypeChecker {
             _ => ty.clone(),
         }
     }
+    pub(super) fn normalize_type(&self, ty: &Type) -> Type {
+        match self.resolve_type(ty) {
+            Type::TypeVar(_) => Type::Primitive(Primitive::Int),
+            t => t,
+        }
+    }
+    pub(super) fn normalize_type_args(&self, args: &mut [Type]) {
+        for ty in args.iter_mut() {
+            *ty = self.normalize_type(ty);
+        }
+    }
 
     pub(super) fn resolve_call_type_args(&mut self, expr: &mut Expr) {
         match expr {
-            Expr::Call(callee, type_args, args, _) => {
-                for ty in type_args.iter_mut() {
-                    let resolved = self.resolve_type_var(ty);
-                    *ty = match resolved {
-                        Type::TypeVar(_) => Type::Primitive(Primitive::Int),
-                        t => t,
-                    };
-                }
+            Expr::Call {
+                callee,
+                type_args,
+                args,
+                ..
+            } => {
+                self.normalize_type_args(type_args);
                 self.resolve_call_type_args(callee);
                 for arg in args.iter_mut() {
                     self.resolve_call_type_args(arg);
                 }
             }
-            Expr::StructLiteral(_, type_args, fields, _) => {
-                for ty in type_args.iter_mut() {
-                    let resolved = self.resolve_type_var(ty);
-                    *ty = match resolved {
-                        Type::TypeVar(_) => Type::Primitive(Primitive::Int),
-                        t => t,
-                    };
-                }
+            Expr::StructLiteral {
+                name: _,
+                type_args,
+                fields,
+                ..
+            } => {
+                self.normalize_type_args(type_args);
                 for (_, value) in fields.iter_mut() {
                     self.resolve_call_type_args(value);
                 }
             }
-            Expr::UnionLiteral(_, type_args, fields, _) => {
-                for ty in type_args.iter_mut() {
-                    let resolved = self.resolve_type_var(ty);
-                    *ty = match resolved {
-                        Type::TypeVar(_) => Type::Primitive(Primitive::Int),
-                        t => t,
-                    };
-                }
+            Expr::UnionLiteral {
+                name: _,
+                type_args,
+                fields,
+                ..
+            } => {
+                self.normalize_type_args(type_args);
                 for (_, value) in fields.iter_mut() {
                     self.resolve_call_type_args(value);
                 }
             }
-            Expr::Block(body, _) => {
+            Expr::Block { stmts: body, .. } => {
                 for e in body.iter_mut() {
                     self.resolve_call_type_args(e);
                 }
             }
-            Expr::FuncDecl(_, _, _, _, _, body, _) => self.resolve_call_type_args(body),
-            Expr::Lambda(_, body, _, _) => self.resolve_call_type_args(body),
-            Expr::If(cond, then_branch, else_branch, _) => {
+            Expr::FuncDecl {
+                name: _,
+                attrs: _,
+                type_params: _,
+                params: _,
+                return_type: _,
+                body,
+                ..
+            } => self.resolve_call_type_args(body),
+            Expr::Lambda {
+                params: _, body, ..
+            } => self.resolve_call_type_args(body),
+            Expr::If {
+                cond,
+                then_branch,
+                else_branch,
+                ..
+            } => {
                 self.resolve_call_type_args(cond);
                 self.resolve_call_type_args(then_branch);
                 if let Some(e) = else_branch {
                     self.resolve_call_type_args(e);
                 }
             }
-            Expr::While(cond, body, _) => {
+            Expr::While { cond, body, .. } => {
                 self.resolve_call_type_args(cond);
                 self.resolve_call_type_args(body);
             }
-            Expr::For(_, array, body, _) => {
+            Expr::For {
+                var: _,
+                iterable: array,
+                body,
+                ..
+            } => {
                 self.resolve_call_type_args(array);
                 self.resolve_call_type_args(body);
             }
-            Expr::Match(target, branches, default, _) => {
+            Expr::Match {
+                target,
+                branches,
+                default,
+                ..
+            } => {
                 self.resolve_call_type_args(target);
-                for (case, result) in branches.iter_mut() {
+                for (case, guard, result) in branches.iter_mut() {
                     self.resolve_call_type_args(case);
+                    if let Some(guard) = guard {
+                        self.resolve_call_type_args(guard);
+                    }
                     self.resolve_call_type_args(result);
                 }
                 if let Some(d) = default {
                     self.resolve_call_type_args(d);
                 }
             }
-            Expr::Range(start, end, _) => {
+            Expr::Range { start, end, .. } => {
                 self.resolve_call_type_args(start);
                 self.resolve_call_type_args(end);
             }
-            Expr::VarDecl(_, _, value, _)
-            | Expr::ConstDecl(_, _, value, _, _)
-            | Expr::VarAssign(_, value, _)
-            | Expr::Return(value, _)
-            | Expr::AddAssign(_, value, _)
-            | Expr::SubAssign(_, value, _) => self.resolve_call_type_args(value),
-            Expr::GlobalVar(_, _, _, value, _) => {
+            Expr::VarDecl {
+                name: _,
+                ty: _,
+                value,
+                ..
+            }
+            | Expr::ConstDecl {
+                name: _,
+                ty: _,
+                value,
+                ..
+            }
+            | Expr::VarAssign { name: _, value, .. }
+            | Expr::Return { value, .. }
+            | Expr::AddAssign { name: _, value, .. }
+            | Expr::SubAssign { name: _, value, .. } => self.resolve_call_type_args(value),
+            Expr::GlobalVar {
+                name: _,
+                is_pub: _,
+                ty: _,
+                value,
+                ..
+            } => {
                 if let Some(v) = value {
                     self.resolve_call_type_args(v);
                 }
             }
-            Expr::ArrayLiteral(elems, _) => {
+            Expr::ArrayLiteral {
+                elements: elems, ..
+            } => {
                 for e in elems.iter_mut() {
                     self.resolve_call_type_args(e);
                 }
             }
-            Expr::ArrayFill(_, len, _) => self.resolve_call_type_args(len),
-            Expr::Index(arr, idx, _) => {
+            Expr::ArrayFill {
+                elem_type: _, len, ..
+            } => self.resolve_call_type_args(len),
+            Expr::Index {
+                array: arr,
+                index: idx,
+                ..
+            } => {
                 self.resolve_call_type_args(arr);
                 self.resolve_call_type_args(idx);
             }
-            Expr::IndexAssign(arr_idx, _, _) => self.resolve_call_type_args(arr_idx),
-            Expr::MemberAccess(obj, _, _) => self.resolve_call_type_args(obj),
-            Expr::MemberAssign(obj, _, val, _) => {
+            Expr::IndexAssign {
+                target: arr_idx, ..
+            } => self.resolve_call_type_args(arr_idx),
+            Expr::MemberAccess { obj, .. } => self.resolve_call_type_args(obj),
+            Expr::MemberAssign {
+                obj,
+                field: _,
+                value: val,
+                ..
+            } => {
                 self.resolve_call_type_args(obj);
                 self.resolve_call_type_args(val);
             }
-            Expr::AddressOf(inner, _) => self.resolve_call_type_args(inner),
-            Expr::Deref(inner, _) => self.resolve_call_type_args(inner),
-            Expr::DerefAssign(ptr, val, _) => {
+            Expr::AddressOf { expr: inner, .. } => self.resolve_call_type_args(inner),
+            Expr::Deref { expr: inner, .. } => self.resolve_call_type_args(inner),
+            Expr::DerefAssign {
+                ptr, value: val, ..
+            } => {
                 self.resolve_call_type_args(ptr);
                 self.resolve_call_type_args(val);
             }
-            Expr::Cast(inner, _, _) => self.resolve_call_type_args(inner),
-            Expr::Add(l, r, _)
-            | Expr::Sub(l, r, _)
-            | Expr::Mul(l, r, _)
-            | Expr::Div(l, r, _)
-            | Expr::Mod(l, r, _)
-            | Expr::Xor(l, r, _)
-            | Expr::FAdd(l, r, _)
-            | Expr::FSub(l, r, _)
-            | Expr::FMul(l, r, _)
-            | Expr::FDiv(l, r, _)
-            | Expr::Eq(l, r, _)
-            | Expr::Ne(l, r, _)
-            | Expr::Lt(l, r, _)
-            | Expr::Le(l, r, _)
-            | Expr::Gt(l, r, _)
-            | Expr::Ge(l, r, _)
-            | Expr::FEq(l, r, _)
-            | Expr::FNe(l, r, _)
-            | Expr::FLt(l, r, _)
-            | Expr::FLe(l, r, _)
-            | Expr::FGt(l, r, _)
-            | Expr::FGe(l, r, _)
-            | Expr::LAnd(l, r, _)
-            | Expr::LOr(l, r, _)
-            | Expr::Shl(l, r, _)
-            | Expr::Shr(l, r, _)
-            | Expr::StrCat(l, r, _) => {
+            Expr::Cast { expr: inner, .. } => self.resolve_call_type_args(inner),
+            Expr::Add {
+                left: l, right: r, ..
+            }
+            | Expr::Sub {
+                left: l, right: r, ..
+            }
+            | Expr::Mul {
+                left: l, right: r, ..
+            }
+            | Expr::Div {
+                left: l, right: r, ..
+            }
+            | Expr::Mod {
+                left: l, right: r, ..
+            }
+            | Expr::Xor {
+                left: l, right: r, ..
+            }
+            | Expr::FAdd {
+                left: l, right: r, ..
+            }
+            | Expr::FSub {
+                left: l, right: r, ..
+            }
+            | Expr::FMul {
+                left: l, right: r, ..
+            }
+            | Expr::FDiv {
+                left: l, right: r, ..
+            }
+            | Expr::Eq {
+                left: l, right: r, ..
+            }
+            | Expr::Ne {
+                left: l, right: r, ..
+            }
+            | Expr::Lt {
+                left: l, right: r, ..
+            }
+            | Expr::Le {
+                left: l, right: r, ..
+            }
+            | Expr::Gt {
+                left: l, right: r, ..
+            }
+            | Expr::Ge {
+                left: l, right: r, ..
+            }
+            | Expr::FEq {
+                left: l, right: r, ..
+            }
+            | Expr::FNe {
+                left: l, right: r, ..
+            }
+            | Expr::FLt {
+                left: l, right: r, ..
+            }
+            | Expr::FLe {
+                left: l, right: r, ..
+            }
+            | Expr::FGt {
+                left: l, right: r, ..
+            }
+            | Expr::FGe {
+                left: l, right: r, ..
+            }
+            | Expr::BAnd {
+                left: l, right: r, ..
+            }
+            | Expr::BOr {
+                left: l, right: r, ..
+            }
+            | Expr::LAnd {
+                left: l, right: r, ..
+            }
+            | Expr::LOr {
+                left: l, right: r, ..
+            }
+            | Expr::Shl {
+                left: l, right: r, ..
+            }
+            | Expr::Shr {
+                left: l, right: r, ..
+            }
+            | Expr::StrCat {
+                left: l, right: r, ..
+            } => {
                 self.resolve_call_type_args(l);
                 self.resolve_call_type_args(r);
             }
-            Expr::BNot(e, _) => self.resolve_call_type_args(e),
-            Expr::Inc(_, _) | Expr::Dec(_, _) => {}
-            Expr::MulAssign(_, v, _)
-            | Expr::DivAssign(_, v, _)
-            | Expr::ModAssign(_, v, _)
-            | Expr::AndAssign(_, v, _)
-            | Expr::OrAssign(_, v, _)
-            | Expr::XorAssign(_, v, _)
-            | Expr::ShlAssign(_, v, _)
-            | Expr::ShrAssign(_, v, _) => self.resolve_call_type_args(v),
-            Expr::Not(e, _) | Expr::Neg(e, _) | Expr::FNeg(e, _) => self.resolve_call_type_args(e),
-            Expr::FString(parts, _) => {
+            Expr::BNot { expr: e, .. } => self.resolve_call_type_args(e),
+            Expr::Inc { .. } | Expr::Dec { .. } => {}
+            Expr::MulAssign {
+                name: _, value: v, ..
+            }
+            | Expr::DivAssign {
+                name: _, value: v, ..
+            }
+            | Expr::ModAssign {
+                name: _, value: v, ..
+            }
+            | Expr::AndAssign {
+                name: _, value: v, ..
+            }
+            | Expr::OrAssign {
+                name: _, value: v, ..
+            }
+            | Expr::XorAssign {
+                name: _, value: v, ..
+            }
+            | Expr::ShlAssign {
+                name: _, value: v, ..
+            }
+            | Expr::ShrAssign {
+                name: _, value: v, ..
+            } => self.resolve_call_type_args(v),
+            Expr::Not { expr: e, .. } | Expr::Neg { expr: e, .. } | Expr::FNeg { expr: e, .. } => {
+                self.resolve_call_type_args(e)
+            }
+            Expr::FString { segs: parts, .. } => {
                 for p in parts {
                     self.resolve_call_type_args(p);
                 }
@@ -590,18 +750,30 @@ impl TypeChecker {
             _ => {}
         }
     }
-
     pub(super) fn types_compatible(&self, expected: &Type, found: &Type) -> bool {
         let expected = self.resolve_type(expected);
         let found = self.resolve_type(found);
 
         match (&expected, &found) {
+            (Type::Struct(s1, a1), Type::Pointer(inner))
+                if **inner == Type::Struct(s1.clone(), a1.clone()) =>
+            {
+                true
+            }
+            (Type::Pointer(inner), Type::Struct(s1, a1))
+                if **inner == Type::Struct(s1.clone(), a1.clone()) =>
+            {
+                true
+            }
             (Type::Primitive(Primitive::Void), Type::Primitive(Primitive::Void)) => true,
             (Type::Pointer(_), Type::Primitive(Primitive::Void)) => true,
             (Type::TypeVar(_), Type::Primitive(Primitive::Void)) => true,
             (Type::Param(_), Type::Primitive(Primitive::Void)) => true,
             (Type::TypeVar(_), _) => true,
             (_, Type::TypeVar(_)) => true,
+
+            (Type::Primitive(Primitive::Char), Type::Primitive(Primitive::Int))
+            | (Type::Primitive(Primitive::Int), Type::Primitive(Primitive::Char)) => true,
             (Type::Param(a), Type::Param(b)) => a == b,
             (Type::Primitive(a), Type::Primitive(b)) => a == b,
             (Type::Pointer(inner), Type::Primitive(Primitive::String))

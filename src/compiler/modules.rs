@@ -42,7 +42,7 @@ impl ModuleLoader {
         }
     }
 
-    pub fn find_file(&self, name: &str, base_path: &str) -> Option<String> {
+    fn search_dirs(&self, base_path: &str) -> Vec<String> {
         let mut dirs: Vec<String> = Vec::new();
         if !base_path.is_empty() {
             let dir = Path::new(base_path)
@@ -55,8 +55,11 @@ impl ModuleLoader {
         dirs.extend(self.include_paths.iter().cloned());
         dirs.push("/usr/local/include/alum".to_string());
         dirs.push("/usr/local/alum".to_string());
+        dirs
+    }
 
-        for dir in dirs {
+    pub fn find_file(&self, name: &str, base_path: &str) -> Option<String> {
+        for dir in self.search_dirs(base_path) {
             for ext in [".al", ".ah"] {
                 let p = format!("{}/{}{}", dir, name, ext);
                 if Path::new(&p).exists() {
@@ -68,20 +71,9 @@ impl ModuleLoader {
     }
 
     pub fn dir_exists(&self, name: &str, base_path: &str) -> bool {
-        let mut dirs: Vec<String> = Vec::new();
-        if !base_path.is_empty() {
-            let dir = Path::new(base_path)
-                .parent()
-                .and_then(|p| p.to_str())
-                .filter(|s| !s.is_empty())
-                .unwrap_or(".");
-            dirs.push(dir.to_string());
-        }
-        dirs.extend(self.include_paths.iter().cloned());
-        dirs.push("/usr/local/include/alum".to_string());
-        dirs.push("/usr/local/alum".to_string());
-
-        dirs.iter().any(|d| Path::new(d).join(name).is_dir())
+        self.search_dirs(base_path)
+            .iter()
+            .any(|d| Path::new(d).join(name).is_dir())
     }
 
     pub fn build_names_map(
@@ -109,9 +101,17 @@ impl ModuleLoader {
     pub fn strip_module_pub(body: &mut Vec<Expr>) {
         for expr in body.iter_mut() {
             match expr {
-                Expr::FuncDecl(_, attrs, _, _, _, _, _) => attrs.is_pub = false,
-                Expr::ConstDecl(_, _, _, is_pub, _) => *is_pub = false,
-                Expr::GlobalVar(_, is_pub, _, _, _) => *is_pub = false,
+                Expr::FuncDecl { name: _, attrs, .. } => attrs.is_pub = false,
+                Expr::ConstDecl {
+                    name: _,
+                    ty: _,
+                    value: _,
+                    is_pub,
+                    ..
+                } => *is_pub = false,
+                Expr::GlobalVar {
+                    name: _, is_pub, ..
+                } => *is_pub = false,
                 _ => {}
             }
         }
@@ -158,29 +158,42 @@ fn rename_expr(e: &mut Expr, map: &HashMap<String, String>, locals: &mut Vec<Str
         }
     }
     match e {
-        Expr::Var(name, _) => ren(name, map, locals),
-        Expr::Inc(name, _) | Expr::Dec(name, _) => ren(name, map, locals),
-        Expr::VarAssign(name, v, _)
-        | Expr::AddAssign(name, v, _)
-        | Expr::SubAssign(name, v, _)
-        | Expr::MulAssign(name, v, _)
-        | Expr::DivAssign(name, v, _)
-        | Expr::ModAssign(name, v, _)
-        | Expr::AndAssign(name, v, _)
-        | Expr::OrAssign(name, v, _)
-        | Expr::XorAssign(name, v, _)
-        | Expr::ShlAssign(name, v, _)
-        | Expr::ShrAssign(name, v, _) => {
+        Expr::Var { name, .. } => ren(name, map, locals),
+        Expr::Inc { name, .. } | Expr::Dec { name, .. } => ren(name, map, locals),
+        Expr::BAnd {
+            left: l, right: r, ..
+        }
+        | Expr::BOr {
+            left: l, right: r, ..
+        } => {
+            rename_expr(l, map, locals);
+            rename_expr(r, map, locals);
+        }
+        Expr::VarAssign { name, value: v, .. }
+        | Expr::AddAssign { name, value: v, .. }
+        | Expr::SubAssign { name, value: v, .. }
+        | Expr::MulAssign { name, value: v, .. }
+        | Expr::DivAssign { name, value: v, .. }
+        | Expr::ModAssign { name, value: v, .. }
+        | Expr::AndAssign { name, value: v, .. }
+        | Expr::OrAssign { name, value: v, .. }
+        | Expr::XorAssign { name, value: v, .. }
+        | Expr::ShlAssign { name, value: v, .. }
+        | Expr::ShrAssign { name, value: v, .. } => {
             ren(name, map, locals);
             rename_expr(v, map, locals);
         }
-        Expr::VarDecl(name, ty, v, _) => {
+        Expr::VarDecl {
+            name, ty, value: v, ..
+        } => {
             rename_type(ty, map);
             rename_expr(v, map, locals);
 
             locals.push(name.clone());
         }
-        Expr::ConstDecl(name, ty, v, _, _) => {
+        Expr::ConstDecl {
+            name, ty, value: v, ..
+        } => {
             rename_type(ty, map);
             rename_expr(v, map, locals);
             if locals.is_empty() {
@@ -189,14 +202,28 @@ fn rename_expr(e: &mut Expr, map: &HashMap<String, String>, locals: &mut Vec<Str
                 locals.push(name.clone());
             }
         }
-        Expr::GlobalVar(name, _, ty, v, _) => {
+        Expr::GlobalVar {
+            name,
+            is_pub: _,
+            ty,
+            value: v,
+            ..
+        } => {
             ren(name, map, locals);
             rename_type(ty, map);
             if let Some(v) = v {
                 rename_expr(v, map, locals);
             }
         }
-        Expr::FuncDecl(name, _, _, params, ret, body, _) => {
+        Expr::FuncDecl {
+            name,
+            attrs: _,
+            type_params: _,
+            params,
+            return_type: ret,
+            body,
+            ..
+        } => {
             ren(name, map, locals);
             let mark = locals.len();
             for (p, t) in params.iter_mut() {
@@ -207,21 +234,42 @@ fn rename_expr(e: &mut Expr, map: &HashMap<String, String>, locals: &mut Vec<Str
             rename_expr(body, map, locals);
             locals.truncate(mark);
         }
-        Expr::ExternVar(_, ty, _) => rename_type(ty, map),
-        Expr::Struct(name, _, fields, _) => {
+        Expr::ExternVar { name: _, ty, .. } => rename_type(ty, map),
+        Expr::Struct {
+            name,
+            type_params: _,
+            fields,
+            ..
+        } => {
             ren(name, map, locals);
             for (_, t) in fields {
                 rename_type(t, map);
             }
         }
-        Expr::Union(name, _, fields, _) => {
+        Expr::Union {
+            name,
+            type_params: _,
+            fields,
+            ..
+        } => {
             ren(name, map, locals);
             for (_, t) in fields {
                 rename_type(t, map);
             }
         }
-        Expr::Enum(name, _, _) => ren(name, map, locals),
-        Expr::StructLiteral(name, args, fields, _) | Expr::UnionLiteral(name, args, fields, _) => {
+        Expr::Enum { name, .. } => ren(name, map, locals),
+        Expr::StructLiteral {
+            name,
+            type_args: args,
+            fields,
+            ..
+        }
+        | Expr::UnionLiteral {
+            name,
+            type_args: args,
+            fields,
+            ..
+        } => {
             ren(name, map, locals);
             for a in args {
                 rename_type(a, map);
@@ -230,7 +278,12 @@ fn rename_expr(e: &mut Expr, map: &HashMap<String, String>, locals: &mut Vec<Str
                 rename_expr(v, map, locals);
             }
         }
-        Expr::Call(callee, targs, args, _) => {
+        Expr::Call {
+            callee,
+            type_args: targs,
+            args,
+            ..
+        } => {
             rename_expr(callee, map, locals);
             for t in targs {
                 rename_type(t, map);
@@ -239,43 +292,66 @@ fn rename_expr(e: &mut Expr, map: &HashMap<String, String>, locals: &mut Vec<Str
                 rename_expr(a, map, locals);
             }
         }
-        Expr::Return(v, _) => rename_expr(v, map, locals),
-        Expr::If(c, t, e, _) => {
+        Expr::Return { value: v, .. } => rename_expr(v, map, locals),
+        Expr::If {
+            cond: c,
+            then_branch: t,
+            else_branch: e,
+            ..
+        } => {
             rename_expr(c, map, locals);
             rename_expr(t, map, locals);
             if let Some(e) = e {
                 rename_expr(e, map, locals);
             }
         }
-        Expr::While(c, b, _) => {
+        Expr::While {
+            cond: c, body: b, ..
+        } => {
             rename_expr(c, map, locals);
             rename_expr(b, map, locals);
         }
-        Expr::Block(body, _) => {
+        Expr::Block { stmts: body, .. } => {
             let mark = locals.len();
             for b in body {
                 rename_expr(b, map, locals);
             }
             locals.truncate(mark);
         }
-        Expr::Index(a, i, _) | Expr::IndexAssign(a, i, _) => {
+        Expr::Index {
+            array: a, index: i, ..
+        }
+        | Expr::IndexAssign {
+            target: a,
+            value: i,
+            ..
+        } => {
             rename_expr(a, map, locals);
             rename_expr(i, map, locals);
         }
-        Expr::ArrayLiteral(es, _) => {
+        Expr::ArrayLiteral { elements: es, .. } => {
             for e in es {
                 rename_expr(e, map, locals);
             }
         }
-        Expr::ArrayFill(ty, len, _) => {
+        Expr::ArrayFill {
+            elem_type: ty, len, ..
+        } => {
             rename_type(ty, map);
             rename_expr(len, map, locals);
         }
-        Expr::Range(s, e, _) => {
+        Expr::Range {
+            start: s, end: e, ..
+        } => {
             rename_expr(s, map, locals);
             rename_expr(e, map, locals);
         }
-        Expr::For(var, arr, body, _) => {
+        Expr::For {
+            var,
+            iterable: arr,
+            body,
+            ..
+        } => {
             rename_expr(arr, map, locals);
             let mark = locals.len();
             locals.push(var.clone());
@@ -283,22 +359,40 @@ fn rename_expr(e: &mut Expr, map: &HashMap<String, String>, locals: &mut Vec<Str
             locals.truncate(mark);
         }
         Expr::TypeDef(_) => {}
-        Expr::Match(t, br, default, _) => {
+        Expr::Match {
+            target: t,
+            branches: br,
+            default,
+            ..
+        } => {
             rename_expr(t, map, locals);
-            for (c, r) in br {
+            for (c, g, r) in br {
                 rename_expr(c, map, locals);
+                if let Some(g) = g {
+                    rename_expr(g, map, locals);
+                }
                 rename_expr(r, map, locals);
             }
             if let Some(d) = default {
                 rename_expr(d, map, locals);
             }
         }
-        Expr::MemberAccess(o, _, _) => rename_expr(o, map, locals),
-        Expr::MemberAssign(o, _, v, _) => {
+        Expr::MemberAccess { obj: o, .. } => rename_expr(o, map, locals),
+        Expr::MemberAssign {
+            obj: o,
+            field: _,
+            value: v,
+            ..
+        } => {
             rename_expr(o, map, locals);
             rename_expr(v, map, locals);
         }
-        Expr::Lambda(params, body, ret, _) => {
+        Expr::Lambda {
+            params,
+            body,
+            return_type: ret,
+            ..
+        } => {
             let mark = locals.len();
             for (p, t) in params.iter_mut() {
                 rename_type(t, map);
@@ -308,57 +402,122 @@ fn rename_expr(e: &mut Expr, map: &HashMap<String, String>, locals: &mut Vec<Str
             rename_expr(body, map, locals);
             locals.truncate(mark);
         }
-        Expr::AddressOf(x, _) | Expr::Deref(x, _) | Expr::BNot(x, _) => rename_expr(x, map, locals),
-        Expr::DerefAssign(p, v, _) => {
+        Expr::AddressOf { expr: x, .. }
+        | Expr::Deref { expr: x, .. }
+        | Expr::BNot { expr: x, .. } => rename_expr(x, map, locals),
+        Expr::DerefAssign {
+            ptr: p, value: v, ..
+        } => {
             rename_expr(p, map, locals);
             rename_expr(v, map, locals);
         }
-        Expr::Cast(x, ty, _) => {
+        Expr::Cast { expr: x, ty, .. } => {
             rename_expr(x, map, locals);
             rename_type(ty, map);
         }
-        Expr::FString(segs, _) => {
+        Expr::FString { segs, .. } => {
             for s in segs {
                 rename_expr(s, map, locals);
             }
         }
-        Expr::Add(l, r, _)
-        | Expr::Sub(l, r, _)
-        | Expr::Mul(l, r, _)
-        | Expr::Div(l, r, _)
-        | Expr::Mod(l, r, _)
-        | Expr::Xor(l, r, _)
-        | Expr::LAnd(l, r, _)
-        | Expr::LOr(l, r, _)
-        | Expr::Shl(l, r, _)
-        | Expr::Shr(l, r, _)
-        | Expr::FAdd(l, r, _)
-        | Expr::FSub(l, r, _)
-        | Expr::FMul(l, r, _)
-        | Expr::FDiv(l, r, _)
-        | Expr::Eq(l, r, _)
-        | Expr::Ne(l, r, _)
-        | Expr::Lt(l, r, _)
-        | Expr::Le(l, r, _)
-        | Expr::Gt(l, r, _)
-        | Expr::Ge(l, r, _)
-        | Expr::FEq(l, r, _)
-        | Expr::FNe(l, r, _)
-        | Expr::FLt(l, r, _)
-        | Expr::FLe(l, r, _)
-        | Expr::FGt(l, r, _)
-        | Expr::FGe(l, r, _)
-        | Expr::StrCat(l, r, _) => {
+        Expr::Add {
+            left: l, right: r, ..
+        }
+        | Expr::Sub {
+            left: l, right: r, ..
+        }
+        | Expr::Mul {
+            left: l, right: r, ..
+        }
+        | Expr::Div {
+            left: l, right: r, ..
+        }
+        | Expr::Mod {
+            left: l, right: r, ..
+        }
+        | Expr::Xor {
+            left: l, right: r, ..
+        }
+        | Expr::LAnd {
+            left: l, right: r, ..
+        }
+        | Expr::LOr {
+            left: l, right: r, ..
+        }
+        | Expr::Shl {
+            left: l, right: r, ..
+        }
+        | Expr::Shr {
+            left: l, right: r, ..
+        }
+        | Expr::FAdd {
+            left: l, right: r, ..
+        }
+        | Expr::FSub {
+            left: l, right: r, ..
+        }
+        | Expr::FMul {
+            left: l, right: r, ..
+        }
+        | Expr::FDiv {
+            left: l, right: r, ..
+        }
+        | Expr::Eq {
+            left: l, right: r, ..
+        }
+        | Expr::Ne {
+            left: l, right: r, ..
+        }
+        | Expr::Lt {
+            left: l, right: r, ..
+        }
+        | Expr::Le {
+            left: l, right: r, ..
+        }
+        | Expr::Gt {
+            left: l, right: r, ..
+        }
+        | Expr::Ge {
+            left: l, right: r, ..
+        }
+        | Expr::FEq {
+            left: l, right: r, ..
+        }
+        | Expr::FNe {
+            left: l, right: r, ..
+        }
+        | Expr::FLt {
+            left: l, right: r, ..
+        }
+        | Expr::FLe {
+            left: l, right: r, ..
+        }
+        | Expr::FGt {
+            left: l, right: r, ..
+        }
+        | Expr::FGe {
+            left: l, right: r, ..
+        }
+        | Expr::StrCat {
+            left: l, right: r, ..
+        } => {
             rename_expr(l, map, locals);
             rename_expr(r, map, locals);
         }
-        Expr::Neg(x, _) | Expr::FNeg(x, _) | Expr::Not(x, _) => rename_expr(x, map, locals),
-        Expr::Int(_, _)
-        | Expr::Float(_, _)
-        | Expr::Bool(_, _)
-        | Expr::String(_, _)
+        Expr::Neg { expr: x, .. } | Expr::FNeg { expr: x, .. } | Expr::Not { expr: x, .. } => {
+            rename_expr(x, map, locals)
+        }
+        Expr::Break { value: v, .. } => {
+            if let Some(v) = v {
+                rename_expr(v, map, locals);
+            }
+        }
+        Expr::Int { .. }
+        | Expr::Float { .. }
+        | Expr::Char { .. }
+        | Expr::Bool { .. }
+        | Expr::String { .. }
         | Expr::Nil(_)
-        | Expr::Break(_)
         | Expr::Continue(_) => {}
     }
 }

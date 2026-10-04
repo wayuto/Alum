@@ -115,10 +115,12 @@ pub struct AsmCodeGen {
     pub(super) internals: HashSet<String>,
     pub(super) extern_link: HashMap<String, String>,
     pub(super) used_callee_saved: Vec<Reg>,
+    pub(super) call_saves: HashMap<usize, (Vec<Reg>, bool)>,
 
     pub(super) stack_arg_plan: HashMap<usize, (usize, usize)>,
     pub(super) cur_inst_idx: usize,
     pub(super) call_stack_bytes: usize,
+    pub(super) debug_intervals: Vec<(String, usize, usize, Reg)>,
 }
 
 impl AsmCodeGen {
@@ -178,9 +180,11 @@ impl AsmCodeGen {
             internals,
             extern_link,
             used_callee_saved: Vec::new(),
+            call_saves: HashMap::new(),
             stack_arg_plan: HashMap::new(),
             cur_inst_idx: 0,
             call_stack_bytes: 0,
+            debug_intervals: Vec::new(),
         }
     }
 
@@ -269,6 +273,24 @@ impl AsmCodeGen {
             eprintln!("  {:?}", a);
         }
         self.text_asms.push(a);
+    }
+
+    pub(super) fn assert_home_exclusive(&self, home: Reg, exempt: &[String]) {
+        if self.debug_intervals.is_empty() {
+            return;
+        }
+        let i = self.cur_inst_idx;
+        let bad: Vec<&(String, usize, usize, Reg)> = self
+            .debug_intervals
+            .iter()
+            .filter(|(k, s, e, r)| *r == home && *s <= i && i <= *e && !exempt.contains(k))
+            .collect();
+        if !bad.is_empty() {
+            panic!(
+                "ALC_DEBUG_ALLOC: fn {} inst {}: write to home {:?} clobbers live vregs {:?} (exempt: {:?})",
+                self.curr_fn, i, home, bad, exempt
+            );
+        }
     }
 
     pub(super) fn push_data(&mut self, a: Asm) {

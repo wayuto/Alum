@@ -17,7 +17,6 @@ impl IRGen {
     }
 
     pub fn compile(&mut self, program: Program) -> Result<IRProgram, CodeGenError> {
-        super::purity::check_lambda_params(&program.body)?;
         let program = self.lambda2function(program);
         self.program_body = program.body.clone();
 
@@ -31,9 +30,9 @@ impl IRGen {
             .body
             .iter()
             .filter(|e| {
-                matches!(e, Expr::ConstDecl(_, _, init, _, _)
-                    if !matches!(init.as_ref(), Expr::FuncDecl(..))
-                        && !matches!(init.as_ref(), Expr::Var(v, _) if v.starts_with("_lambda_")))
+                matches!(e, Expr::ConstDecl { name: _, ty: _, value: init, .. }
+                    if !matches!(init.as_ref(), Expr::FuncDecl { .. })
+                        && !matches!(init.as_ref(), Expr::Var { name: v, .. } if v.starts_with("_lambda_")))
             })
             .cloned()
             .collect();
@@ -46,27 +45,35 @@ impl IRGen {
 
         for expr in program.body {
             match expr {
-                Expr::FuncDecl(name, _, type_params, params, _, body, _) => {
+                Expr::FuncDecl {
+                    name,
+                    attrs: _,
+                    type_params,
+                    params,
+                    return_type: _,
+                    body,
+                    ..
+                } => {
                     if type_params.is_empty() {
                         self.compile_fn(name, params, *body)?;
                     }
                 }
-                Expr::ConstDecl(_, _, _, _, _) | Expr::GlobalVar(_, _, _, _, _) => {}
-                Expr::Int(_, _)
-                | Expr::Float(_, _)
-                | Expr::Bool(_, _)
-                | Expr::String(_, _)
+                Expr::ConstDecl { .. } | Expr::GlobalVar { .. } => {}
+                Expr::Int { .. }
+                | Expr::Float { .. }
+                | Expr::Bool { .. }
+                | Expr::String { .. }
                 | Expr::Nil(_)
-                | Expr::Var(_, _) => {
+                | Expr::Var { .. } => {
                     let mut ctx = Context::new("_global".to_string());
                     ctx.enter_scope();
                     self.compile_expr(
-                        Expr::VarDecl(
-                            "_global".to_string(),
-                            Type::Primitive(Primitive::Int),
-                            Box::new(expr),
-                            Span::new(0, 0),
-                        ),
+                        Expr::VarDecl {
+                            name: "_global".to_string(),
+                            ty: Type::Primitive(Primitive::Int),
+                            value: Box::new(expr),
+                            span: Span::new(0, 0),
+                        },
                         &mut ctx,
                     )?;
                 }
@@ -87,8 +94,15 @@ impl IRGen {
         bind_name: &str,
         fn_decl: Option<Expr>,
     ) -> Result<(), CodeGenError> {
-        if let Some(Expr::FuncDecl(name, attrs, type_params, params, ret_type, lam_body, _)) =
-            fn_decl
+        if let Some(Expr::FuncDecl {
+            name,
+            attrs,
+            type_params,
+            params,
+            return_type: ret_type,
+            body: lam_body,
+            ..
+        }) = fn_decl
         {
             if type_params.is_empty() {
                 self.func_decl(name.clone(), attrs, params.clone(), ret_type.clone())?;
@@ -105,7 +119,15 @@ impl IRGen {
     fn collect_decls(&mut self, body: &[Expr]) -> Result<(), CodeGenError> {
         for expr in body {
             match expr {
-                Expr::FuncDecl(name, attrs, type_params, params, ret_type, body, _) => {
+                Expr::FuncDecl {
+                    name,
+                    attrs,
+                    type_params,
+                    params,
+                    return_type: ret_type,
+                    body,
+                    ..
+                } => {
                     if type_params.is_empty() {
                         self.func_decl(
                             name.clone(),
@@ -127,26 +149,47 @@ impl IRGen {
                         );
                     }
                 }
-                Expr::GlobalVar(bind_name, _, _, init, _) => {
+                Expr::GlobalVar {
+                    name: bind_name,
+                    is_pub: _,
+                    ty: _,
+                    value: init,
+                    ..
+                } => {
                     let fn_decl = resolve_fn_init(body, init.as_deref());
                     self.register_bound_fn(bind_name, fn_decl)?;
                 }
-                Expr::ConstDecl(bind_name, _, init, _, _) => {
+                Expr::ConstDecl {
+                    name: bind_name,
+                    ty: _,
+                    value: init,
+                    ..
+                } => {
                     let fn_decl = resolve_fn_init(body, Some(init));
                     self.register_bound_fn(bind_name, fn_decl)?;
                 }
-                Expr::ExternVar(name, ty, _) => {
+                Expr::ExternVar { name, ty, .. } => {
                     self.extern_vars.insert(name.clone(), ty.clone());
                 }
-                Expr::Struct(name, type_params, fields, _) => {
+                Expr::Struct {
+                    name,
+                    type_params,
+                    fields,
+                    ..
+                } => {
                     self.structs
                         .insert(name.clone(), (type_params.clone(), fields.clone()));
                 }
-                Expr::Union(name, type_params, fields, _) => {
+                Expr::Union {
+                    name,
+                    type_params,
+                    fields,
+                    ..
+                } => {
                     self.unions
                         .insert(name.clone(), (type_params.clone(), fields.clone()));
                 }
-                Expr::Enum(name, members, _) => {
+                Expr::Enum { name, members, .. } => {
                     self.enums.insert(name.clone(), members.clone());
                 }
                 _ => {}
@@ -158,7 +201,7 @@ impl IRGen {
     fn warn_unverifiable_extern_pure(&self) {
         let mut warned: std::collections::HashSet<String> = std::collections::HashSet::new();
         for expr in &self.program_body {
-            if let Expr::FuncDecl(name, attrs, _, _, _, _, _) = expr {
+            if let Expr::FuncDecl { name, attrs, .. } = expr {
                 let shown = attrs.link_name.as_deref().unwrap_or(name);
                 if attrs.is_external && attrs.is_pure && !warned.contains(shown) {
                     warned.insert(shown.to_string());
@@ -171,7 +214,15 @@ impl IRGen {
     fn resolve_native_signatures(&mut self) {
         if let Some(natives) = self.natives.as_mut() {
             for expr in &self.program_body {
-                if let Expr::FuncDecl(name, attrs, _, params, ret_type, _, _) = expr {
+                if let Expr::FuncDecl {
+                    name,
+                    attrs,
+                    type_params: _,
+                    params,
+                    return_type: ret_type,
+                    ..
+                } = expr
+                {
                     if attrs.is_external && attrs.is_pure {
                         if let Some(sig) = super::const_eval::native_sig(params, ret_type) {
                             match &attrs.link_name {
@@ -204,10 +255,10 @@ impl IRGen {
 
 fn resolve_fn_init(body: &[Expr], init: Option<&Expr>) -> Option<Expr> {
     match init? {
-        f @ Expr::FuncDecl(..) => Some(f.clone()),
-        Expr::Var(vname, _) if vname.starts_with("_lambda_") => body
+        f @ Expr::FuncDecl { .. } => Some(f.clone()),
+        Expr::Var { name: vname, .. } if vname.starts_with("_lambda_") => body
             .iter()
-            .find(|e| matches!(e, Expr::FuncDecl(n, ..) if n == vname))
+            .find(|e| matches!(e, Expr::FuncDecl { name: n, .. } if n == vname))
             .cloned(),
         _ => None,
     }

@@ -119,7 +119,6 @@ pub enum Op {
     I2F,
     F2I,
     ARRAYLEN,
-    DUP,
 }
 
 impl TryFrom<u8> for Op {
@@ -179,7 +178,6 @@ impl TryFrom<u8> for Op {
             Op::I2F,
             Op::F2I,
             Op::ARRAYLEN,
-            Op::DUP,
         ];
         if let Some(op) = OP_LIST.get(value as usize) {
             Ok(op.clone())

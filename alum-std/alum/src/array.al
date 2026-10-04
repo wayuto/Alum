@@ -10,7 +10,7 @@ struct(pub) Array<T> {
     next: Maybe<T>(*Array<T>),
 }
 
-fun(pub) arr_new<T>(data: T[], len: int): Array<T> {
+fun(pub) new<T>(data: T[], len: int): Array<T> {
     return Array<T> {
         data: data,
         len: len,

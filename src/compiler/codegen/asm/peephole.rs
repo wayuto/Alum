@@ -27,7 +27,6 @@ pub fn optimize(asms: &mut Vec<Asm>) {
         changed |= pass_add_sub_xor_zero(asms);
         changed |= pass_push_pop(asms);
         changed |= pass_mov_mov_swap(asms);
-        changed |= pass_self_mov(asms);
         changed |= pass_redundant_ret(asms);
 
         if !changed {
@@ -139,8 +138,6 @@ fn operand_writes(asm: &Asm, reg: Reg) -> bool {
         | Asm::Setle(r)
         | Asm::Seta(r)
         | Asm::Setae(r)
-        | Asm::Setb(r)
-        | Asm::Setbe(r)
         | Asm::Setp(r)
         | Asm::Setnp(r) => *r == reg,
 
@@ -387,22 +384,6 @@ fn pass_jmp_chain(asms: &mut Vec<Asm>) -> bool {
             break;
         }
         changed = true;
-    }
-    changed
-}
-
-fn pass_self_mov(asms: &mut Vec<Asm>) -> bool {
-    let mut changed = false;
-    let mut i = 0;
-    while i < asms.len() {
-        if let Asm::Mov(Operand::Reg(r1), Operand::Reg(r2)) = &asms[i] {
-            if r1 == r2 {
-                asms.remove(i);
-                changed = true;
-                continue;
-            }
-        }
-        i += 1;
     }
     changed
 }

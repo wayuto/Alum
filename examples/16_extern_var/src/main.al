@@ -11,7 +11,7 @@ fun main(): int {
 
     counter = 42
     counter += 1
-    ++counter
+    counter++
     println(f"counter after writes = {counter}")
 
     var r0: float = ratio
@@ -23,7 +23,7 @@ fun main(): int {
     var twice: float = ratio * 2.0
     println(f"ratio * 2 = {twice}")
 
-    --counter
+    counter--
     counter -= 5
     println(f"counter at end = {counter}")
 

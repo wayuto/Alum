@@ -111,6 +111,22 @@ impl<'a> Lexer<'a> {
 
         Ok(ident)
     }
+    fn read_escape(&mut self, out: &mut String) {
+        self.bump();
+        match self.current {
+            Some('n') => out.push('\n'),
+            Some('t') => out.push('\t'),
+            Some('r') => out.push('\r'),
+            Some('0') => out.push('\0'),
+            Some(c) => out.push(c),
+            None => {}
+        }
+        if self.current == Some('\n') {
+            self.line += 1;
+            self.col = 0;
+        }
+        self.bump();
+    }
 
     fn lex_string(&mut self, quote: char) -> Result<String, LexerError> {
         let mut s = String::new();
@@ -122,19 +138,7 @@ impl<'a> Lexer<'a> {
                 });
             }
             if self.current == Some('\\') {
-                self.bump();
-                match self.current {
-                    Some('n') => s.push('\n'),
-                    Some('t') => s.push('\t'),
-                    Some('r') => s.push('\r'),
-                    Some(c) => s.push(c),
-                    None => {}
-                }
-                if self.current == Some('\n') {
-                    self.line += 1;
-                    self.col = 0;
-                }
-                self.bump();
+                self.read_escape(&mut s);
                 continue;
             }
             if self.current == Some('\n') {
@@ -223,7 +227,12 @@ impl<'a> Lexer<'a> {
                 self.bump();
                 if self.current == Some('.') {
                     self.bump();
-                    Token::DOTDOT
+                    if self.current == Some('=') {
+                        self.bump();
+                        Token::DOTDOTEQ
+                    } else {
+                        Token::DOTDOT
+                    }
                 } else {
                     Token::DOT
                 }
@@ -372,7 +381,12 @@ impl<'a> Lexer<'a> {
             }
             '\'' => {
                 self.bump();
-                Token::STRING(self.lex_string('\'')?)
+                let s = self.lex_string('\'')?;
+                if s.chars().count() == 1 {
+                    Token::CHAR(s.chars().next().unwrap() as u8)
+                } else {
+                    Token::STRING(s)
+                }
             }
             '"' => {
                 self.bump();
@@ -445,6 +459,7 @@ impl<'a> Lexer<'a> {
             "using" => Token::USING,
             "as" => Token::AS,
             "int" => Token::TYPE(ident),
+            "char" => Token::TYPE(ident),
             "float" => Token::TYPE(ident),
             "bool" => Token::TYPE(ident),
             "string" => Token::TYPE(ident),
@@ -486,21 +501,7 @@ impl<'a> Lexer<'a> {
                         col: self.col,
                     });
                 }
-                Some('\\') => {
-                    self.bump();
-                    match self.current {
-                        Some('n') => lit.push('\n'),
-                        Some('t') => lit.push('\t'),
-                        Some('r') => lit.push('\r'),
-                        Some(c) => lit.push(c),
-                        None => {}
-                    }
-                    if self.current == Some('\n') {
-                        self.line += 1;
-                        self.col = 0;
-                    }
-                    self.bump();
-                }
+                Some('\\') => self.read_escape(&mut lit),
                 Some('{') => {
                     let next = self.chars.clone().next();
                     if next == Some('{') {

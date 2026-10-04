@@ -42,7 +42,7 @@ impl<'a> VmSafety<'a> {
 
     fn bind(&mut self, name: &str, value: &Expr) {
         match value {
-            Expr::Var(v, _) => {
+            Expr::Var { name: v, .. } => {
                 let target = if v.starts_with("_lambda_") || self.pure_fns.contains(v) {
                     Some(v.clone())
                 } else {
@@ -54,7 +54,9 @@ impl<'a> VmSafety<'a> {
                     }
                 }
             }
-            Expr::Lambda(_, body, _, _) => {
+            Expr::Lambda {
+                params: _, body, ..
+            } => {
                 if self.safe(body) {
                     if let Some(scope) = self.bound.last_mut() {
                         scope.insert(name.to_string(), VM_LAMBDA_MARKER.to_string());
@@ -97,7 +99,15 @@ impl<'a> VmSafety<'a> {
 
     fn find_lambda_body(&self, name: &str) -> Option<&Expr> {
         self.program_body.iter().find_map(|e| match e {
-            Expr::FuncDecl(n, _, _, _, _, b, _) if n == name => Some(b.as_ref()),
+            Expr::FuncDecl {
+                name: n,
+                attrs: _,
+                type_params: _,
+                params: _,
+                return_type: _,
+                body: b,
+                ..
+            } if n == name => Some(b.as_ref()),
             _ => None,
         })
     }
@@ -105,13 +115,31 @@ impl<'a> VmSafety<'a> {
     pub(super) fn safe(&mut self, expr: &Expr) -> bool {
         use Expr::*;
         match expr {
-            Int(..) | Float(..) | Bool(..) | String(..) | Nil(_) | Var(..) | Break(_)
-            | Continue(_) | TypeDef(_) | Struct(..) | Union(..) | Enum(..) | GlobalVar(..)
-            | ExternVar(..) | FuncDecl(..) => true,
+            Int { .. }
+            | Float { .. }
+            | Char { .. }
+            | Bool { .. }
+            | String { .. }
+            | Nil(_)
+            | Var { .. }
+            | Continue(_)
+            | TypeDef(_)
+            | Struct { .. }
+            | Union { .. }
+            | Enum { .. }
+            | GlobalVar { .. }
+            | ExternVar { .. }
+            | FuncDecl { .. } => true,
+            Break { value: v, .. } => v.as_ref().map(|v| self.safe(v)).unwrap_or(true),
 
-            Call(callee, _, args, _) => {
+            Call {
+                callee,
+                type_args: _,
+                args,
+                ..
+            } => {
                 match callee.as_ref() {
-                    Var(name, _) => {
+                    Var { name, .. } => {
                         let bound_target = self.lookup_bound(name).cloned();
                         let pure = match &bound_target {
                             Some(t) => self.callee_pure(t),
@@ -127,13 +155,18 @@ impl<'a> VmSafety<'a> {
                 args.iter().all(|a| self.safe(a))
             }
 
-            Block(stmts, _) => {
+            Block { stmts, .. } => {
                 self.enter_scope();
                 let r = stmts.iter().all(|s| self.safe(s));
                 self.leave_scope();
                 r
             }
-            If(c, t, e, _) => {
+            If {
+                cond: c,
+                then_branch: t,
+                else_branch: e,
+                ..
+            } => {
                 if !self.safe(c) {
                     return false;
                 }
@@ -153,7 +186,9 @@ impl<'a> VmSafety<'a> {
                     None => true,
                 }
             }
-            While(c, b, _) => {
+            While {
+                cond: c, body: b, ..
+            } => {
                 if !self.safe(c) {
                     return false;
                 }
@@ -162,7 +197,12 @@ impl<'a> VmSafety<'a> {
                 self.leave_scope();
                 r
             }
-            For(var, iterable, body, _) => {
+            For {
+                var,
+                iterable,
+                body,
+                ..
+            } => {
                 if !self.safe(iterable) {
                     return false;
                 }
@@ -172,14 +212,24 @@ impl<'a> VmSafety<'a> {
                 self.leave_scope();
                 r
             }
-            Range(start, end, _) => self.safe(start) && self.safe(end),
-            Match(s, arms, d, _) => {
+            Range { start, end, .. } => self.safe(start) && self.safe(end),
+            Match {
+                target: s,
+                branches: arms,
+                default: d,
+                ..
+            } => {
                 if !self.safe(s) {
                     return false;
                 }
-                for (pat, arm) in arms {
+                for (pat, guard, arm) in arms {
                     if !self.safe(pat) {
                         return false;
+                    }
+                    if let Some(guard) = guard {
+                        if !self.safe(guard) {
+                            return false;
+                        }
                     }
                     self.enter_scope();
                     let r = self.safe(arm);
@@ -198,83 +248,180 @@ impl<'a> VmSafety<'a> {
                     None => true,
                 }
             }
-            Return(v, _) => self.safe(v),
-            Lambda(_, b, _, _) => {
+            Return { value: v, .. } => self.safe(v),
+            Lambda {
+                params: _, body: b, ..
+            } => {
                 let saved = std::mem::take(&mut self.bound);
                 self.bound = vec![HashMap::new()];
                 let r = self.safe(b);
                 self.bound = saved;
                 r
             }
-            VarDecl(name, _, v, _) | ConstDecl(name, _, v, _, _) => {
+            VarDecl {
+                name,
+                ty: _,
+                value: v,
+                ..
+            }
+            | ConstDecl {
+                name,
+                ty: _,
+                value: v,
+                ..
+            } => {
                 let r = self.safe(v);
                 if r {
                     self.bind(name, v);
                 }
                 r
             }
-            Not(v, _) | BNot(v, _) | Neg(v, _) | FNeg(v, _) => self.safe(v),
-            AddressOf(..) => false,
-            Deref(..) => false,
-            VarAssign(name, v, _)
-            | AddAssign(name, v, _)
-            | SubAssign(name, v, _)
-            | MulAssign(name, v, _)
-            | DivAssign(name, v, _)
-            | ModAssign(name, v, _)
-            | AndAssign(name, v, _)
-            | OrAssign(name, v, _)
-            | XorAssign(name, v, _)
-            | ShlAssign(name, v, _)
-            | ShrAssign(name, v, _) => {
+            Not { expr: v, .. }
+            | BNot { expr: v, .. }
+            | Neg { expr: v, .. }
+            | FNeg { expr: v, .. } => self.safe(v),
+            AddressOf { .. } => false,
+            Deref { .. } => false,
+            VarAssign { name, value: v, .. }
+            | AddAssign { name, value: v, .. }
+            | SubAssign { name, value: v, .. }
+            | MulAssign { name, value: v, .. }
+            | DivAssign { name, value: v, .. }
+            | ModAssign { name, value: v, .. }
+            | AndAssign { name, value: v, .. }
+            | OrAssign { name, value: v, .. }
+            | XorAssign { name, value: v, .. }
+            | ShlAssign { name, value: v, .. }
+            | ShrAssign { name, value: v, .. } => {
                 let r = self.safe(v);
                 if r {
                     match v.as_ref() {
-                        Var(..) | Lambda(..) => self.bind(name, v),
+                        Var { .. } | Lambda { .. } => self.bind(name, v),
                         _ => self.unbind(name),
                     }
                 }
                 r
             }
-            Inc(..) | Dec(..) => true,
-            IndexAssign(..) => false,
-            Add(l, r, _)
-            | Sub(l, r, _)
-            | Mul(l, r, _)
-            | Div(l, r, _)
-            | Mod(l, r, _)
-            | FAdd(l, r, _)
-            | FSub(l, r, _)
-            | FMul(l, r, _)
-            | FDiv(l, r, _)
-            | Eq(l, r, _)
-            | Ne(l, r, _)
-            | Lt(l, r, _)
-            | Le(l, r, _)
-            | Gt(l, r, _)
-            | Ge(l, r, _)
-            | FEq(l, r, _)
-            | FNe(l, r, _)
-            | FLt(l, r, _)
-            | FLe(l, r, _)
-            | FGt(l, r, _)
-            | FGe(l, r, _)
-            | Xor(l, r, _)
-            | LAnd(l, r, _)
-            | LOr(l, r, _)
-            | Shl(l, r, _)
-            | Shr(l, r, _)
-            | StrCat(l, r, _) => self.safe(l) && self.safe(r),
-            DerefAssign(..) => false,
-            Index(l, r, _) => self.safe(l) && self.safe(r),
-            ArrayLiteral(items, _) => items.iter().all(|it| self.safe(it)),
-            ArrayFill(_, len, _) => self.safe(len),
-            StructLiteral(_, _, fields, _) => fields.iter().all(|(_, v)| self.safe(v)),
-            UnionLiteral(_, _, fields, _) => fields.iter().all(|(_, v)| self.safe(v)),
-            MemberAccess(obj, _, _) => self.safe(obj),
-            MemberAssign(obj, _, val, _) => self.safe(obj) && self.safe(val),
-            FString(parts, _) => parts.iter().all(|p| self.safe(p)),
-            Cast(inner, _, _) => self.safe(inner),
+            Inc { .. } | Dec { .. } => true,
+            IndexAssign { .. } => false,
+            Add {
+                left: l, right: r, ..
+            }
+            | Sub {
+                left: l, right: r, ..
+            }
+            | Mul {
+                left: l, right: r, ..
+            }
+            | Div {
+                left: l, right: r, ..
+            }
+            | Mod {
+                left: l, right: r, ..
+            }
+            | FAdd {
+                left: l, right: r, ..
+            }
+            | FSub {
+                left: l, right: r, ..
+            }
+            | FMul {
+                left: l, right: r, ..
+            }
+            | FDiv {
+                left: l, right: r, ..
+            }
+            | Eq {
+                left: l, right: r, ..
+            }
+            | Ne {
+                left: l, right: r, ..
+            }
+            | Lt {
+                left: l, right: r, ..
+            }
+            | Le {
+                left: l, right: r, ..
+            }
+            | Gt {
+                left: l, right: r, ..
+            }
+            | Ge {
+                left: l, right: r, ..
+            }
+            | FEq {
+                left: l, right: r, ..
+            }
+            | FNe {
+                left: l, right: r, ..
+            }
+            | FLt {
+                left: l, right: r, ..
+            }
+            | FLe {
+                left: l, right: r, ..
+            }
+            | FGt {
+                left: l, right: r, ..
+            }
+            | FGe {
+                left: l, right: r, ..
+            }
+            | Xor {
+                left: l, right: r, ..
+            }
+            | BAnd {
+                left: l, right: r, ..
+            }
+            | BOr {
+                left: l, right: r, ..
+            }
+            | LAnd {
+                left: l, right: r, ..
+            }
+            | LOr {
+                left: l, right: r, ..
+            }
+            | Shl {
+                left: l, right: r, ..
+            }
+            | Shr {
+                left: l, right: r, ..
+            }
+            | StrCat {
+                left: l, right: r, ..
+            } => self.safe(l) && self.safe(r),
+            DerefAssign { .. } => false,
+            Index {
+                array: l, index: r, ..
+            } => self.safe(l) && self.safe(r),
+            ArrayLiteral {
+                elements: items, ..
+            } => items.iter().all(|it| self.safe(it)),
+            ArrayFill {
+                elem_type: _, len, ..
+            } => self.safe(len),
+            StructLiteral {
+                name: _,
+                type_args: _,
+                fields,
+                ..
+            } => fields.iter().all(|(_, v)| self.safe(v)),
+            UnionLiteral {
+                name: _,
+                type_args: _,
+                fields,
+                ..
+            } => fields.iter().all(|(_, v)| self.safe(v)),
+            MemberAccess { obj, .. } => self.safe(obj),
+            MemberAssign {
+                obj,
+                field: _,
+                value: val,
+                ..
+            } => self.safe(obj) && self.safe(val),
+            FString { segs: parts, .. } => parts.iter().all(|p| self.safe(p)),
+            Cast { expr: inner, .. } => self.safe(inner),
         }
     }
 }

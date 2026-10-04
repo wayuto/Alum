@@ -1,7 +1,7 @@
-$ifndef VARS_AL
+#ifndef VARS_AL
 #define VARS_AL nil
 
 extern counter: int
 extern ratio: float
 
-$endif // VARS_AL
+#endif // VARS_AL

@@ -32,38 +32,101 @@ pub(super) fn make_compound_assign(
     let bin = |l: Expr, r: Expr| {
         let sp = Span::new(0, 0);
         match op {
-            CompoundOp::Add => Expr::Add(Box::new(l), Box::new(r), sp),
-            CompoundOp::Sub => Expr::Sub(Box::new(l), Box::new(r), sp),
-            CompoundOp::Mul => Expr::Mul(Box::new(l), Box::new(r), sp),
-            CompoundOp::Div => Expr::Div(Box::new(l), Box::new(r), sp),
-            CompoundOp::Mod => Expr::Mod(Box::new(l), Box::new(r), sp),
-            CompoundOp::And => Expr::LAnd(Box::new(l), Box::new(r), sp),
-            CompoundOp::Or => Expr::LOr(Box::new(l), Box::new(r), sp),
-            CompoundOp::Xor => Expr::Xor(Box::new(l), Box::new(r), sp),
-            CompoundOp::Shl => Expr::Shl(Box::new(l), Box::new(r), sp),
-            CompoundOp::Shr => Expr::Shr(Box::new(l), Box::new(r), sp),
+            CompoundOp::Add => Expr::Add {
+                left: Box::new(l),
+                right: Box::new(r),
+                span: sp,
+            },
+            CompoundOp::Sub => Expr::Sub {
+                left: Box::new(l),
+                right: Box::new(r),
+                span: sp,
+            },
+            CompoundOp::Mul => Expr::Mul {
+                left: Box::new(l),
+                right: Box::new(r),
+                span: sp,
+            },
+            CompoundOp::Div => Expr::Div {
+                left: Box::new(l),
+                right: Box::new(r),
+                span: sp,
+            },
+            CompoundOp::Mod => Expr::Mod {
+                left: Box::new(l),
+                right: Box::new(r),
+                span: sp,
+            },
+            CompoundOp::And => Expr::LAnd {
+                left: Box::new(l),
+                right: Box::new(r),
+                span: sp,
+            },
+            CompoundOp::Or => Expr::LOr {
+                left: Box::new(l),
+                right: Box::new(r),
+                span: sp,
+            },
+            CompoundOp::Xor => Expr::Xor {
+                left: Box::new(l),
+                right: Box::new(r),
+                span: sp,
+            },
+            CompoundOp::Shl => Expr::Shl {
+                left: Box::new(l),
+                right: Box::new(r),
+                span: sp,
+            },
+            CompoundOp::Shr => Expr::Shr {
+                left: Box::new(l),
+                right: Box::new(r),
+                span: sp,
+            },
         }
     };
     match &target {
-        Expr::Index(arr, idx, _) => {
-            let t = Expr::Index(arr.clone(), idx.clone(), Span::new(0, 0));
+        Expr::Index {
+            array: arr,
+            index: idx,
+            ..
+        } => {
+            let t = Expr::Index {
+                array: arr.clone(),
+                index: idx.clone(),
+                span: Span::new(0, 0),
+            };
             let v = bin(t.clone(), rhs);
-            Ok(Expr::IndexAssign(Box::new(t), Box::new(v), span))
-        }
-        Expr::MemberAccess(obj, field, _) => {
-            let t = Expr::MemberAccess(obj.clone(), field.clone(), Span::new(0, 0));
-            let v = bin(t, rhs);
-            Ok(Expr::MemberAssign(
-                obj.clone(),
-                field.clone(),
-                Box::new(v),
+            Ok(Expr::IndexAssign {
+                target: Box::new(t),
+                value: Box::new(v),
                 span,
-            ))
+            })
         }
-        Expr::Deref(ptr, _) => {
-            let t = Expr::Deref(ptr.clone(), Span::new(0, 0));
+        Expr::MemberAccess { obj, field, .. } => {
+            let t = Expr::MemberAccess {
+                obj: obj.clone(),
+                field: field.clone(),
+                span: Span::new(0, 0),
+            };
             let v = bin(t, rhs);
-            Ok(Expr::DerefAssign(ptr.clone(), Box::new(v), span))
+            Ok(Expr::MemberAssign {
+                obj: obj.clone(),
+                field: field.clone(),
+                value: Box::new(v),
+                span,
+            })
+        }
+        Expr::Deref { expr: ptr, .. } => {
+            let t = Expr::Deref {
+                expr: ptr.clone(),
+                span: Span::new(0, 0),
+            };
+            let v = bin(t, rhs);
+            Ok(Expr::DerefAssign {
+                ptr: ptr.clone(),
+                value: Box::new(v),
+                span,
+            })
         }
         _ => Err(ParserError::UnexpectedToken {
             expected: Some(Token::IDENT(
@@ -76,7 +139,10 @@ pub(super) fn make_compound_assign(
 }
 
 pub(super) fn make_inc_dec(target: Expr, is_inc: bool, span: Span) -> Result<Expr, ParserError> {
-    let one = Expr::Int(1, Span::new(0, 0));
+    let one = Expr::Int {
+        value: 1,
+        span: Span::new(0, 0),
+    };
     make_compound_assign(
         target,
         if is_inc {
@@ -183,6 +249,9 @@ impl<'a> Parser<'a> {
                         self.synchronize();
                     }
                 }
+                Some(Ok((Token::SEMICOLON, _))) => {
+                    let _ = self.next();
+                }
                 Some(Ok(_)) => match self.expr() {
                     Ok(expr) => {
                         self.record_decl(&expr);
@@ -244,7 +313,7 @@ impl<'a> Parser<'a> {
 
     fn record_decl(&mut self, expr: &Expr) {
         match expr {
-            Expr::FuncDecl(name, attrs, ..) => {
+            Expr::FuncDecl { name, attrs, .. } => {
                 let kind = if attrs.is_external {
                     DeclKind::ExternFn
                 } else {
@@ -253,27 +322,32 @@ impl<'a> Parser<'a> {
                 let is_pub = attrs.is_pub || attrs.is_external;
                 self.own_decls.push((name.clone(), kind, is_pub));
             }
-            Expr::Struct(name, ..) => {
+            Expr::Struct { name, .. } => {
                 self.own_decls
                     .push((name.clone(), DeclKind::Struct, self.decl_pub))
             }
-            Expr::Union(name, ..) => {
+            Expr::Union { name, .. } => {
                 self.own_decls
                     .push((name.clone(), DeclKind::Union, self.decl_pub))
             }
-            Expr::Enum(name, ..) => {
+            Expr::Enum { name, .. } => {
                 self.own_decls
                     .push((name.clone(), DeclKind::Enum, self.decl_pub))
             }
-            Expr::ConstDecl(name, _, _, is_pub, _) => {
-                self.own_decls
-                    .push((name.clone(), DeclKind::Const, *is_pub))
-            }
-            Expr::GlobalVar(name, is_pub, ..) => {
+            Expr::ConstDecl {
+                name,
+                ty: _,
+                value: _,
+                is_pub,
+                ..
+            } => self
+                .own_decls
+                .push((name.clone(), DeclKind::Const, *is_pub)),
+            Expr::GlobalVar { name, is_pub, .. } => {
                 self.own_decls
                     .push((name.clone(), DeclKind::GlobalVar, *is_pub))
             }
-            Expr::ExternVar(name, ..) => {
+            Expr::ExternVar { name, .. } => {
                 self.own_decls
                     .push((name.clone(), DeclKind::ExternVar, true))
             }
@@ -379,14 +453,37 @@ impl<'a> Parser<'a> {
                 }
                 Err(e) => return Err(ParserError::LexerError(e.to_owned())),
                 _ => {
-                    exprs.push(self.expr()?);
-                    if let Some(Ok((Token::SEMICOLON, _))) = self.peek() {
+                    let e = self.expr()?;
+                    if matches!(self.peek(), Some(Ok((Token::SEMICOLON, _)))) {
                         self.next()?;
+
+                        if !matches!(
+                            e,
+                            Expr::Return { .. }
+                                | Expr::Break { .. }
+                                | Expr::Continue(_)
+                                | Expr::FuncDecl { .. }
+                                | Expr::Struct { .. }
+                                | Expr::Union { .. }
+                                | Expr::Enum { .. }
+                                | Expr::TypeDef(_)
+                                | Expr::ExternVar { .. }
+                                | Expr::GlobalVar { .. }
+                        ) {
+                            let span = e.span();
+                            exprs.push(Expr::Cast {
+                                expr: Box::new(e),
+                                ty: Type::Primitive(Primitive::Void),
+                                span,
+                            });
+                            continue;
+                        }
                     }
+                    exprs.push(e);
                 }
             }
         }
-        Ok(Expr::Block(exprs, span))
+        Ok(Expr::Block { stmts: exprs, span })
     }
 
     pub(super) fn parse_global_annotation(&mut self, kw: &str) -> Result<bool, ParserError> {

@@ -78,17 +78,21 @@ fun(extern) dup3(int, int, int): int // dup2 with flags
 
 ### String Module (`string`)
 
-Provides string (byte array) operations.
+Provides string (byte array) operations. The manipulation functions take raw
+`*void` pointers: string arguments pass implicitly, no move semantics, callers
+keep ownership. Comparison functions are `pure` and can participate in
+compile-time evaluation.
 
-```al
-fun(pure,extern) strlen(string): int             // String length
-fun(extern) strcpy(string, string): string  // Copy string
-fun(extern) strcat(string, string): string  // Concatenate strings
-fun(extern) memcpy(string, string, int): string  // Copy n bytes
-fun(extern) memset(string, int, int): string     // Fill n bytes with a value
-fun(pure,extern) bcmp(string, string, int): int       // Byte comparison
-fun(pure,extern) memcmp(string, string, int): int     // Byte comparison (n bytes)
-```
+| Signature | Description |
+| --- | --- |
+| `fun(pure) strlen(*void): int` | String length |
+| `fun(pure) strcmp(*void, *void): int` | Lexicographic comparison |
+| `fun(pure) bcmp(*void, *void, int): int` | Byte comparison |
+| `fun(pure) memcmp(*void, *void, int): int` | Byte comparison (n bytes) |
+| `fun strcpy(*void, *void): *void` | Copy string |
+| `fun strcat(*void, *void): *void` | Concatenate strings |
+| `fun memcpy(*void, *void, int): *void` | Copy n bytes |
+| `fun memset(*void, int, int): *void` | Fill n bytes with a value |
 
 ### Math Module (`math`)
 
@@ -157,6 +161,8 @@ struct Timeval {
 fun(extern) nanosleep(*Timespec, *Timespec): int    // Sleep, rem may be nil
 fun(extern) clock_gettime(int, *Timespec): int      // Realtime(0)/monotonic(1) clock
 fun(extern) gettimeofday(*Timeval, *void): int      // Wall-clock time, tz may be nil
+
+fun sleep_ms(ms: int): int  // Sleep ms milliseconds (malloc'd Timespec + nanosleep)
 ```
 
 ### File System Module (`fs`)
@@ -195,12 +201,12 @@ fun(extern) uname(*void): int                 // System info (struct utsname)
 
 Provides type conversion functions.
 
-```al
-fun(pure,extern) itoa(int): string    // Integer to string
-fun(pure,extern) atoi(string): int    // String to integer
-fun(pure,extern) atof(string): float  // String to float
-fun(pure,extern) ftoa(float): string  // Float to string
-```
+| Signature | Description |
+| --- | --- |
+| `fun itoa(int): string` | Integer to string |
+| `fun(pure) atoi(string): int` | String to integer |
+| `fun(extern) atof(string): float` | String to float (C library) |
+| `fun(extern) ftoa(float): string` | Float to string (C library) |
 
 ### Vec Container (`vec`)
 
@@ -238,7 +244,7 @@ fun main(): int {
 ```
 
 **Methods:**
-- `vec_new<T>()`: Creates a new empty `Vec<T>` (pure function)
+- `vec_new<T>()`: Creates a new empty `Vec<T>`
 - `vec.nth(&vec, index): Maybe<T>`: Access element at the given index (error-safe)
 - `vec.push(&vec, element): void`: Add an element to the end
 - `vec.pop(&vec): Maybe<T>`: Remove and return the last element
@@ -314,7 +320,12 @@ struct Maybe<T> {
     value: T
 }
 
-fun(pure) is_some<T>(m: Maybe<T>): int  // 1 if Just, 0 if Nothing
+fun(pure) is_some<T>(m: Maybe<T>): int {
+    if m.tag == Just {
+        return 1
+    }
+    return 0
+}
 ```
 
 **Usage:**
