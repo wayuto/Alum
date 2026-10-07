@@ -22,7 +22,7 @@ use crate::compiler::{
     irgen::ir::{IRConst, IRFunction, IRGlobalVar, IRType},
     parser::{Expr, Type},
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 pub struct IRGen {
     pub(super) functions: Vec<IRFunction>,
     pub(super) constants: Vec<IRConst>,
@@ -41,6 +41,11 @@ pub struct IRGen {
     pub(super) extern_vars: HashMap<String, Type>,
     pub(super) program_body: Vec<Expr>,
     pub(super) natives: Option<NativeTable>,
+    pub(super) cte_step_limit: u64,
+    pub(super) cte_force: bool,
+    pub(super) cte_error: Option<String>,
+    cte_pure_fns: Option<HashSet<String>>,
+    cte_vm_program_cache: Option<Vec<Expr>>,
 
     expr_depth: usize,
 }
@@ -73,6 +78,17 @@ impl IRGen {
             extern_vars: HashMap::new(),
             program_body: Vec::new(),
             natives,
+            cte_step_limit: crate::compiler::bytecode::DEFAULT_CTE_STEP_LIMIT,
+            cte_force: false,
+            cte_error: None,
+            cte_pure_fns: None,
+            cte_vm_program_cache: None,
         }
+    }
+
+    pub fn with_cte_options(mut self, step_limit: u64, force: bool) -> Self {
+        self.cte_step_limit = step_limit;
+        self.cte_force = force;
+        self
     }
 }

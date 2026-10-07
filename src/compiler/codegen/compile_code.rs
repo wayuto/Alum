@@ -107,15 +107,7 @@ impl AsmCodeGen {
                 self.store_global_xmm(dst, Reg::Xmm0)?;
                 Ok(())
             }
-            Op::Add
-            | Op::Sub
-            | Op::Mul
-            | Op::Div
-            | Op::LAnd
-            | Op::LOr
-            | Op::And
-            | Op::Or
-            | Op::Xor => {
+            Op::Add | Op::Sub | Op::Mul | Op::LAnd | Op::LOr | Op::And | Op::Or | Op::Xor => {
                 let dst = code.dst.as_ref().unwrap();
                 let src1 = code.src1.as_ref().unwrap();
                 let src2 = code.src2.as_ref().unwrap();
@@ -179,11 +171,7 @@ impl AsmCodeGen {
                     }
                 }
                 self.load(src1, Reg::Rax)?;
-                if matches!(code.op, Op::Div) {
-                    self.load(src2, Reg::Rbx)?;
-                    self.push_text(Asm::Cqo);
-                    self.push_text(Asm::Idiv(Reg::Rbx));
-                } else {
+                {
                     let asm_op = match code.op {
                         Op::Add => Asm::Add,
                         Op::Sub => Asm::Sub,
@@ -224,26 +212,55 @@ impl AsmCodeGen {
                 self.store_dst(dst, Reg::Rax)?;
                 self.regs.remove(&Reg::Rax);
                 self.regs.remove(&Reg::Rdx);
-                if matches!(code.op, Op::Div) {
-                    self.regs.remove(&Reg::Rbx);
-                }
                 self.regs.insert(Reg::Rax, dst.clone());
+                Ok(())
+            }
+            Op::Div => {
+                let dst = code.dst.as_ref().unwrap();
+                let src1 = code.src1.as_ref().unwrap();
+                let src2 = code.src2.as_ref().unwrap();
+                if !self.emit_divmod_by_const(dst, src1, src2, false)? {
+                    self.load(src1, Reg::Rax)?;
+                    self.load(src2, Reg::Rbx)?;
+                    self.push_text(Asm::Cqo);
+                    self.push_text(Asm::Idiv(Reg::Rbx));
+                    self.store_dst(dst, Reg::Rax)?;
+                    self.regs.remove(&Reg::Rax);
+                    self.regs.remove(&Reg::Rdx);
+                    self.regs.remove(&Reg::Rbx);
+                    self.regs.insert(Reg::Rax, dst.clone());
+                }
                 Ok(())
             }
             Op::Shl | Op::Shr => {
                 let dst = code.dst.as_ref().unwrap();
                 let src1 = code.src1.as_ref().unwrap();
                 let src2 = code.src2.as_ref().unwrap();
+                let const_shift = match src2 {
+                    IROperand::ConstIdx(idx) => match &self.program.constants[*idx] {
+                        IRConst::Int(v) if *v >= 0 && *v < 64 => Some(*v as u8),
+                        _ => None,
+                    },
+                    _ => None,
+                };
                 self.load(src1, Reg::Rax)?;
-                self.load(src2, Reg::Rcx)?;
-                if matches!(code.op, Op::Shl) {
-                    self.push_text(Asm::Shl(Reg::Rax));
+                if let Some(sh) = const_shift {
+                    if matches!(code.op, Op::Shl) {
+                        self.push_text(Asm::ShlImm(Reg::Rax, sh));
+                    } else {
+                        self.push_text(Asm::SarImm(Reg::Rax, sh));
+                    }
                 } else {
-                    self.push_text(Asm::Sar(Reg::Rax));
+                    self.load(src2, Reg::Rcx)?;
+                    if matches!(code.op, Op::Shl) {
+                        self.push_text(Asm::Shl(Reg::Rax));
+                    } else {
+                        self.push_text(Asm::Sar(Reg::Rax));
+                    }
+                    self.invalidate_cached_reg(Reg::Rcx);
                 }
                 self.store_dst(dst, Reg::Rax)?;
                 self.invalidate_cached_reg(Reg::Rax);
-                self.invalidate_cached_reg(Reg::Rcx);
                 self.regs.insert(Reg::Rax, dst.clone());
                 Ok(())
             }
@@ -251,33 +268,38 @@ impl AsmCodeGen {
                 let dst = code.dst.as_ref().unwrap();
                 let src1 = code.src1.as_ref().unwrap();
                 let src2 = code.src2.as_ref().unwrap();
-                self.load(src1, Reg::Rax)?;
-                let mut div_by_reg = Reg::Rbx;
-                match src2 {
-                    IROperand::ConstIdx(idx) => {
-                        if let IRConst::Int(v) = &self.program.constants[*idx] {
-                            if *v >= i32::MIN as i64 && *v <= i32::MAX as i64 {
-                                self.push_text(Asm::Mov(Operand::Reg(Reg::R10), Operand::Imm(*v)));
-                                div_by_reg = Reg::R10;
+                if !self.emit_divmod_by_const(dst, src1, src2, true)? {
+                    self.load(src1, Reg::Rax)?;
+                    let mut div_by_reg = Reg::Rbx;
+                    match src2 {
+                        IROperand::ConstIdx(idx) => {
+                            if let IRConst::Int(v) = &self.program.constants[*idx] {
+                                if *v >= i32::MIN as i64 && *v <= i32::MAX as i64 {
+                                    self.push_text(Asm::Mov(
+                                        Operand::Reg(Reg::R10),
+                                        Operand::Imm(*v),
+                                    ));
+                                    div_by_reg = Reg::R10;
+                                } else {
+                                    self.load(src2, Reg::Rbx)?;
+                                }
                             } else {
                                 self.load(src2, Reg::Rbx)?;
                             }
-                        } else {
+                        }
+                        _ => {
                             self.load(src2, Reg::Rbx)?;
                         }
                     }
-                    _ => {
-                        self.load(src2, Reg::Rbx)?;
-                    }
+                    self.push_text(Asm::Cqo);
+                    self.push_text(Asm::Idiv(div_by_reg));
+                    self.store_dst(dst, Reg::Rdx)?;
+                    self.invalidate_cached_reg(Reg::Rax);
+                    self.invalidate_cached_reg(Reg::Rdx);
+                    self.invalidate_cached_reg(Reg::Rbx);
+                    self.invalidate_cached_reg(Reg::R10);
+                    self.regs.insert(Reg::Rdx, dst.clone());
                 }
-                self.push_text(Asm::Cqo);
-                self.push_text(Asm::Idiv(div_by_reg));
-                self.store_dst(dst, Reg::Rdx)?;
-                self.invalidate_cached_reg(Reg::Rax);
-                self.invalidate_cached_reg(Reg::Rdx);
-                self.invalidate_cached_reg(Reg::Rbx);
-                self.invalidate_cached_reg(Reg::R10);
-                self.regs.insert(Reg::Rdx, dst.clone());
                 Ok(())
             }
             Op::FAdd | Op::FSub | Op::FMul | Op::FDiv => {
@@ -939,7 +961,105 @@ impl AsmCodeGen {
                 self.regs.insert(Reg::Rax, dst.clone());
                 Ok(())
             }
-            Op::Return(_) | Op::Label(_) => unreachable!("handled by compile_fn"),
+            Op::TailCall | Op::Return(_) | Op::Label(_) => unreachable!("handled by compile_fn"),
         }
     }
+
+    pub(super) fn emit_divmod_by_const(
+        &mut self,
+        dst: &IROperand,
+        src1: &IROperand,
+        src2: &IROperand,
+        is_mod: bool,
+    ) -> Result<bool, CodeGenError> {
+        let IROperand::ConstIdx(idx) = src2 else {
+            return Ok(false);
+        };
+        let IRConst::Int(d) = &self.program.constants[*idx] else {
+            return Ok(false);
+        };
+        let d = *d;
+        let ad = d.abs();
+        if ad < 2 {
+            return Ok(false);
+        }
+
+        if ad & (ad - 1) == 0 {
+            let k = ad.trailing_zeros();
+            self.load(src1, Reg::Rax)?;
+            self.push_text(Asm::Mov(Operand::Reg(Reg::Rbx), Operand::Reg(Reg::Rax)));
+            self.push_text(Asm::Mov(Operand::Reg(Reg::Rcx), Operand::Reg(Reg::Rax)));
+            self.push_text(Asm::SarImm(Reg::Rcx, 63));
+            self.push_text(Asm::ShrImm(Reg::Rcx, (64 - k) as u8));
+            self.push_text(Asm::Add(Operand::Reg(Reg::Rax), Operand::Reg(Reg::Rcx)));
+            self.push_text(Asm::SarImm(Reg::Rax, k as u8));
+        } else {
+            let Some((m, s, neg)) = magic_signed(ad) else {
+                return Ok(false);
+            };
+            self.load(src1, Reg::Rax)?;
+            self.push_text(Asm::Mov(Operand::Reg(Reg::Rbx), Operand::Reg(Reg::Rax)));
+            self.push_text(Asm::Mov(Operand::Reg(Reg::R10), Operand::Imm(m)));
+            self.push_text(Asm::ImulOne(Reg::R10));
+            self.push_text(Asm::Mov(Operand::Reg(Reg::Rax), Operand::Reg(Reg::Rdx)));
+            if neg {
+                self.push_text(Asm::Add(Operand::Reg(Reg::Rax), Operand::Reg(Reg::Rbx)));
+            }
+            if s > 0 {
+                self.push_text(Asm::SarImm(Reg::Rax, s as u8));
+            }
+            self.push_text(Asm::Mov(Operand::Reg(Reg::Rcx), Operand::Reg(Reg::Rbx)));
+            self.push_text(Asm::SarImm(Reg::Rcx, 63));
+            self.push_text(Asm::Sub(Operand::Reg(Reg::Rax), Operand::Reg(Reg::Rcx)));
+        }
+        if is_mod {
+            if ad <= i32::MAX as i64 {
+                self.push_text(Asm::Imul(Operand::Reg(Reg::Rax), Operand::Imm(ad)));
+            } else {
+                self.push_text(Asm::Mov(Operand::Reg(Reg::R10), Operand::Imm(ad)));
+                self.push_text(Asm::Imul(Operand::Reg(Reg::Rax), Operand::Reg(Reg::R10)));
+                self.invalidate_cached_reg(Reg::R10);
+            }
+            self.push_text(Asm::Sub(Operand::Reg(Reg::Rbx), Operand::Reg(Reg::Rax)));
+            self.invalidate_cached_reg(Reg::Rax);
+            self.invalidate_cached_reg(Reg::Rcx);
+            self.invalidate_cached_reg(Reg::Rdx);
+            self.store_dst(dst, Reg::Rbx)?;
+            self.regs.insert(Reg::Rbx, dst.clone());
+        } else {
+            if d < 0 {
+                self.push_text(Asm::Neg(Reg::Rax));
+            }
+            self.invalidate_cached_reg(Reg::Rbx);
+            self.invalidate_cached_reg(Reg::Rcx);
+            self.invalidate_cached_reg(Reg::Rdx);
+            self.invalidate_cached_reg(Reg::R10);
+            self.store_dst(dst, Reg::Rax)?;
+            self.regs.insert(Reg::Rax, dst.clone());
+        }
+        Ok(true)
+    }
+}
+
+fn magic_signed(d: i64) -> Option<(i64, u32, bool)> {
+    debug_assert!(d >= 2 && (d & (d - 1)) != 0);
+    for s in 0..=62u32 {
+        let p = 64u32 + s;
+        let m128 = ((1u128 << p) + d as u128 - 1) / d as u128;
+        if m128 > u64::MAX as u128 {
+            return None;
+        }
+        let e = m128 * d as u128 - (1u128 << p);
+        if e == 0 || e > (1u128 << (s + 1)) - 1 {
+            continue;
+        }
+        let neg = m128 >= (1u128 << 63);
+        let m = if neg {
+            m128.wrapping_sub(1u128 << 64) as i64
+        } else {
+            m128 as i64
+        };
+        return Some((m, s, neg));
+    }
+    None
 }

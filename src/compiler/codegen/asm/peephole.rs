@@ -22,6 +22,7 @@ pub fn optimize(asms: &mut Vec<Asm>) {
         changed |= pass_redundant_mov(asms);
         changed |= pass_mov_chain(asms);
         changed |= pass_dead_mov(asms);
+        changed |= pass_store_load_forward(asms);
         changed |= pass_cmp_zero_to_test(asms);
         changed |= pass_const_test_jcc(asms);
         changed |= pass_add_sub_xor_zero(asms);
@@ -101,6 +102,8 @@ fn operand_reads(asm: &Asm, reg: Reg) -> bool {
         Asm::Push(r) | Asm::Neg(r) | Asm::Inc(r) | Asm::Dec(r) | Asm::Not(r) => *r == reg,
         Asm::Idiv(r) => *r == reg || reg == Reg::Rax || reg == Reg::Rdx,
         Asm::Shl(r) | Asm::Sar(r) => *r == reg || reg == Reg::Rcx,
+        Asm::ShlImm(r, _) | Asm::SarImm(r, _) | Asm::ShrImm(r, _) => *r == reg,
+        Asm::ImulOne(r) => *r == reg || reg == Reg::Rax,
         Asm::Call(Operand::Reg(r)) => *r == reg,
         Asm::Cqo | Asm::Cdqe => reg == Reg::Rax,
         Asm::Ret => reg == Reg::Rax,
@@ -144,6 +147,8 @@ fn operand_writes(asm: &Asm, reg: Reg) -> bool {
         Asm::Cqo => reg == Reg::Rdx,
         Asm::Cdqe => reg == Reg::Rax,
         Asm::Idiv(_) => reg == Reg::Rax || reg == Reg::Rdx,
+        Asm::ShlImm(r, _) | Asm::SarImm(r, _) | Asm::ShrImm(r, _) => *r == reg,
+        Asm::ImulOne(r) => *r == reg || reg == Reg::Rax || reg == Reg::Rdx,
         _ => false,
     }
 }
@@ -247,6 +252,55 @@ fn pass_dead_mov(asms: &mut Vec<Asm>) -> bool {
                 changed = true;
                 continue;
             }
+        }
+        i += 1;
+    }
+    changed
+}
+
+fn pass_store_load_forward(asms: &mut Vec<Asm>) -> bool {
+    let mut changed = false;
+    let mut i = 0;
+    while i + 1 < asms.len() {
+        let fwd = match (&asms[i], &asms[i + 1]) {
+            (Asm::Mov(Operand::Mem(m), Operand::Reg(r)), Asm::Mov(dst, Operand::Mem(m2))) => (m
+                == m2)
+                .then(|| match dst {
+                    Operand::Reg(r2) if r2 == r => Some(None),
+                    Operand::Reg(_) => Some(Some(Asm::Mov(dst.clone(), Operand::Reg(*r)))),
+                    _ => None,
+                })
+                .flatten(),
+            (Asm::Mov(Operand::Mem(m), Operand::Imm(v)), Asm::Mov(dst, Operand::Mem(m2))) => (m
+                == m2)
+                .then(|| match dst {
+                    Operand::Reg(_) => Some(Some(Asm::Mov(dst.clone(), Operand::Imm(*v)))),
+                    _ => None,
+                })
+                .flatten(),
+            (Asm::Movsd(Operand::Mem(m), Operand::Reg(r)), Asm::Movsd(dst, Operand::Mem(m2))) => (m
+                == m2)
+                .then(|| match dst {
+                    Operand::Reg(r2) if r2 == r => Some(None),
+                    Operand::Reg(_) => Some(Some(Asm::Movsd(dst.clone(), Operand::Reg(*r)))),
+                    _ => None,
+                })
+                .flatten(),
+            _ => None,
+        };
+        match fwd {
+            Some(replacement) => {
+                match replacement {
+                    Some(new_inst) => asms[i + 1] = new_inst,
+                    None => {
+                        asms.remove(i + 1);
+                        changed = true;
+                        continue;
+                    }
+                }
+                changed = true;
+            }
+            None => {}
         }
         i += 1;
     }

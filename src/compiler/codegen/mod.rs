@@ -23,6 +23,8 @@ pub struct DumpOptions {
 pub struct CodeGen {
     ast: Program,
     cte_libs: Vec<String>,
+    cte_step_limit: u64,
+    cte_force: bool,
     dumps: DumpOptions,
 }
 
@@ -31,8 +33,16 @@ impl CodeGen {
         Self {
             ast,
             cte_libs,
+            cte_step_limit: crate::compiler::bytecode::DEFAULT_CTE_STEP_LIMIT,
+            cte_force: false,
             dumps: DumpOptions::default(),
         }
+    }
+
+    pub fn with_cte_options(mut self, step_limit: u64, force: bool) -> Self {
+        self.cte_step_limit = step_limit;
+        self.cte_force = force;
+        self
     }
 
     pub fn with_dumps(mut self, dumps: DumpOptions) -> Self {
@@ -41,7 +51,8 @@ impl CodeGen {
     }
 
     pub fn generate(self) -> Result<Vec<u8>, CodeGenError> {
-        let mut ir_gen = IRGen::new(&self.cte_libs);
+        let mut ir_gen =
+            IRGen::new(&self.cte_libs).with_cte_options(self.cte_step_limit, self.cte_force);
         let mut ir_program = ir_gen.compile(self.ast)?;
 
         if std::env::var("ALC_NO_OPT").is_err() {

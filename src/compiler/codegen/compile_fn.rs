@@ -349,7 +349,8 @@ impl AsmCodeGen {
                 continue;
             }
 
-            let needs_wrap = regalloc::clobbers_all_volatile(code, &self.program.constants);
+            let needs_wrap = regalloc::clobbers_all_volatile(code, &self.program.constants)
+                && !matches!(code.op, Op::TailCall);
             if needs_wrap {
                 if let Some((regs, pad)) = self.call_saves.get(&i).cloned() {
                     if pad {
@@ -370,6 +371,39 @@ impl AsmCodeGen {
                         self.push_text(Asm::Movsd(Operand::Reg(*r), m_rbp(*off)));
                     }
                     self.invalidate_cached_reg(Reg::Rax);
+                }
+                Op::TailCall => {
+                    let name = match &code.src1 {
+                        Some(IROperand::Function(name)) => name.clone(),
+                        other => {
+                            return Err(CodeGenError::InvalidOperand {
+                                message: format!("tail call requires a function target: {other:?}"),
+                            });
+                        }
+                    };
+                    if self.curr_flt_reg > 0 {
+                        self.push_text(Asm::Mov(
+                            Operand::Reg(Reg::Rax),
+                            Operand::Imm(self.curr_flt_reg as i64),
+                        ));
+                    } else {
+                        self.push_text(Asm::Xor(Operand::Reg(Reg::Rax), Operand::Reg(Reg::Rax)));
+                    }
+                    self.curr_flt_reg = 0;
+                    if !frame_less {
+                        for (reg, off) in &xmm_saved {
+                            self.push_text(Asm::Movsd(Operand::Reg(*reg), m_rbp(*off)));
+                        }
+                        self.push_text(Asm::Mov(Operand::Reg(Reg::Rsp), Operand::Reg(Reg::Rbp)));
+                        let used_regs_rev: Vec<Reg> =
+                            self.used_callee_saved.iter().rev().copied().collect();
+                        for reg in &used_regs_rev {
+                            self.push_text(Asm::Pop(*reg));
+                        }
+                        self.push_text(Asm::Pop(Reg::Rbp));
+                    }
+                    self.push_text(Asm::Jmp(name.clone()));
+                    self.invalidate_volatile_registers();
                 }
                 Op::Return(reg_name) => {
                     if let Some(ref val) = code.src1 {

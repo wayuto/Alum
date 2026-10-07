@@ -234,6 +234,22 @@ impl Assembler {
                 self.emit_rex(section, true, false, false, reg.rex_b());
                 self.emit_slice(section, &[0xd3, self.modrm(3, 7, reg.reg_id() & 7)]);
             }
+            ShlImm(reg, imm) => {
+                self.emit_rex(section, true, false, false, reg.rex_b());
+                self.emit_slice(section, &[0xc1, self.modrm(3, 4, reg.reg_id() & 7), *imm]);
+            }
+            SarImm(reg, imm) => {
+                self.emit_rex(section, true, false, false, reg.rex_b());
+                self.emit_slice(section, &[0xc1, self.modrm(3, 7, reg.reg_id() & 7), *imm]);
+            }
+            ShrImm(reg, imm) => {
+                self.emit_rex(section, true, false, false, reg.rex_b());
+                self.emit_slice(section, &[0xc1, self.modrm(3, 5, reg.reg_id() & 7), *imm]);
+            }
+            ImulOne(reg) => {
+                self.emit_rex(section, true, false, false, reg.rex_b());
+                self.emit_slice(section, &[0xf7, self.modrm(3, 5, reg.reg_id() & 7)]);
+            }
             Inc(reg) => {
                 self.emit_rex(section, true, false, false, reg.rex_b());
                 self.emit_slice(section, &[0xff, self.modrm(3, 0, reg.reg_id() & 7)]);

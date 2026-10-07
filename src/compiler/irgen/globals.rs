@@ -24,9 +24,12 @@ impl IRGen {
                         continue;
                     }
                     let value = match init {
-                        Some(init) => match self.eval_const(init, None) {
+                        Some(init) => match self.eval_const(init, None, false) {
                             Some((cv, _)) => Some(cv),
                             None => {
+                                if let Some(err) = self.cte_error.take() {
+                                    return Err(CodeGenError::TypeError { message: err });
+                                }
                                 return Err(CodeGenError::TypeError {
                                     message: format!(
                                         "initializer of global variable '{}' is not a compile-time constant",
@@ -116,7 +119,7 @@ impl IRGen {
             progressed = false;
             let mut next = Vec::new();
             for (name, value) in pending {
-                if let Some(cv) = self.eval_const(&value, None) {
+                if let Some(cv) = self.eval_const(&value, None, false) {
                     self.globals.insert(name, cv);
                     progressed = true;
                 } else {
@@ -126,6 +129,9 @@ impl IRGen {
             pending = next;
         }
         for (name, _) in pending {
+            if let Some(err) = self.cte_error.take() {
+                return Err(CodeGenError::TypeError { message: err });
+            }
             return Err(CodeGenError::TypeError {
                 message: format!(
                     "initializer of constant '{}' is not a compile-time constant",

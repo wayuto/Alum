@@ -4,6 +4,7 @@ use crate::compiler::{
     parser::{Expr, Primitive, Program, Type},
 };
 use std::collections::HashMap;
+use std::rc::Rc;
 
 #[derive(Debug, Clone)]
 pub struct Bytecode {
@@ -493,7 +494,7 @@ impl Compiler {
                 self.emit(Op::LOADCONST, &[idx]);
             }
             Expr::String { value: s, .. } => {
-                let idx = self.add_const(Value::Str(s.clone()));
+                let idx = self.add_const(Value::Str(Rc::new(s.clone())));
                 self.emit(Op::LOADCONST, &[idx]);
             }
             Expr::Nil(_) => {
@@ -1502,8 +1503,8 @@ fn array_fill_zero(ty: &Type) -> Value {
     match ty {
         Type::Primitive(Primitive::Float) => Value::Float(0.0),
         Type::Primitive(Primitive::Boolean) => Value::Bool(false),
-        Type::Primitive(Primitive::String) => Value::Str(String::new()),
-        Type::Array(_) => Value::Array(Vec::new()),
+        Type::Primitive(Primitive::String) => Value::Str(Rc::new(String::new())),
+        Type::Array(_) => Value::Array(Rc::new(Vec::new())),
         _ => Value::Int(0),
     }
 }

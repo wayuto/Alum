@@ -49,11 +49,16 @@ impl IRGen {
         } else if allow_move && Self::array_has_string_elems(&value) {
             self.compile_expr(value, ctx)?
         } else {
-            match self.eval_const(&value, Some(&*ctx)) {
+            match self.eval_const(&value, Some(&*ctx), false) {
                 Some((cv, IRType::Int | IRType::Float | IRType::Bool | IRType::Array)) => {
                     Operand::ConstIdx(self.get_const_index(cv))
                 }
-                _ => self.compile_expr(value, ctx)?,
+                _ => {
+                    if let Some(err) = self.cte_error.take() {
+                        return Err(CodeGenError::TypeError { message: err });
+                    }
+                    self.compile_expr(value, ctx)?
+                }
             }
         };
         if let Some(copy_ty) = copy_info {
@@ -257,6 +262,16 @@ impl IRGen {
                 message: format!("expression nesting exceeds {} levels", MAX_EXPR_DEPTH),
             });
         }
+
+        if super::const_eval::expr_probeable(&expr) {
+            if let Some((cv, _)) = self.eval_const(&expr, Some(ctx), true) {
+                if !matches!(cv, IRConst::Array(_)) {
+                    let idx = self.get_const_index(cv);
+                    return Ok(Operand::ConstIdx(idx));
+                }
+            }
+        }
+
         let span = expr.span();
         self.expr_depth += 1;
         let result = self

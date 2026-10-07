@@ -1,4 +1,4 @@
-use super::ir::{IRConst, IRProgram, Instruction, Op, Operand};
+use super::ir::{IRConst, IRFunction, IRProgram, IRType, Instruction, Op, Operand};
 use ordered_float::OrderedFloat;
 use std::collections::{HashMap, HashSet};
 
@@ -6,6 +6,10 @@ pub(crate) fn optimize(program: &mut IRProgram) {
     if std::env::var_os("ALC_NO_OPT").is_some() {
         return;
     }
+    if std::env::var_os("ALC_NO_INLINE").is_none() {
+        pass_inline(program);
+    }
+    pass_tailcall(program);
     let mut pool = ConstPool::new(&program.constants);
     for func in &mut program.functions {
         if func.is_external || func.instructions.is_empty() {
@@ -40,6 +44,7 @@ fn optimize_fn(insts: &mut Vec<Instruction>, constants: &mut Vec<IRConst>, pool:
         changed |= pass_algebraic(insts, constants, pool);
         changed |= pass_branch_const(insts, constants);
         changed |= pass_copy_prop(insts);
+        changed |= pass_load_forward(insts);
         changed |= pass_dead_code(insts, constants);
         changed |= pass_unreachable(insts);
         changed |= pass_jump_to_next(insts);
@@ -500,7 +505,7 @@ fn pass_unreachable(insts: &mut Vec<Instruction>) -> bool {
     let mut changed = false;
     let mut i = 0;
     while i < insts.len() {
-        if matches!(insts[i].op, Op::Jump | Op::Return(_)) {
+        if matches!(insts[i].op, Op::Jump | Op::TailCall | Op::Return(_)) {
             let mut j = i + 1;
             while j < insts.len() && !matches!(insts[j].op, Op::Label(_)) {
                 j += 1;
@@ -762,4 +767,401 @@ fn hoist_loop(insts: &mut Vec<Instruction>, header: usize, back: usize) -> bool 
         insts.insert(header, inst);
     }
     true
+}
+
+fn pass_load_forward(insts: &mut [Instruction]) -> bool {
+    let mut last_load: HashMap<String, Operand> = HashMap::new();
+    let mut changed = false;
+    for inst in insts.iter_mut() {
+        match &inst.op {
+            Op::Load | Op::FLoad => {
+                let is_float = matches!(inst.op, Op::FLoad);
+
+                let src_key = match &inst.src1 {
+                    Some(Operand::Var(v)) => Some(v.clone()),
+                    Some(Operand::Temp(id, _)) => Some(format!("_tmp_{}", id)),
+                    _ => None,
+                };
+                if let (Some(v), Some(dst)) = (src_key, inst.dst.clone()) {
+                    if let Some(prev) = last_load.get(&v).cloned() {
+                        inst.op = if is_float { Op::FMove } else { Op::Move };
+                        inst.src1 = Some(prev);
+                        inst.src2 = None;
+                        changed = true;
+                    }
+                    last_load.insert(v, dst);
+                } else {
+                    last_load.clear();
+                }
+                continue;
+            }
+            Op::Label(_)
+            | Op::Jump
+            | Op::TailCall
+            | Op::Return(_)
+            | Op::Call
+            | Op::Malloc
+            | Op::Free
+            | Op::StrCat
+            | Op::StrByte
+            | Op::StoreAt
+            | Op::FStoreAt
+            | Op::ByteAssign
+            | Op::ArrayAssign
+            | Op::Lea
+            | Op::Range(_) => {
+                last_load.clear();
+            }
+            _ => {}
+        }
+        match &inst.dst {
+            Some(Operand::Var(v)) => {
+                let is_def = matches!(
+                    inst.op,
+                    Op::Store
+                        | Op::FStore
+                        | Op::Move
+                        | Op::FMove
+                        | Op::Load
+                        | Op::FLoad
+                        | Op::GlobLoad
+                        | Op::FGlobLoad
+                );
+                if is_def {
+                    last_load.remove(v);
+                } else {
+                    last_load.clear();
+                }
+            }
+            Some(Operand::Temp(id, _)) => {
+                let key = format!("_tmp_{}", id);
+                if last_load.contains_key(&key) && !matches!(inst.op, Op::Load | Op::FLoad) {
+                    last_load.remove(&key);
+                }
+            }
+            _ => {}
+        }
+    }
+    changed
+}
+
+const MAX_INLINE_INSTS: usize = 30;
+const MAX_INLINE_ROUNDS: usize = 8;
+
+type InlineBody = (Vec<Instruction>, Vec<(Operand, IRType)>, IRType);
+
+fn inlineable(f: &IRFunction) -> bool {
+    if f.is_external || f.instructions.is_empty() || f.instructions.len() > MAX_INLINE_INSTS {
+        return false;
+    }
+    f.instructions.iter().all(|inst| {
+        !matches!(
+            inst.op,
+            Op::Call
+                | Op::TailCall
+                | Op::Arg(_)
+                | Op::FArg(_)
+                | Op::Malloc
+                | Op::Free
+                | Op::StrCat
+                | Op::StrByte
+                | Op::StrEq
+                | Op::StrNe
+                | Op::StrLt
+                | Op::StrLe
+                | Op::StrGt
+                | Op::StrGe
+                | Op::Range(_)
+        )
+    })
+}
+
+fn pass_inline(program: &mut IRProgram) {
+    for _round in 0..MAX_INLINE_ROUNDS {
+        let candidates: HashMap<String, InlineBody> = program
+            .functions
+            .iter()
+            .filter(|f| inlineable(f))
+            .map(|f| {
+                (
+                    f.name.clone(),
+                    (f.instructions.clone(), f.params.clone(), f.ret_type.clone()),
+                )
+            })
+            .collect();
+        if candidates.is_empty() {
+            return;
+        }
+        let mut changed = false;
+        let mut site: usize = 0;
+        for caller in program.functions.iter_mut() {
+            if caller.is_external {
+                continue;
+            }
+            let mut temp_base = max_temp_id(&caller.instructions);
+            if inline_into(
+                &mut caller.instructions,
+                &candidates,
+                &mut temp_base,
+                &mut site,
+            ) {
+                changed = true;
+            }
+        }
+        if !changed {
+            return;
+        }
+    }
+}
+
+fn max_temp_id(insts: &[Instruction]) -> usize {
+    insts
+        .iter()
+        .flat_map(|i| [&i.dst, &i.src1, &i.src2].into_iter().flatten())
+        .map(|op| match op {
+            Operand::Temp(id, _) => *id,
+            _ => 0,
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+fn inline_into(
+    insts: &mut Vec<Instruction>,
+    candidates: &HashMap<String, InlineBody>,
+    temp_base: &mut usize,
+    site_counter: &mut usize,
+) -> bool {
+    let mut changed = false;
+    let mut i = 0;
+    while i < insts.len() {
+        if !matches!(insts[i].op, Op::Call) {
+            i += 1;
+            continue;
+        }
+        let callee_name = match &insts[i].src1 {
+            Some(Operand::Function(name)) => name.clone(),
+            _ => {
+                i += 1;
+                continue;
+            }
+        };
+        let Some((body, params, ret_ty)) = candidates.get(&callee_name) else {
+            i += 1;
+            continue;
+        };
+        let mut start = i;
+        while start > 0 && matches!(insts[start - 1].op, Op::Arg(_) | Op::FArg(_)) {
+            start -= 1;
+        }
+        let call_dst = insts[i].dst.clone();
+        if let Some(consumed) = try_inline_site(
+            insts,
+            start,
+            i,
+            body,
+            params,
+            ret_ty,
+            call_dst,
+            *temp_base,
+            *site_counter,
+        ) {
+            *temp_base = consumed;
+            *site_counter += 1;
+            changed = true;
+            continue;
+        }
+        i += 1;
+    }
+    changed
+}
+
+#[allow(clippy::too_many_arguments)]
+fn try_inline_site(
+    insts: &mut Vec<Instruction>,
+    arg_start: usize,
+    call_idx: usize,
+    body: &[Instruction],
+    params: &[(Operand, IRType)],
+    ret_ty: &IRType,
+    call_dst: Option<Operand>,
+    temp_base: usize,
+    site: usize,
+) -> Option<usize> {
+    let arg_insts = &insts[arg_start..call_idx];
+    if arg_insts.len() != params.len() {
+        return None;
+    }
+    if call_dst.is_some() {
+        if matches!(ret_ty, IRType::Void)
+            || !matches!(body.last().map(|b| &b.op), Some(Op::Return(_)))
+        {
+            return None;
+        }
+    }
+
+    let mut values: Vec<Option<(Operand, bool)>> = vec![None; params.len()];
+    let (mut int_idx, mut flt_idx) = (0usize, 0usize);
+    for (k, (_, ty)) in params.iter().enumerate() {
+        let is_float = matches!(ty, IRType::Float);
+        let want = if is_float { flt_idx } else { int_idx };
+        values[k] = arg_insts.iter().find_map(|a| match (&a.op, &a.src1) {
+            (Op::Arg(n), Some(v)) if !is_float && *n == want => Some((v.clone(), false)),
+            (Op::FArg(n), Some(v)) if is_float && *n == want => Some((v.clone(), true)),
+            _ => None,
+        });
+        if values[k].is_none() {
+            return None;
+        }
+        if is_float {
+            flt_idx += 1;
+        } else {
+            int_idx += 1;
+        }
+    }
+    for b in body {
+        if matches!(b.op, Op::Return(_)) && b.src1.is_none() && call_dst.is_some() {
+            return None;
+        }
+    }
+
+    let param_temp = |k: usize| Operand::Temp(temp_base + k, params[k].1.clone());
+    let body_shift = temp_base + params.len();
+    let next_base = body_shift + max_temp_id(body) + 1;
+    let var_suffix = format!(".inl{}", site);
+    let label_suffix = format!(".inl{}", site);
+    let exit_label = format!(".inl{}exit", site);
+
+    let rename = |op: &Operand| -> Operand {
+        match op {
+            Operand::Temp(id, ty) => Operand::Temp(body_shift + id, ty.clone()),
+            Operand::Var(name) => match params
+                .iter()
+                .position(|(p, _)| matches!(p, Operand::Var(pn) if pn == name))
+            {
+                Some(k) => param_temp(k),
+                None => Operand::Var(format!("{}{}", name, var_suffix)),
+            },
+            Operand::Label(l) => Operand::Label(format!("{}{}", l, label_suffix)),
+            other => other.clone(),
+        }
+    };
+
+    let mut out: Vec<Instruction> = Vec::new();
+    for (k, val) in values.into_iter().enumerate() {
+        let (val, _) = val.unwrap();
+        out.push(Instruction {
+            op: if params[k].1 == IRType::Float {
+                Op::FMove
+            } else {
+                Op::Move
+            },
+            dst: Some(param_temp(k)),
+            src1: Some(val),
+            src2: None,
+        });
+    }
+    let mut has_exit = false;
+    for b in body {
+        if matches!(b.op, Op::Return(_)) {
+            if let (Some(dst), Some(val)) = (&call_dst, &b.src1) {
+                out.push(Instruction {
+                    op: if matches!(ret_ty, IRType::Float) {
+                        Op::FMove
+                    } else {
+                        Op::Move
+                    },
+                    dst: Some(dst.clone()),
+                    src1: Some(rename(val)),
+                    src2: None,
+                });
+            }
+            out.push(Instruction {
+                op: Op::Jump,
+                dst: None,
+                src1: Some(Operand::Label(exit_label.clone())),
+                src2: None,
+            });
+            has_exit = true;
+        } else {
+            out.push(Instruction {
+                op: match &b.op {
+                    Op::Label(l) => Op::Label(format!("{}{}", l, label_suffix)),
+                    other => other.clone(),
+                },
+                dst: b.dst.as_ref().map(&rename),
+                src1: b.src1.as_ref().map(&rename),
+                src2: b.src2.as_ref().map(&rename),
+            });
+        }
+    }
+    if has_exit {
+        out.push(Instruction {
+            op: Op::Label(exit_label),
+            dst: None,
+            src1: None,
+            src2: None,
+        });
+    }
+
+    let tail = insts.split_off(call_idx + 1);
+    insts.truncate(arg_start);
+    insts.extend(out);
+    insts.extend(tail);
+    Some(next_base)
+}
+
+fn pass_tailcall(program: &mut IRProgram) -> bool {
+    let mut changed = false;
+    for func in program.functions.iter_mut() {
+        if func.is_external {
+            continue;
+        }
+        let mut ints = 0usize;
+        let mut flts = 0usize;
+        let mut has_stack_args = false;
+        for (_, ty) in &func.params {
+            if matches!(ty, IRType::Float) {
+                flts += 1;
+                if flts > 8 {
+                    has_stack_args = true;
+                }
+            } else {
+                ints += 1;
+                if ints > 6 {
+                    has_stack_args = true;
+                }
+            }
+        }
+        if has_stack_args {
+            continue;
+        }
+        let name = func.name.clone();
+        let mut i = 0;
+        while i + 1 < func.instructions.len() {
+            if !matches!(func.instructions[i].op, Op::Call) {
+                i += 1;
+                continue;
+            }
+            let is_self =
+                matches!(&func.instructions[i].src1, Some(Operand::Function(f)) if *f == name);
+            let dst = func.instructions[i].dst.clone();
+            let ret = &func.instructions[i + 1];
+            let matches_pattern = is_self
+                && matches!(ret.op, Op::Return(_))
+                && match (&dst, &ret.src1) {
+                    (Some(d), Some(v)) => d == v,
+                    (None, None) => true,
+                    _ => false,
+                };
+            if matches_pattern {
+                func.instructions[i].op = Op::TailCall;
+                func.instructions.remove(i + 1);
+                changed = true;
+                continue;
+            }
+            i += 1;
+        }
+    }
+    changed
 }

@@ -93,6 +93,7 @@ pub enum Op {
     GlobStore,
     FGlobStore,
     Call,
+    TailCall,
     Arg(usize),
     FArg(usize),
     Return(String),

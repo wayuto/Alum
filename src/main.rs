@@ -70,6 +70,9 @@ fn run() -> Result<(), Box<dyn Error>> {
             cli.include_paths,
             cli.verbose,
             cli.cte_lib.clone(),
+            cli.cte_steps
+                .unwrap_or(alc::compiler::bytecode::DEFAULT_CTE_STEP_LIMIT),
+            cli.cte_force,
             alc::compiler::codegen::DumpOptions {
                 ir: cli.emit_ir,
                 asm: cli.emit_asm,
@@ -119,6 +122,9 @@ fn run() -> Result<(), Box<dyn Error>> {
             cli.preprocess_only,
             cli.verbose,
             cli.cte_lib.clone(),
+            cli.cte_steps
+                .unwrap_or(alc::compiler::bytecode::DEFAULT_CTE_STEP_LIMIT),
+            cli.cte_force,
             dumps,
         )?;
 

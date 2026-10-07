@@ -8,12 +8,14 @@ use crate::compiler::{
 };
 use ordered_float::OrderedFloat;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::rc::Rc;
 
 impl IRGen {
     pub(super) fn eval_const(
         &mut self,
         expr: &Expr,
         ctx: Option<&Context>,
+        quiet: bool,
     ) -> Option<(IRConst, IRType)> {
         match expr {
             Expr::Int { value: n, .. } => Some((IRConst::Int(*n as i64), IRType::Int)),
@@ -29,13 +31,13 @@ impl IRGen {
                 }
                 self.globals.get(name).cloned()
             }
-            Expr::Neg { expr: e, .. } => match self.eval_const(e, ctx)? {
+            Expr::Neg { expr: e, .. } => match self.eval_const(e, ctx, quiet)? {
                 (IRConst::Int(v), IRType::Int) => {
                     Some((IRConst::Int(v.wrapping_neg()), IRType::Int))
                 }
                 _ => None,
             },
-            Expr::FNeg { expr: e, .. } => match self.eval_const(e, ctx)? {
+            Expr::FNeg { expr: e, .. } => match self.eval_const(e, ctx, quiet)? {
                 (IRConst::Float(v), IRType::Float) => Some((IRConst::Float(-v), IRType::Float)),
                 _ => None,
             },
@@ -66,8 +68,8 @@ impl IRGen {
             | Expr::FDiv {
                 left: l, right: r, ..
             } => {
-                let (lc, lt) = self.eval_const(l, ctx)?;
-                let (rc, rt) = self.eval_const(r, ctx)?;
+                let (lc, lt) = self.eval_const(l, ctx, quiet)?;
+                let (rc, rt) = self.eval_const(r, ctx, quiet)?;
                 if matches!(lt, IRType::Float) || matches!(rt, IRType::Float) {
                     let (a, b) = match (lc, rc) {
                         (IRConst::Float(a), IRConst::Float(b)) => (a.into_inner(), b.into_inner()),
@@ -107,15 +109,111 @@ impl IRGen {
                     Some((IRConst::Int(v), IRType::Int))
                 }
             }
-            _ => self.eval_const_vm(expr),
+            _ => self.eval_const_vm(expr, ctx, quiet),
         }
     }
 
-    pub(super) fn eval_const_vm(&mut self, expr: &Expr) -> Option<(IRConst, IRType)> {
-        if self.expr_has_var(expr) {
+    pub(super) fn eval_const_vm(
+        &mut self,
+        expr: &Expr,
+        ctx: Option<&Context>,
+        quiet: bool,
+    ) -> Option<(IRConst, IRType)> {
+        if self.expr_has_var(expr, ctx) {
             return None;
         }
 
+        if matches!(expr, Expr::StructLiteral { .. } | Expr::UnionLiteral { .. }) {
+            return None;
+        }
+        self.ensure_cte_analysis();
+        let mut safety = VmSafety::new(&self.program_body, self.cte_pure_fns.as_ref().unwrap());
+        if !safety.safe(expr) {
+            return None;
+        }
+
+        let mut body = self.cte_vm_program();
+        body.push(expr.clone());
+        let program = Program { body };
+
+        let natives = self
+            .natives
+            .as_ref()
+            .map(|t| t.entries.clone())
+            .unwrap_or_default();
+
+        let prev_hook = std::panic::take_hook();
+        std::panic::set_hook(std::boxed::Box::new(|_| {}));
+
+        let mut global_consts: std::collections::HashMap<String, Value> =
+            std::collections::HashMap::new();
+        for (name, (c, _)) in self.globals.iter() {
+            let v = match c {
+                IRConst::Int(i) => Some(Value::Int(*i)),
+                IRConst::Float(f) => Some(Value::Float(f.into_inner())),
+                IRConst::Str(s) => Some(Value::Str(Rc::new(s.clone()))),
+                _ => None,
+            };
+            if let Some(v) = v {
+                global_consts.insert(name.clone(), v);
+            }
+        }
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let bc = Compiler::with_global_consts(global_consts).compile(program);
+            let mut vm = GVM::new(bc, natives).with_step_limit(self.cte_step_limit);
+            vm.run();
+            vm.result()
+        }));
+        std::panic::set_hook(prev_hook);
+
+        let mut fail_reason = String::new();
+        let result = match result {
+            Ok(r) => r,
+            Err(payload) => {
+                fail_reason = payload
+                    .downcast_ref::<String>()
+                    .cloned()
+                    .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                    .unwrap_or_default();
+                None
+            }
+        };
+        if !fail_reason.is_empty() {
+            if quiet {
+                return None;
+            }
+            if self.cte_force {
+                self.cte_error = Some(format!("compile-time evaluation failed: {fail_reason}"));
+                return None;
+            }
+            eprintln!("warning: compile-time evaluation failed: {}", fail_reason);
+        }
+        let result = result?;
+
+        match result {
+            Value::Int(i) => Some((IRConst::Int(i), IRType::Int)),
+            Value::Float(f) => Some((IRConst::Float(OrderedFloat(f)), IRType::Float)),
+            Value::Str(s) => Some((IRConst::Str((*s).clone()), IRType::String)),
+            Value::Bool(b) => Some((IRConst::Int(if b { 1 } else { 0 }), IRType::Bool)),
+            Value::Array(elems) => {
+                if elems.iter().any(|e| matches!(e, Value::Array(_))) {
+                    return None;
+                }
+                let mut operands = Vec::with_capacity(elems.len());
+                for e in elems.iter() {
+                    operands.push(self.vm_value_to_const(&e)?);
+                }
+                Some((IRConst::Array(operands), IRType::Array))
+            }
+            Value::Void => None,
+            Value::Fn(..) => None,
+        }
+    }
+
+    fn ensure_cte_analysis(&mut self) {
+        if self.cte_vm_program_cache.is_some() {
+            return;
+        }
         let pure_fns: HashSet<String> = self
             .program_body
             .iter()
@@ -128,10 +226,6 @@ impl IRGen {
                 _ => None,
             })
             .collect();
-        let mut safety = VmSafety::new(&self.program_body, &pure_fns);
-        if !safety.safe(expr) {
-            return None;
-        }
 
         let mut unsafe_fns: HashSet<String> = HashSet::new();
         for decl in self.program_body.iter() {
@@ -182,71 +276,13 @@ impl IRGen {
             }
         }
 
-        body.push(expr.clone());
-        let program = Program { body };
+        self.cte_pure_fns = Some(pure_fns);
+        self.cte_vm_program_cache = Some(body);
+    }
 
-        let natives = self
-            .natives
-            .as_ref()
-            .map(|t| t.entries.clone())
-            .unwrap_or_default();
-
-        let prev_hook = std::panic::take_hook();
-        std::panic::set_hook(std::boxed::Box::new(|_| {}));
-
-        let mut global_consts: std::collections::HashMap<String, Value> =
-            std::collections::HashMap::new();
-        for (name, (c, _)) in self.globals.iter() {
-            let v = match c {
-                IRConst::Int(i) => Some(Value::Int(*i)),
-                IRConst::Float(f) => Some(Value::Float(f.into_inner())),
-                IRConst::Str(s) => Some(Value::Str(s.clone())),
-                _ => None,
-            };
-            if let Some(v) = v {
-                global_consts.insert(name.clone(), v);
-            }
-        }
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let bc = Compiler::with_global_consts(global_consts).compile(program);
-            let mut vm = GVM::new(bc, natives);
-            vm.run();
-            vm.result()
-        }));
-        std::panic::set_hook(prev_hook);
-
-        let mut fail_reason = String::new();
-        let result = match result {
-            Ok(r) => r,
-            Err(payload) => {
-                fail_reason = payload
-                    .downcast_ref::<String>()
-                    .cloned()
-                    .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
-                    .unwrap_or_default();
-                None
-            }
-        };
-        if !fail_reason.is_empty() {
-            eprintln!("warning: compile-time evaluation failed: {}", fail_reason);
-        }
-        let result = result?;
-
-        match result {
-            Value::Int(i) => Some((IRConst::Int(i), IRType::Int)),
-            Value::Float(f) => Some((IRConst::Float(OrderedFloat(f)), IRType::Float)),
-            Value::Str(s) => Some((IRConst::Str(s), IRType::String)),
-            Value::Bool(b) => Some((IRConst::Int(if b { 1 } else { 0 }), IRType::Bool)),
-            Value::Array(elems) => {
-                let mut operands = Vec::with_capacity(elems.len());
-                for e in elems {
-                    operands.push(self.vm_value_to_const(&e)?);
-                }
-                Some((IRConst::Array(operands), IRType::Array))
-            }
-            Value::Void => None,
-            Value::Fn(..) => None,
-        }
+    fn cte_vm_program(&mut self) -> Vec<Expr> {
+        self.ensure_cte_analysis();
+        self.cte_vm_program_cache.clone().unwrap()
     }
 
     fn vm_value_to_const(&mut self, value: &Value) -> Option<Operand> {
@@ -256,14 +292,14 @@ impl IRGen {
                 self.get_const_index(IRConst::Float(OrderedFloat(*f))),
             )),
             Value::Str(s) => Some(Operand::ConstIdx(
-                self.get_const_index(IRConst::Str(s.clone())),
+                self.get_const_index(IRConst::Str(s.as_ref().clone())),
             )),
             Value::Bool(b) => Some(Operand::ConstIdx(
                 self.get_const_index(IRConst::Int(if *b { 1 } else { 0 })),
             )),
             Value::Array(elems) => {
                 let mut operands = Vec::with_capacity(elems.len());
-                for e in elems {
+                for e in elems.iter() {
                     operands.push(self.vm_value_to_const(e)?);
                 }
                 Some(Operand::ConstIdx(
@@ -275,7 +311,7 @@ impl IRGen {
         }
     }
 
-    fn expr_has_var(&self, expr: &Expr) -> bool {
+    fn expr_has_var(&self, expr: &Expr, ctx: Option<&Context>) -> bool {
         use Expr::*;
         match expr {
             Int { .. }
@@ -289,60 +325,74 @@ impl IRGen {
             | Struct { .. }
             | Union { .. }
             | Enum { .. } => false,
-            Break { value: v, .. } => v.as_ref().map(|v| self.expr_has_var(v)).unwrap_or(false),
-            Var { .. } => true,
+            Break { value: v, .. } => v
+                .as_ref()
+                .map(|v| self.expr_has_var(v, ctx))
+                .unwrap_or(false),
+            Var { name, .. } => {
+                if ctx.map(|c| c.get_var_type(name).is_ok()).unwrap_or(false) {
+                    return true;
+                }
+                !self.globals.contains_key(name)
+            }
             Call {
                 callee: f,
                 type_args: _,
                 args,
                 ..
             } => {
-                if !matches!(f.as_ref(), Var { .. }) && self.expr_has_var(f) {
+                if !matches!(f.as_ref(), Var { .. }) && self.expr_has_var(f, ctx) {
                     return true;
                 }
-                args.iter().any(|a| self.expr_has_var(a))
+                args.iter().any(|a| self.expr_has_var(a, ctx))
             }
-            Block { stmts, .. } => stmts.iter().any(|s| self.expr_has_var(s)),
+            Block { stmts, .. } => stmts.iter().any(|s| self.expr_has_var(s, ctx)),
             If {
                 cond: c,
                 then_branch: t,
                 else_branch: e,
                 ..
             } => {
-                self.expr_has_var(c)
-                    || self.expr_has_var(t)
-                    || e.as_ref().map(|x| self.expr_has_var(x)).unwrap_or(false)
+                self.expr_has_var(c, ctx)
+                    || self.expr_has_var(t, ctx)
+                    || e.as_ref()
+                        .map(|x| self.expr_has_var(x, ctx))
+                        .unwrap_or(false)
             }
             While {
                 cond: c, body: b, ..
-            } => self.expr_has_var(c) || self.expr_has_var(b),
+            } => self.expr_has_var(c, ctx) || self.expr_has_var(b, ctx),
             For {
                 var: _,
                 iterable: i,
                 body: b,
                 ..
-            } => self.expr_has_var(i) || self.expr_has_var(b),
+            } => self.expr_has_var(i, ctx) || self.expr_has_var(b, ctx),
             Range {
                 start: l, end: r, ..
-            } => self.expr_has_var(l) || self.expr_has_var(r),
+            } => self.expr_has_var(l, ctx) || self.expr_has_var(r, ctx),
             Match {
                 target: s,
                 branches: arms,
                 default: d,
                 ..
             } => {
-                self.expr_has_var(s)
+                self.expr_has_var(s, ctx)
                     || arms.iter().any(|(p, g, a)| {
-                        self.expr_has_var(p)
-                            || g.as_ref().map(|g| self.expr_has_var(g)).unwrap_or(false)
-                            || self.expr_has_var(a)
+                        self.expr_has_var(p, ctx)
+                            || g.as_ref()
+                                .map(|g| self.expr_has_var(g, ctx))
+                                .unwrap_or(false)
+                            || self.expr_has_var(a, ctx)
                     })
-                    || d.as_ref().map(|x| self.expr_has_var(x)).unwrap_or(false)
+                    || d.as_ref()
+                        .map(|x| self.expr_has_var(x, ctx))
+                        .unwrap_or(false)
             }
-            Return { value: v, .. } => self.expr_has_var(v),
+            Return { value: v, .. } => self.expr_has_var(v, ctx),
             Lambda {
                 params: _, body: b, ..
-            } => self.expr_has_var(b),
+            } => self.expr_has_var(b, ctx),
             FuncDecl {
                 name: _,
                 attrs: _,
@@ -351,7 +401,7 @@ impl IRGen {
                 return_type: _,
                 body: b,
                 ..
-            } => self.expr_has_var(b),
+            } => self.expr_has_var(b, ctx),
             GlobalVar { .. } | ExternVar { .. } => false,
             VarDecl {
                 name: _,
@@ -364,13 +414,13 @@ impl IRGen {
                 ty: _,
                 value: v,
                 ..
-            } => self.expr_has_var(v),
+            } => self.expr_has_var(v, ctx),
             Not { expr: e, .. }
             | BNot { expr: e, .. }
             | Neg { expr: e, .. }
             | FNeg { expr: e, .. }
             | AddressOf { expr: e, .. }
-            | Deref { expr: e, .. } => self.expr_has_var(e),
+            | Deref { expr: e, .. } => self.expr_has_var(e, ctx),
             Add {
                 left: l, right: r, ..
             }
@@ -463,7 +513,7 @@ impl IRGen {
             }
             | DerefAssign {
                 ptr: l, value: r, ..
-            } => self.expr_has_var(l) || self.expr_has_var(r),
+            } => self.expr_has_var(l, ctx) || self.expr_has_var(r, ctx),
             IndexAssign {
                 target: o,
                 value: v,
@@ -474,13 +524,13 @@ impl IRGen {
                 field: _,
                 value: v,
                 ..
-            } => self.expr_has_var(o) || self.expr_has_var(v),
+            } => self.expr_has_var(o, ctx) || self.expr_has_var(v, ctx),
             ArrayLiteral {
                 elements: items, ..
-            } => items.iter().any(|it| self.expr_has_var(it)),
+            } => items.iter().any(|it| self.expr_has_var(it, ctx)),
             ArrayFill {
                 elem_type: _, len, ..
-            } => self.expr_has_var(len),
+            } => self.expr_has_var(len, ctx),
             StructLiteral {
                 name: _,
                 type_args: _,
@@ -492,8 +542,8 @@ impl IRGen {
                 type_args: _,
                 fields,
                 ..
-            } => fields.iter().any(|(_, v)| self.expr_has_var(v)),
-            MemberAccess { obj: o, .. } => self.expr_has_var(o),
+            } => fields.iter().any(|(_, v)| self.expr_has_var(v, ctx)),
+            MemberAccess { obj: o, .. } => self.expr_has_var(o, ctx),
             Inc { .. } | Dec { .. } => false,
             VarAssign {
                 name: _, value: v, ..
@@ -527,9 +577,9 @@ impl IRGen {
             }
             | ShrAssign {
                 name: _, value: v, ..
-            } => self.expr_has_var(v),
-            FString { segs: parts, .. } => parts.iter().any(|p| self.expr_has_var(p)),
-            Cast { expr: inner, .. } => self.expr_has_var(inner),
+            } => self.expr_has_var(v, ctx),
+            FString { segs: parts, .. } => parts.iter().any(|p| self.expr_has_var(p, ctx)),
+            Cast { expr: inner, .. } => self.expr_has_var(inner, ctx),
         }
     }
 }
@@ -895,4 +945,55 @@ pub(super) fn native_sig(params: &[(String, Type)], ret_type: &Type) -> Option<N
         params: Box::leak(kinds.into_boxed_slice()),
         ret,
     })
+}
+
+pub(super) fn expr_probeable(expr: &Expr) -> bool {
+    use Expr::*;
+    matches!(
+        expr,
+        Call { .. }
+            | If { .. }
+            | Match { .. }
+            | FString { .. }
+            | Index { .. }
+            | MemberAccess { .. }
+            | ArrayLiteral { .. }
+            | ArrayFill { .. }
+            | StructLiteral { .. }
+            | UnionLiteral { .. }
+            | Cast { .. }
+            | Add { .. }
+            | Sub { .. }
+            | Mul { .. }
+            | Div { .. }
+            | Mod { .. }
+            | FAdd { .. }
+            | FSub { .. }
+            | FMul { .. }
+            | FDiv { .. }
+            | Eq { .. }
+            | Ne { .. }
+            | Lt { .. }
+            | Le { .. }
+            | Gt { .. }
+            | Ge { .. }
+            | FEq { .. }
+            | FNe { .. }
+            | FLt { .. }
+            | FLe { .. }
+            | FGt { .. }
+            | FGe { .. }
+            | Xor { .. }
+            | BAnd { .. }
+            | BOr { .. }
+            | LAnd { .. }
+            | LOr { .. }
+            | Shl { .. }
+            | Shr { .. }
+            | StrCat { .. }
+            | Not { .. }
+            | BNot { .. }
+            | Neg { .. }
+            | FNeg { .. }
+    )
 }

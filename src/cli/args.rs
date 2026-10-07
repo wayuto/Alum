@@ -57,4 +57,17 @@ pub struct Cli {
         help = "Shared library to dlopen for compile-time evaluation of fun(extern, pure) functions"
     )]
     pub cte_lib: Vec<String>,
+
+    #[arg(
+        long,
+        value_name = "N",
+        help = "Step budget for the compile-time evaluator (default 100000000)"
+    )]
+    pub cte_steps: Option<u64>,
+
+    #[arg(
+        long,
+        help = "Treat a failed compile-time evaluation as a hard error instead of falling back to runtime code"
+    )]
+    pub cte_force: bool,
 }

@@ -18,6 +18,8 @@ pub fn build(
     preprocess_only: bool,
     verbose: bool,
     cte_libs: Vec<String>,
+    cte_steps: u64,
+    cte_force: bool,
     dumps: DumpOptions,
 ) -> Result<String, CompilerError> {
     let src = fs::read_to_string(&input)?;
@@ -70,7 +72,9 @@ pub fn build(
     if verbose {
         eprintln!("Generating code...");
     }
-    let codegen = CodeGen::new(ast, cte_libs).with_dumps(dumps);
+    let codegen = CodeGen::new(ast, cte_libs)
+        .with_cte_options(cte_steps, cte_force)
+        .with_dumps(dumps);
     let object_code = codegen
         .generate()
         .map_err(|e| CompilerError::new(e, source_map.clone()))?;
@@ -101,6 +105,8 @@ pub fn exec_run(
     include_paths: Vec<String>,
     verbose: bool,
     cte_libs: Vec<String>,
+    cte_steps: u64,
+    cte_force: bool,
     dumps: DumpOptions,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let obj_file = build(
@@ -111,6 +117,8 @@ pub fn exec_run(
         false,
         verbose,
         cte_libs.clone(),
+        cte_steps,
+        cte_force,
         dumps,
     )?;
 

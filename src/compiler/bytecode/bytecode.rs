@@ -1,12 +1,13 @@
 use std::hash::{Hash, Hasher};
+use std::rc::Rc;
 
 #[derive(Debug, Clone)]
 pub enum Value {
     Int(i64),
     Float(f64),
     Bool(bool),
-    Str(String),
-    Array(Vec<Value>),
+    Str(Rc<String>),
+    Array(Rc<Vec<Value>>),
     Fn(u32, u32),
     Void,
 }
@@ -50,7 +51,7 @@ impl Hash for Value {
             Value::Array(a) => {
                 5u8.hash(state);
                 a.len().hash(state);
-                for e in a {
+                for e in a.iter() {
                     e.hash(state);
                 }
             }

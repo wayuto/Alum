@@ -1,6 +1,7 @@
 use crate::compiler::bytecode::Value;
 use std::collections::HashMap;
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
+use std::rc::Rc;
 use std::sync::OnceLock;
 
 const RTLD_NOW: c_int = 2;
@@ -179,7 +180,7 @@ pub fn call_native(entry: &NativeEntry, args: &[Value]) -> Option<Value> {
             },
             NativeKind::Str => match value {
                 Value::Str(s) => {
-                    let c = CString::new(s.clone()).ok()?;
+                    let c = CString::new((**s).clone()).ok()?;
                     let p = c.as_ptr() as u64;
                     strings.push(c);
                     p
@@ -227,10 +228,10 @@ pub fn call_native(entry: &NativeEntry, args: &[Value]) -> Option<Value> {
         NativeKind::Str => {
             let p = rvalue as *const c_char;
             if p.is_null() {
-                Value::Str(String::new())
+                Value::Str(Rc::new(String::new()))
             } else {
                 let s = unsafe { CStr::from_ptr(p) };
-                Value::Str(s.to_string_lossy().into_owned())
+                Value::Str(Rc::new(s.to_string_lossy().into_owned()))
             }
         }
     };

@@ -1,5 +1,6 @@
 use crate::compiler::bytecode::{Bytecode, NativeEntry, Op, Value, call_native};
 use std::collections::HashMap;
+use std::rc::Rc;
 
 struct CallStack {
     return_ip: usize,
@@ -18,7 +19,10 @@ pub struct GVM {
     bytecode: Bytecode,
     natives: HashMap<String, NativeEntry>,
     memo: HashMap<(usize, Vec<Value>), Value>,
+    step_limit: u64,
 }
+
+pub const DEFAULT_CTE_STEP_LIMIT: u64 = 100_000_000;
 
 impl GVM {
     pub fn new(bytecode: Bytecode, natives: HashMap<String, NativeEntry>) -> Self {
@@ -32,7 +36,13 @@ impl GVM {
             bytecode,
             natives,
             memo: HashMap::new(),
+            step_limit: DEFAULT_CTE_STEP_LIMIT,
         }
+    }
+
+    pub fn with_step_limit(mut self, limit: u64) -> Self {
+        self.step_limit = limit;
+        self
     }
 
     fn read(&mut self) -> u8 {
@@ -51,7 +61,8 @@ impl GVM {
 
     fn enter_frame(&mut self, target: usize, args: Vec<Value>, operand_base: usize) {
         let args_count = args.len();
-        let key = (target, args.clone());
+
+        let key = (target, args);
         if let Some(cached) = self.memo.get(&key).cloned() {
             self.stack.push(cached);
             return;
@@ -61,17 +72,20 @@ impl GVM {
             panic!("GVM: recursion depth exceeded 1000000 frames during constant evaluation");
         }
 
+        let new_base_slot = self.slots.len();
+        {
+            let key_args = &key.1;
+            for i in 0..args_count {
+                self.slots.push(key_args[args_count - i - 1].clone());
+            }
+        }
+
         self.call_stack.push(CallStack {
             return_ip: self.ip,
             base_slot: self.curr_base_slot,
             operand_base,
             cache_key: Some(key),
         });
-
-        let new_base_slot = self.slots.len();
-        for i in 0..args_count {
-            self.slots.push(args[args_count - i - 1].clone());
-        }
         self.curr_base_slot = new_base_slot;
         self.curr_operand_base = operand_base;
         self.ip = target;
@@ -92,7 +106,7 @@ impl GVM {
             let code = self.read();
             let op = Op::try_from(code).expect("Bytecode: unknown opcode");
             steps += 1;
-            if steps > 100_000_000 {
+            if steps > self.step_limit {
                 panic!(
                     "GVM: execution step limit exceeded (ip={}, op={:?})",
                     self.ip, op
@@ -134,7 +148,9 @@ impl GVM {
                 Op::ADD => self.binop("ADD", |left, right| match (&left, &right) {
                     (Value::Int(a), Value::Int(b)) => Some(Value::Int(a.wrapping_add(*b))),
                     (Value::Float(a), Value::Float(b)) => Some(Value::Float(a + b)),
-                    (Value::Str(a), Value::Str(b)) => Some(Value::Str(a.clone() + b)),
+                    (Value::Str(a), Value::Str(b)) => {
+                        Some(Value::Str(Rc::new(format!("{}{}", a, b))))
+                    }
                     (Value::Bool(a), Value::Bool(b)) => Some(Value::Bool(*a & *b)),
                     _ => None,
                 }),
@@ -429,7 +445,7 @@ impl GVM {
                         elems.push(self.pop());
                     }
                     elems.reverse();
-                    self.stack.push(Value::Array(elems));
+                    self.stack.push(Value::Array(Rc::new(elems)));
                 }
                 Op::ARRAYFILL => {
                     let elem = self.pop();
@@ -438,7 +454,7 @@ impl GVM {
                         Value::Int(_) => 0,
                         _ => panic!("TypeError: Wrong types for ARRAY_FILL operation"),
                     };
-                    self.stack.push(Value::Array(vec![elem; len]));
+                    self.stack.push(Value::Array(Rc::new(vec![elem; len])));
                 }
                 Op::ARRAYGET => {
                     let idx = self.pop();
@@ -473,7 +489,7 @@ impl GVM {
                                 panic!("IndexError: Array index out of bounds: {i}");
                             }
                             let mut a = a.clone();
-                            a[*i as usize] = value;
+                            Rc::make_mut(&mut a)[*i as usize] = value;
                             if index >= self.slots.len() {
                                 self.slots.resize(index + 1, Value::Void);
                             }
@@ -489,7 +505,7 @@ impl GVM {
                                 _ => panic!("TypeError: Wrong types for ARRAY_SET on string"),
                             };
                             let mut s = s.clone();
-                            s.replace_range(
+                            Rc::make_mut(&mut s).replace_range(
                                 *i as usize..*i as usize + 1,
                                 &(byte as char).to_string(),
                             );
